@@ -164,6 +164,7 @@ Every code unit is exactly one of: core, port (inside core), adapter, compositio
 - Atomic: 1 task = 1 commit. `Cargo.lock` changes ride with the task that caused them.
 - Reference `D-XX` in the body when the task touches a locked decision.
 - Language: code, commits, PRs in **English**. Discussion and `.jdi/` docs in **pt-BR**.
+- Hooks enforce this mechanically (`git config core.hooksPath .githooks`, already set on the dev clone). `commit-msg` rejects: non-conventional headers, headers > 72 chars, `feat/fix/refactor/perf/test` without a scope that is a roadmap slug, a commit mixing code (`Cargo.*`, `src/`, `crates/`, `apps/`, `.github/`) with `.jdi/` state, and a commit spanning two phases. `pre-commit` (JDI gate) rejects code without an active phase in the index. A rejected commit means the split is wrong — fix the split, never `--no-verify`, never `JDI_ALLOW_MIXED`/`JDI_GATE_DISABLE`.
 </conventions>
 
 <process>
