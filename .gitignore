@@ -24,3 +24,13 @@ target
 # Added by cargo
 
 /target
+
+# JDI: views renderizadas e cache por clone (regenerados por npx -y jdi-cli render)
+.jdi/STATE.md
+.jdi/ROADMAP.md
+.jdi/DECISIONS.md
+.jdi/todos.md
+.jdi/registry.md
+.jdi/specialists.md
+.jdi/reviewers.md
+.jdi/skills-registry.md
