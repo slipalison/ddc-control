@@ -9,9 +9,9 @@ cli + desktop app (ícone na bandeja). Sem backend, sem rede.
 ## Stack
 - Language: Rust stable (1.98, edition 2024), cargo workspace
 - Framework: Tauri 2.11 (tray + popup), clap 4.6 (CLI)
-- Version: ddc-hi 0.4.1 (backends `ddc-winapi` Windows / `ddc-i2c` Linux), mccs-caps 0.2 + mccs 0.2 (parser de capabilities MCCS)
+- Version: ddc-hi 0.4.1 (backends `ddc-winapi` Windows / `ddc-i2c` Linux); parser de capabilities MCCS próprio em `ddc-core` (D-2 — sem `mccs`/`mccs-caps`)
 - Key dependencies: tauri-plugin-global-shortcut 2.3, tauri-plugin-autostart, serde/serde_json, thiserror, tracing
-- Layout alvo: `crates/ddc-core` (lib), `crates/ddc-cli` (bin), `apps/ddc-tray` (Tauri). O crate raiz atual (`src/main.rs`) vira workspace na phase 1.
+- Layout alvo: `crates/ddc-core` (hexágono, deps = thiserror), `crates/ddc-adapters` (driven: ddc-hi + fake), `crates/ddc-cli` (driving, clap), `apps/ddc-tray` (driving, Tauri). O crate raiz atual (`src/main.rs`) vira workspace na phase 1.
 - Testes: `cargo test --workspace` + backend mock; cobertura via `cargo llvm-cov`
 
 ## Code Design
@@ -68,3 +68,10 @@ llm_config:
 ```
 
 Applied by `/jdi-bootstrap` to `.opencode/opencode.jsonc`. Other runtimes ignore.
+
+## Frontend
+
+```yaml
+frontend:
+  has_frontend: false   # tray popup Tauri não é web app roteável; phase tray-app pode reverter via D-XX
+```
