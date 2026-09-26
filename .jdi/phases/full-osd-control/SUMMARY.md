@@ -75,3 +75,62 @@
   - LG: `read_vcp` no teste de hardware = 403 ms (3 tentativas, 2×200 ms); `ddc-cli -m LG get brightness` = exit 6 em 3,61–3,63 s (enumeração ~1,1 s + caps da LG falhando 3× a 500 ms + checagem de presença ~2,1 s + VCP ~0,4 s); `-m LG features --probe` = exit 0 em 20,6 s.
   - Testes de hardware: 7/7 verdes.
 - Gates: build 0, test 0 (243 + 7 ignorados), fmt --check 0, clippy -D warnings 0, Linux check 0, Windows check 0, llvm-cov TOTAL 95.92% linhas, `cargo audit` só RUSTSEC-2018-0005 / RUSTSEC-2024-0320, DoD 14/14 OK.
+
+## Iter 2 (critic row 7, W-1, W-2)
+
+Modo fix (ralph loop, iter 2). Nenhuma task do PLAN foi reimplementada; os 4 itens vieram da REVIEW (DoD Critic linha 7, W-1, W-2) e da D-2026-09-26-full-osd-control-10.
+
+### Commits
+- `a2f5fda` test: **DoD #7 (crítico, oco)**. O teste nomeado `mccs_catalog_value_names_match_the_declared_lists_for_preset_input_language_power_mode_and_the_factory_reset_commands` (nome mantido) agora fixa por igualdade `catalog_entry(code).values` inteiro (bytes e nomes) de 0x04/05/06/08, 0x14, 0x60, 0xCC e 0xD6. Também fixa QUAIS códigos têm lista (qualquer lista nova em outro código derruba o teste).
+- `f3dc39d` feat: **W-1 / D-10(a)**.
+  - Catálogo: 0x1E ganha `00 Off, 01 Run, 02 Continuous` e 0xCA ganha `01 OSD disabled, 02 OSD enabled`. Os dois continuam `Dangerous`.
+  - O teste de igualdade passa a fixar 10 listas.
+  - DoD #8: o caso "sem lista em lugar nenhum" passa de 0x1E para 0x02. Entram 0x1E aceito/recusado (caps ilegível) e 0xCA declarado sem lista (caps do RTK): aceita 2, recusa 0.
+  - Unitário novo `auto_setup_and_osd_control_accept_only_their_catalog_values`: 0xCA recusa `0x0102`, ou seja, o byte de botões fica em 0.
+  - Fixture `--fake` com 0x1E (0/2) e 0xCA (2/2). CLI `auto_setup_and_osd_lock_take_only_their_catalog_values_and_only_with_yes`:
+    - `set auto-setup run --yes` e `set osd-lock 2 --yes` → exit 0, com `WriteVcp` 0x01 e 0x02;
+    - sem `--yes` → exit 5, e o log fica só com `Enumerate`;
+    - `auto-setup 3`, `osd-lock 0` e `osd-lock 0x0102` com `--yes` → exit 4, sem escrita.
+  - Tudo isso in-process e pelo binário.
+  - README: tabela 0x1E/0xCA, parágrafo dos recusados, Known limitations (só 0x02 recusado; 0xCA só com o byte OSD; `osd-disabled` pode travar o OSD; RTK lê 0xCA=0x01). CHANGELOG Changed: 0x02 sozinho e entrada nova para 0x1E/0xCA.
+- `2def274` fix: **W-2 / D-10(b)**.
+  - A seam `DdcHandle::read_vcp` devolve `VcpReply { value, echoed: Option<VcpCode> }`: `Some(ty)` no Linux, `None` fora dele (`ddc-winapi`).
+  - O worker valida em `Worker::read_vcp` (`handle.read_vcp(code)?.answering(code)`). `ensure_reply_answers` saiu da casca, que agora só traduz (`vcp_reply`).
+  - Teste nomeado `a_reply_that_echoes_another_vcp_code_is_retried_until_the_reply_to_the_code_asked_arrives`, com fake que deixa respostas "no barramento":
+    - 1 resposta de 0x70 → 2 tentativas, 1×200 ms, `Ok(50/100)`;
+    - 3 respostas → `Transport("reply answers VCP code 0x70, not 0x7E (gave up after attempt 3 of 3)")`;
+    - sem eco → aceita na 1ª tentativa.
+  - Também `a_reply_for_another_code_is_a_transient_failure` e `a_linux_reply_carries_the_code_the_monitor_echoed` (`cfg(linux)`), mais o espelho `cfg(not linux)`, compilado no msvc via clippy `--tests`.
+- `6df4c07` docs:
+  - README: exemplos `features`/`--probe` com `0/1 Off` e `1/2 OSD disabled`, conferidos contra captura nova no RTK; parágrafo "Replies for another code" diz que o worker valida e que o Windows não tem eco.
+  - `docs/hardware-validation.md`: valores esperados de 0x1E/0xCA. Em "Never run", 0xCA e 0x1E aparecem "with any value", com os nomes, mais a nota de que o caminho `--yes` só é testado no fake.
+
+### Provas de mutação (cópias descartáveis via `git archive`, target separado)
+- DoD #7: acrescentar `(0x0E, "Italian")` a `OSD_LANGUAGES` → o teste nomeado dá FAILED (`assertion left == right failed: 0xCC`). O mesmo vale para `(0x0C, "User 2")` em 0x14, `(0x1B, "USB-C")` em 0x60 e `.with_values(RESET)` em 0x02 (as 4 derrubam).
+- W-2: trocar `handle.read_vcp(code)?.answering(code)` por `handle.read_vcp(code).map(|reply| reply.value)` → o teste nomeado dá FAILED (left `Ok(80/100)`, right `Ok(50/100)`). Extra: `echoed_code` do Linux devolvendo `None` → `a_linux_reply_carries_the_code_the_monitor_echoed` dá FAILED.
+
+### Gates (exit codes)
+- build 0, test 0 (247 passed, 0 failed, 7 ignored), fmt --check 0, clippy -D warnings 0.
+- check Linux (`-p ddc-core -p ddc-adapters -p ddc-cli`) 0, check Windows (`-p ddc-cli -p ddc-adapters --target x86_64-pc-windows-msvc`) 0.
+- llvm-cov 0: `TOTAL 2800 107 96.18% 336 14 95.83% 1821 71 96.10% 0 0 -` (linhas 96.10%). `hardware.rs` foi de 65.62% para 69.35%.
+- `cargo audit` só RUSTSEC-2018-0005 e RUSTSEC-2024-0320 (exit 1 por causa delas, como antes).
+- DoD: 12/12 Verify da CONTEXT OK, mais os 2 testes D-8 OK e os 5 testes nomeados novos OK.
+
+### Hardware (só leitura, RTK em /dev/i2c-5)
+- Testes de hardware: `DDC_HW_TESTS=1 ... real_monitor -- --ignored`, 7/7 verdes. Passam pelo novo `vcp_reply` e pela validação no worker.
+- `features --probe`: exit 0, 39 linhas, 4,65 s.
+  - Sondados: 0x1E `0/1 Off`, 0x20, 0x30, 0x62, 0x6C, 0x6E, 0x70, 0xC9, 0xE6 e 0xF1 `ok`; 0x7E `unresponsive`.
+  - 0xCA `1/2 OSD disabled`; 0xFD e 0xFF `not supported by this monitor`.
+- `get osd-lock` → `1 (0x01) OSD disabled, max 2`. `ddcutil --bus 5 getvcp ca` → `OSD disabled, button events enabled (sl=0x01)`, a mesma leitura.
+- `get auto-setup` → `0 (0x00) Off, max 1`. `ddcutil` → `Auto setup not active (sl=0x00)`.
+- Nenhum `set`/`reset` no hardware.
+
+### Achados para o orquestrador
+1. **0xAE agora lê 144.00 Hz**: `14400 (0x3840)` em 3 leituras do `ddc-cli`, e `ddcutil --bus 5 getvcp ae` lê o mesmo `sh=0x38 sl=0x40`, com o KDE em `2560x1600@144.00`. A leitura `44818 (0xAF12) = 448.18 Hz` (D-9, a 143,96 Hz) não se repetiu. As Known limitations do README ("reports 0xAE as 0xAF12 … while running at 144 Hz") e a linha 0xAE dos exemplos continuam com o valor antigo, que está fora do escopo dos itens 2 e 3 e não foi alterado. O roteiro de hardware já diz "Record what it reads". Sugestão: tratar como dependente do modo/firmware e ajustar o texto numa rodada de docs.
+2. **O RTK reporta 0xCA = 0x01 ("OSD disabled")**, e o `ddcutil` interpreta igual. O rótulo segue a D-10 e o MCCS. Não confirmei no hardware se o OSD/botões do RTK estão de fato desabilitados (não é possível só lendo). Está documentado de forma neutra no README.
+- Achado 1 resolvido em `8a09f06` (docs):
+  - README Known limitations: 0xAE depende do modo de vídeo/firmware. Leu `0x3840` = 144.00 Hz a 2560x1600@144 em 2026-09-26 e uma vez `0xAF12` = 448.18 Hz a 143,96 Hz; o ddcutil leu os mesmos bytes. Comparar com `ddcutil getvcp AE --verbose`.
+  - Exemplos do README iguais à captura nova.
+  - `docs/hardware-validation.md` sem número esperado.
+  - O CHANGELOG não tinha menção a 448.18.
+  - O achado 2 (0xCA) segue como nota neutra.
