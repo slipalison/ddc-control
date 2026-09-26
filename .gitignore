@@ -34,3 +34,6 @@ target
 .jdi/specialists.md
 .jdi/reviewers.md
 .jdi/skills-registry.md
+
+# Claude Code: per-user local settings
+.claude/settings.local.json
