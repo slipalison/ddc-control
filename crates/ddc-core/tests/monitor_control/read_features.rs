@@ -208,3 +208,25 @@ fn list_monitors_returns_the_backend_enumeration() {
     );
     assert_eq!(backend.calls(), [BackendCall::Enumerate]);
 }
+
+#[test]
+fn explicit_capabilities_request_recovers_from_transient_failure() {
+    let (osd, backend) = osd_with([rtk_monitor().with_transient_capabilities_failures(1)]);
+
+    let before = osd.get_feature(&rtk_id(), VcpCode::BRIGHTNESS).unwrap();
+    let caps = osd.capabilities(&rtk_id()).unwrap();
+    let after = osd.get_feature(&rtk_id(), VcpCode::BRIGHTNESS).unwrap();
+
+    assert!(!before.declared_in_capabilities);
+    assert_eq!(caps.model.as_deref(), Some("RTK"));
+    assert!(after.declared_in_capabilities);
+    assert_eq!(
+        backend.calls(),
+        [
+            BackendCall::ReadCapabilities(rtk_id()),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::BRIGHTNESS),
+            BackendCall::ReadCapabilities(rtk_id()),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::BRIGHTNESS),
+        ]
+    );
+}

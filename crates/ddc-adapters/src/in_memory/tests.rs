@@ -169,3 +169,20 @@ fn clones_share_monitors_and_call_log() {
     assert_eq!(handle.calls(), backend.calls());
     assert_eq!(backend.calls().len(), 2);
 }
+
+#[test]
+fn transient_capabilities_failures_precede_the_scripted_string() {
+    let backend = single_monitor(
+        FakeMonitor::new(info("m"))
+            .with_capabilities("(vcp(10))")
+            .with_transient_capabilities_failures(2),
+    );
+
+    let first = backend.read_capabilities(&id("m"));
+    let second = backend.read_capabilities(&id("m"));
+    let third = backend.read_capabilities(&id("m"));
+
+    assert!(matches!(first, Err(DdcError::Transport(_))));
+    assert!(matches!(second, Err(DdcError::Transport(_))));
+    assert_eq!(third.unwrap(), "(vcp(10))");
+}
