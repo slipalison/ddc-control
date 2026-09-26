@@ -1,0 +1,15 @@
+[package]
+name = "ddc-core"
+description = "Technology-free core of ddc-control: VCP domain model, ports and use cases."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+ddc-adapters = { workspace = true }
+
+[lints]
+workspace = true
