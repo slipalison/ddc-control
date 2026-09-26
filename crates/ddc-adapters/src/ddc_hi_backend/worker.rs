@@ -24,7 +24,7 @@ use ddc_core::ports::MonitorBackend;
 use super::DdcHiBudgets;
 use super::hardware::capabilities_text;
 use super::identity::{DisplayIdentity, monitor_infos};
-use super::retry::{Clock, Failure, RetryPolicy, SystemClock};
+use super::retry::{Clock, Failure, RetryPolicies, RetryPolicy, SystemClock};
 
 /// Where the worker finds displays: `ddc-hi` in production, fakes in tests.
 pub(crate) trait DisplaySource: Send + 'static {
@@ -48,14 +48,45 @@ pub(crate) trait DdcHandle {
 }
 
 /// A failed transaction, reduced to its message so no transport error type
-/// crosses the seam.
+/// crosses the seam, and to whether asking again could change it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct HandleError(String);
+pub(crate) struct HandleError {
+    kind: HandleErrorKind,
+    message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandleErrorKind {
+    /// A NAK, a bus error, a garbled reply: a retry may cure it.
+    Transient,
+    /// The monitor answered that it does not support the VCP code.
+    Unsupported,
+}
 
 impl HandleError {
-    /// Keeps the whole cause chain of `error` (`{:#}`).
+    /// A failure a retry may cure. Keeps the whole cause chain of `error`
+    /// (`{:#}`).
     pub(crate) fn new(error: impl fmt::Display) -> Self {
-        Self(format!("{error:#}"))
+        Self::of_kind(HandleErrorKind::Transient, error)
+    }
+
+    /// The monitor's answer that it does not support the VCP code: final,
+    /// asking again gets the same answer (D-2026-09-26-cli-4). Keeps the
+    /// whole cause chain of `error` (`{:#}`).
+    pub(crate) fn unsupported(error: impl fmt::Display) -> Self {
+        Self::of_kind(HandleErrorKind::Unsupported, error)
+    }
+
+    fn of_kind(kind: HandleErrorKind, error: impl fmt::Display) -> Self {
+        Self {
+            kind,
+            message: format!("{error:#}"),
+        }
+    }
+
+    /// Whether the monitor refused the request as unsupported.
+    pub(crate) fn is_unsupported(&self) -> bool {
+        self.kind == HandleErrorKind::Unsupported
     }
 }
 
@@ -93,7 +124,7 @@ pub(crate) struct Worker<S: DisplaySource, C> {
     displays: Vec<(MonitorId, S::Handle)>,
     /// How long the last enumeration took; `None` before the first one.
     enumeration_cost: Option<Duration>,
-    policy: RetryPolicy,
+    policies: RetryPolicies,
     clock: C,
 }
 
@@ -107,12 +138,12 @@ impl<S: DisplaySource> Worker<S, SystemClock> {
 }
 
 impl<S: DisplaySource, C: Clock> Worker<S, C> {
-    fn new(source: S, policy: RetryPolicy, clock: C) -> Self {
+    fn new(source: S, policies: RetryPolicies, clock: C) -> Self {
         Self {
             source,
             displays: Vec::new(),
             enumeration_cost: None,
-            policy,
+            policies,
             clock,
         }
     }
@@ -145,13 +176,23 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         infos
     }
 
+    /// A DDC/CI capabilities reply carries no result code, so a refusal
+    /// cannot happen with `ddc-hi`; were one reported, it would be a
+    /// transport failure.
     fn read_capabilities(
         &mut self,
         id: &MonitorId,
         deadline: Instant,
     ) -> Result<String, TransactError> {
-        self.transact(id, deadline, DdcHandle::read_capabilities)
-            .map(|raw| capabilities_text(&raw))
+        let policy = self.policies.capabilities;
+        self.transact(
+            id,
+            deadline,
+            policy,
+            DdcError::Transport,
+            DdcHandle::read_capabilities,
+        )
+        .map(|raw| capabilities_text(&raw))
     }
 
     fn read_vcp(
@@ -160,7 +201,11 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         code: VcpCode,
         deadline: Instant,
     ) -> Result<VcpValue, TransactError> {
-        self.transact(id, deadline, |handle| handle.read_vcp(code))
+        let policy = self.policies.vcp;
+        let refused = move |_| DdcError::UnsupportedFeature(code);
+        self.transact(id, deadline, policy, refused, |handle| {
+            handle.read_vcp(code)
+        })
     }
 
     fn write_vcp(
@@ -170,30 +215,53 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         value: u16,
         deadline: Instant,
     ) -> Result<(), TransactError> {
-        self.transact(id, deadline, |handle| handle.write_vcp(code, value))
+        let policy = self.policies.vcp;
+        let refused = move |_| DdcError::UnsupportedFeature(code);
+        self.transact(id, deadline, policy, refused, |handle| {
+            handle.write_vcp(code, value)
+        })
     }
 
-    /// Runs `op` on the handle of `id` under the retry policy. An unknown id
-    /// is reported at once, without enumerating inside this `deadline`.
+    /// Runs `op` on the handle of `id` under `policy`. An unknown id is
+    /// reported at once, without enumerating inside this `deadline`. A
+    /// request the monitor refuses as unsupported answers `refused` of the
+    /// refusal's message.
     fn transact<T>(
         &mut self,
         id: &MonitorId,
         deadline: Instant,
+        policy: RetryPolicy,
+        refused: impl FnOnce(String) -> DdcError,
         mut op: impl FnMut(&mut S::Handle) -> Result<T, HandleError>,
     ) -> Result<T, TransactError> {
         let handle = handle_of(&mut self.displays, id).ok_or(TransactError::UnknownMonitor)?;
-        let outcome = self.policy.run(&self.clock, deadline, || op(handle));
-        outcome.map_err(|failure| TransactError::Failed(self.explain(id, failure, deadline)))
+        let outcome = policy.run(&self.clock, deadline, || op(handle));
+        outcome
+            .map_err(|failure| TransactError::Failed(self.explain(id, failure, deadline, refused)))
     }
 
-    /// The caller's error for a give-up. When one more enumeration fits
-    /// before `deadline`, the monitor is looked up again: an unplugged one
-    /// is reported missing, not as a transport failure the core would
-    /// remember against its id. Otherwise the transport failure is reported
-    /// at once, so a mute display frees the queue fast.
-    fn explain(&mut self, id: &MonitorId, failure: Failure, deadline: Instant) -> DdcError {
-        let Failure::Exhausted { attempts, last } = failure else {
-            return DdcError::Timeout;
+    /// The caller's error for a give-up. A refusal is the monitor's final
+    /// answer, reported at once as `refused` says (D-2026-09-26-cli-4).
+    /// Otherwise, when one more enumeration fits before `deadline`, the
+    /// monitor is looked up again: an unplugged one is reported missing,
+    /// not as a transport failure the core would remember against its id.
+    /// Else the transport failure is reported at once, so a mute display
+    /// frees the queue fast.
+    fn explain(
+        &mut self,
+        id: &MonitorId,
+        failure: Failure,
+        deadline: Instant,
+        refused: impl FnOnce(String) -> DdcError,
+    ) -> DdcError {
+        let (attempts, max_attempts, last) = match failure {
+            Failure::Expired => return DdcError::Timeout,
+            Failure::Unsupported(refusal) => return refused(refusal.message),
+            Failure::Exhausted {
+                attempts,
+                max_attempts,
+                last,
+            } => (attempts, max_attempts, last),
         };
         if self.enumeration_fits(deadline) {
             self.enumerate();
@@ -201,10 +269,9 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
                 return DdcError::MonitorNotFound(id.clone());
             }
         }
-        let HandleError(message) = last;
-        let max = self.policy.max_attempts;
         DdcError::Transport(format!(
-            "{message} (gave up after attempt {attempts} of {max})"
+            "{} (gave up after attempt {attempts} of {max_attempts})",
+            last.message
         ))
     }
 
@@ -240,12 +307,12 @@ impl<S: DisplaySource> WorkerClient<S> {
     pub(crate) fn spawn(
         source: S,
         budgets: DdcHiBudgets,
-        policy: RetryPolicy,
+        policies: RetryPolicies,
     ) -> Result<Self, DdcError> {
         let (jobs, queue) = mpsc::channel::<Job<S>>();
         let worker = thread::Builder::new()
             .name("ddc-hi-worker".to_owned())
-            .spawn(move || Worker::new(source, policy, SystemClock).run(queue))
+            .spawn(move || Worker::new(source, policies, SystemClock).run(queue))
             .map_err(|error| {
                 DdcError::Transport(format!("cannot start the DDC worker: {error}"))
             })?;

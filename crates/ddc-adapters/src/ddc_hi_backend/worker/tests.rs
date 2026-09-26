@@ -7,7 +7,7 @@ use ddc_core::ports::MonitorBackend;
 
 use super::super::DdcHiBudgets;
 use super::super::identity::DisplayIdentity;
-use super::super::retry::{Clock, RetryPolicy, SystemClock};
+use super::super::retry::{Clock, RetryPolicies, SystemClock};
 use super::{DdcHandle, DisplaySource, HandleError, TransactError, Worker, WorkerClient};
 
 /// Holds a transaction until the test opens it.
@@ -37,6 +37,8 @@ enum Behaviour {
     Fail(&'static str),
     /// Fails this many more times with [`FLAKY`], then answers.
     Flaky(u32),
+    /// Answers every transaction that it does not support the VCP code.
+    Refuse,
     /// Fails and is unplugged, like a monitor pulled mid-transaction.
     Vanish,
     Block(Gate),
@@ -44,6 +46,7 @@ enum Behaviour {
 }
 
 const FLAKY: &str = "flaky i2c bus";
+const REFUSED: &str = "unsupported vcp code";
 
 #[derive(Debug, Clone)]
 struct FakeDisplay {
@@ -164,6 +167,7 @@ impl FakeHandle {
             None => Err(HandleError::new("no such device")),
             Some(Behaviour::Answer | Behaviour::Flaky(_)) => Ok(answer),
             Some(Behaviour::Fail(message)) => Err(HandleError::new(message)),
+            Some(Behaviour::Refuse) => Err(HandleError::unsupported(REFUSED)),
             Some(Behaviour::Vanish) => {
                 lock(&self.bus)
                     .displays
@@ -227,11 +231,8 @@ fn budgets(vcp: Duration) -> DdcHiBudgets {
 }
 
 /// Retries without pauses, so no test sleeps between attempts.
-fn no_backoff() -> RetryPolicy {
-    RetryPolicy {
-        backoff: Duration::ZERO,
-        ..RetryPolicy::default()
-    }
+fn no_backoff() -> RetryPolicies {
+    RetryPolicies::without_backoff()
 }
 
 /// A worker on its own thread.
@@ -265,30 +266,46 @@ impl Clock for VirtualClock {
     }
 }
 
-/// What a single read did on a worker run in the test thread, after one
-/// instant enumeration, with the default retry policy and virtual time.
+type InstantWorker = Worker<FakeDisplays, VirtualClock>;
+
+/// What a single transaction on display "a" did on a worker run in the
+/// test thread, after one instant enumeration, with the default retry
+/// policies and virtual time.
 #[derive(Debug)]
-struct ReadRun {
-    result: Result<VcpValue, DdcError>,
-    reads: usize,
+struct Run<T> {
+    result: Result<T, DdcError>,
+    attempts: usize,
     sleeps: Vec<Duration>,
 }
 
-fn read_on_worker(behaviour: Behaviour, budget: Duration) -> ReadRun {
+fn on_worker<T>(
+    behaviour: Behaviour,
+    budget: Duration,
+    op: impl FnOnce(&mut InstantWorker, &MonitorId, Instant) -> Result<T, TransactError>,
+) -> Run<T> {
     let source = FakeDisplays::with([FakeDisplay::new("a", behaviour)]);
     let clock = VirtualClock::new();
-    let mut worker = Worker::new(source.clone(), RetryPolicy::default(), clock.clone());
+    let mut worker = Worker::new(source.clone(), RetryPolicies::default(), clock.clone());
     worker.enumerate();
 
-    let result = worker
-        .read_vcp(&id("a"), VcpCode::BRIGHTNESS, clock.now() + budget)
-        .map_err(|error| error.for_caller(&id("a")));
+    let result =
+        op(&mut worker, &id("a"), clock.now() + budget).map_err(|error| error.for_caller(&id("a")));
 
-    ReadRun {
+    Run {
         result,
-        reads: source.calls().len(),
+        attempts: source.calls().len(),
         sleeps: clock.sleeps(),
     }
+}
+
+fn read_on_worker(behaviour: Behaviour, budget: Duration) -> Run<VcpValue> {
+    on_worker(behaviour, budget, |worker, id, deadline| {
+        worker.read_vcp(id, VcpCode::BRIGHTNESS, deadline)
+    })
+}
+
+fn capabilities_on_worker(behaviour: Behaviour, budget: Duration) -> Run<String> {
+    on_worker(behaviour, budget, Worker::read_capabilities)
 }
 
 /// Virtual time one enumeration takes: the ~1.1 s measured on the dev
@@ -302,6 +319,7 @@ type SlowWorker = Worker<SlowDisplays<VirtualClock>, VirtualClock>;
 #[derive(Debug)]
 struct SlowRun<T> {
     result: Result<T, DdcError>,
+    attempts: usize,
     enumerations: usize,
     took: Duration,
 }
@@ -318,7 +336,7 @@ fn on_slow_worker<T>(
         clock: clock.clone(),
         cost: ENUMERATION,
     };
-    let mut worker = Worker::new(displays, RetryPolicy::default(), clock.clone());
+    let mut worker = Worker::new(displays, RetryPolicies::default(), clock.clone());
     worker.enumerate();
     let started = clock.now();
 
@@ -327,6 +345,7 @@ fn on_slow_worker<T>(
 
     SlowRun {
         result,
+        attempts: source.calls().len(),
         enumerations: source.enumerations(),
         took: clock.now() - started,
     }
@@ -431,7 +450,7 @@ fn first_request_enumerates_on_demand() {
 fn unknown_id_is_reported_at_once_without_enumerating() {
     let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
     let clock = VirtualClock::new();
-    let mut worker = Worker::new(source.clone(), RetryPolicy::default(), clock.clone());
+    let mut worker = Worker::new(source.clone(), RetryPolicies::default(), clock.clone());
 
     let result = worker.read_vcp(
         &id("a"),
@@ -512,16 +531,56 @@ fn retries_transient_errors_up_to_three_times_within_timeout_budget() {
 
     assert_eq!(recovers.result, Ok(FAKE_VALUE));
     assert_eq!(
-        (recovers.reads, recovers.sleeps),
+        (recovers.attempts, recovers.sleeps),
         (3, vec![backoff, backoff])
     );
     assert_transport(&persists.result, "gave up after attempt 3 of 3");
     assert_eq!(
-        (persists.reads, persists.sleeps),
+        (persists.attempts, persists.sleeps),
         (3, vec![backoff, backoff])
     );
     assert_transport(&short.result, FLAKY);
-    assert_eq!((short.reads, short.sleeps), (2, vec![backoff]));
+    assert_eq!((short.attempts, short.sleeps), (2, vec![backoff]));
+}
+
+/// The dev monitor keeps refusing capabilities reads for a few hundred
+/// milliseconds after one fails, so capabilities retries wait 500 ms where
+/// VCP ones wait 50 ms, and the capabilities budget still bounds them
+/// (D-2026-09-26-cli-2).
+#[test]
+fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_50_ms_within_budget() {
+    let caps_backoff = Duration::from_millis(500);
+    let vcp_backoff = Duration::from_millis(50);
+    let budgets = DdcHiBudgets::default();
+
+    let caps = capabilities_on_worker(Behaviour::Flaky(2), budgets.capabilities);
+    let vcp = read_on_worker(Behaviour::Flaky(2), budgets.vcp);
+    let caps_fail = capabilities_on_worker(Behaviour::Fail(FLAKY), budgets.capabilities);
+    let caps_tight = capabilities_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(700));
+    let caps_one_shot = capabilities_on_worker(Behaviour::Fail(FLAKY), caps_backoff);
+
+    assert_eq!(caps.result.as_deref(), Ok("(prot(monitor)vcp(10 12))"));
+    assert_eq!(
+        (caps.attempts, caps.sleeps),
+        (3, vec![caps_backoff, caps_backoff])
+    );
+    assert_eq!(vcp.result, Ok(FAKE_VALUE));
+    assert_eq!(
+        (vcp.attempts, vcp.sleeps),
+        (3, vec![vcp_backoff, vcp_backoff])
+    );
+    assert_transport(&caps_fail.result, "gave up after attempt 3 of 3");
+    assert_eq!(caps_fail.sleeps, [caps_backoff, caps_backoff]);
+    assert_transport(&caps_tight.result, "gave up after attempt 2 of 3");
+    assert_eq!(
+        (caps_tight.attempts, caps_tight.sleeps),
+        (2, vec![caps_backoff])
+    );
+    assert_transport(&caps_one_shot.result, "gave up after attempt 1 of 3");
+    assert_eq!(
+        (caps_one_shot.attempts, caps_one_shot.sleeps),
+        (1, Vec::new())
+    );
 }
 
 #[test]
@@ -552,7 +611,7 @@ fn monitor_gone_after_a_failure_is_not_found() {
     let run = read_on_worker(Behaviour::Vanish, Duration::from_secs(1));
 
     assert_eq!(run.result, Err(DdcError::MonitorNotFound(id("a"))));
-    assert_eq!(run.reads, 3);
+    assert_eq!(run.attempts, 3);
 }
 
 #[test]
@@ -560,7 +619,7 @@ fn deadline_spent_finding_the_monitor_sends_nothing() {
     let run = read_on_worker(Behaviour::Answer, Duration::ZERO);
 
     assert_eq!(run.result, Err(DdcError::Timeout));
-    assert_eq!(run.reads, 0);
+    assert_eq!(run.attempts, 0);
 }
 
 /// After the retries, a presence check that would end at or past the
@@ -601,6 +660,36 @@ fn failed_capabilities_read_checks_presence_when_it_fits() {
     assert_transport(&present.result, "gave up after attempt 3 of 3");
     assert_eq!(
         (present.enumerations, present.took),
-        (2, Duration::from_millis(100) + ENUMERATION)
+        (2, Duration::from_millis(1000) + ENUMERATION)
     );
+}
+
+/// The monitor's "unsupported VCP code" answer is final
+/// (D-2026-09-26-cli-4): one attempt, no pause, and no presence check even
+/// where one fits. A VCP caller learns which code was refused.
+#[test]
+fn unsupported_reply_is_final_without_retry_or_presence_check() {
+    let budget = Duration::from_secs(8);
+
+    let read = on_slow_worker(Behaviour::Refuse, budget, read_brightness);
+    let write = on_slow_worker(Behaviour::Refuse, budget, |worker, id, deadline| {
+        worker.write_vcp(id, VcpCode::CONTRAST, 7, deadline)
+    });
+    let caps = on_slow_worker(Behaviour::Refuse, budget, Worker::read_capabilities);
+
+    assert_eq!(
+        read.result,
+        Err(DdcError::UnsupportedFeature(VcpCode::BRIGHTNESS))
+    );
+    assert_eq!(
+        write.result,
+        Err(DdcError::UnsupportedFeature(VcpCode::CONTRAST))
+    );
+    assert_eq!(caps.result, Err(DdcError::Transport(REFUSED.to_owned())));
+    let costs = [
+        (read.attempts, read.enumerations, read.took),
+        (write.attempts, write.enumerations, write.took),
+        (caps.attempts, caps.enumerations, caps.took),
+    ];
+    assert_eq!(costs, [(1, 1, Duration::ZERO); 3]);
 }

@@ -2,10 +2,12 @@
 //! `/dev/i2c-*` on Linux — `ddc-hi` picks the platform backend itself.
 //!
 //! One worker thread owns every display handle (D-6) and retries a failed
-//! transaction up to 3 times, 50 ms apart, within the caller's budget
-//! (D-3); callers wait on a per-operation budget (D-7) and get
-//! [`DdcError::Timeout`] past it. Monitors are identified by EDID when
-//! available (D-2).
+//! transaction up to 3 times within the caller's budget: 50 ms apart for
+//! VCP reads and writes (D-3), 500 ms apart for capabilities reads
+//! (D-2026-09-26-cli-2). A VCP code the monitor answers as unsupported is
+//! never retried (D-2026-09-26-cli-4). Callers wait on a per-operation budget
+//! (D-7) and get [`DdcError::Timeout`] past it. Monitors are identified by
+//! EDID when available (D-2).
 
 mod hardware;
 mod identity;
@@ -18,7 +20,7 @@ use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
 
 use hardware::DdcHiDisplays;
-use retry::RetryPolicy;
+use retry::RetryPolicies;
 use worker::WorkerClient;
 
 /// Default wait for a Get or Set VCP Feature (D-7).
@@ -59,11 +61,14 @@ impl Default for DdcHiBudgets {
 /// the worker does not know yet is looked up with one enumeration under the
 /// enumeration budget, then the call runs under its own budget
 /// (D-2026-09-26-ddc-backends-1). A monitor still unknown after that answers
-/// [`DdcError::MonitorNotFound`]. Failures that outlast the retries answer
-/// [`DdcError::Transport`], or `MonitorNotFound` when a fresh enumeration
-/// fits the rest of the budget and no longer lists the monitor. A caller
-/// whose budget runs out answers [`DdcError::Timeout`]. Dropping the
-/// backend stops the worker once its current transaction ends; it never
+/// [`DdcError::MonitorNotFound`]. A VCP code the monitor answers as
+/// unsupported answers [`DdcError::UnsupportedFeature`] after one attempt
+/// (D-2026-09-26-cli-4); on Windows, where `dxva2` keeps that reply to
+/// itself, it counts as any other failure. Failures that outlast the retries
+/// answer [`DdcError::Transport`], or `MonitorNotFound` when a fresh
+/// enumeration fits the rest of the budget and no longer lists the monitor.
+/// A caller whose budget runs out answers [`DdcError::Timeout`]. Dropping
+/// the backend stops the worker once its current transaction ends; it never
 /// waits for it.
 #[derive(Debug)]
 pub struct DdcHiMonitorBackend {
@@ -77,7 +82,7 @@ impl DdcHiMonitorBackend {
         WorkerClient::spawn(
             DdcHiDisplays,
             DdcHiBudgets::default(),
-            RetryPolicy::default(),
+            RetryPolicies::default(),
         )
         .map(|client| Self { client })
     }

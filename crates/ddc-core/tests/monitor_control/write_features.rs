@@ -91,23 +91,11 @@ fn declared_code_learns_its_max_before_the_first_write() {
     );
 }
 
+/// The dev monitor answers 0x62 volume without declaring it; a fresh core
+/// learns its maximum with one read, then writes (D-2026-09-26-cli-1).
 #[test]
-fn undeclared_code_never_read_is_not_written() {
+fn safe_write_to_an_answered_but_undeclared_code_reads_its_max_first() {
     let (osd, backend) = osd_with([rtk_monitor()]);
-
-    let result = osd.set_feature(&rtk_id(), VcpCode::AUDIO_VOLUME, 40, Confirm::No);
-
-    assert_eq!(
-        result.unwrap_err(),
-        DdcError::UnsupportedFeature(VcpCode::AUDIO_VOLUME)
-    );
-    assert!(!wrote_anything(&backend));
-}
-
-#[test]
-fn undeclared_code_is_writable_once_read() {
-    let (osd, _) = osd_with([rtk_monitor()]);
-    osd.get_feature(&rtk_id(), VcpCode::AUDIO_VOLUME).unwrap();
 
     let result = osd.set_feature(&rtk_id(), VcpCode::AUDIO_VOLUME, 40, Confirm::No);
 
@@ -117,6 +105,93 @@ fn undeclared_code_is_writable_once_read() {
             current: 40,
             max: 100
         }
+    );
+    assert_eq!(
+        backend.calls(),
+        [
+            BackendCall::ReadCapabilities(rtk_id()),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::AUDIO_VOLUME),
+            BackendCall::WriteVcp(rtk_id(), VcpCode::AUDIO_VOLUME, 40),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::AUDIO_VOLUME),
+        ]
+    );
+}
+
+#[test]
+fn undeclared_code_is_bounded_by_the_max_it_reads() {
+    let (osd, backend) = osd_with([rtk_monitor()]);
+
+    let result = osd.set_feature(&rtk_id(), VcpCode::AUDIO_VOLUME, 101, Confirm::No);
+
+    assert_eq!(
+        result.unwrap_err(),
+        DdcError::InvalidValue {
+            code: VcpCode::AUDIO_VOLUME,
+            value: 101,
+            max: 100
+        }
+    );
+    assert!(!wrote_anything(&backend));
+}
+
+#[test]
+fn failed_max_read_is_reported_and_nothing_is_written() {
+    let failures = [
+        DdcError::Transport("bus gone".to_owned()),
+        DdcError::Timeout,
+        DdcError::MonitorNotFound(rtk_id()),
+    ];
+    for failure in failures {
+        let flaky = rtk_monitor().with_vcp_failure(VcpCode::AUDIO_VOLUME, failure.clone());
+        let (osd, backend) = osd_with([flaky]);
+
+        let result = osd.set_feature(&rtk_id(), VcpCode::AUDIO_VOLUME, 40, Confirm::No);
+
+        assert_eq!(result.unwrap_err(), failure);
+        assert_eq!(
+            backend.calls(),
+            [
+                BackendCall::ReadCapabilities(rtk_id()),
+                BackendCall::ReadVcp(rtk_id(), VcpCode::AUDIO_VOLUME),
+            ]
+        );
+    }
+}
+
+#[test]
+fn code_the_monitor_does_not_answer_is_unsupported_and_not_written() {
+    let (osd, backend) = osd_with([rtk_monitor()]);
+
+    let result = osd.set_feature(&rtk_id(), VcpCode::SHARPNESS, 3, Confirm::No);
+
+    assert_eq!(
+        result.unwrap_err(),
+        DdcError::UnsupportedFeature(VcpCode::SHARPNESS)
+    );
+    assert!(!wrote_anything(&backend));
+}
+
+#[test]
+fn undeclared_code_read_earlier_is_written_without_reading_again() {
+    let (osd, backend) = osd_with([rtk_monitor()]);
+    osd.get_feature(&rtk_id(), VcpCode::AUDIO_VOLUME).unwrap();
+    let calls_before = backend.calls().len();
+
+    let result = osd.set_feature(&rtk_id(), VcpCode::AUDIO_VOLUME, 40, Confirm::No);
+
+    assert_eq!(
+        result.unwrap(),
+        VcpValue {
+            current: 40,
+            max: 100
+        }
+    );
+    assert_eq!(
+        backend.calls()[calls_before..],
+        [
+            BackendCall::WriteVcp(rtk_id(), VcpCode::AUDIO_VOLUME, 40),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::AUDIO_VOLUME),
+        ]
     );
 }
 
@@ -186,16 +261,21 @@ fn confirmed_dangerous_write_is_performed() {
 }
 
 #[test]
-fn write_without_read_or_capabilities_is_unsupported() {
+fn write_without_capabilities_reads_the_max_first() {
     let (osd, backend) = osd_with([rtk_monitor_without_capabilities()]);
 
     let result = osd.set_feature(&rtk_id(), VcpCode::BRIGHTNESS, 70, Confirm::No);
 
+    assert_eq!(result.unwrap().current, 70);
     assert_eq!(
-        result.unwrap_err(),
-        DdcError::UnsupportedFeature(VcpCode::BRIGHTNESS)
+        backend.calls(),
+        [
+            BackendCall::ReadCapabilities(rtk_id()),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::BRIGHTNESS),
+            BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 70),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::BRIGHTNESS),
+        ]
     );
-    assert_eq!(backend.calls(), [BackendCall::ReadCapabilities(rtk_id())]);
 }
 
 #[test]
