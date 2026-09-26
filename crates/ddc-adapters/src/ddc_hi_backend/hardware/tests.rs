@@ -1,6 +1,5 @@
 use std::error::Error as _;
 use std::io;
-use std::time::Duration;
 
 use ddc_core::domain::{DdcError, MonitorId, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
@@ -8,7 +7,7 @@ use ddc_hi::{Backend, DisplayInfo};
 
 use super::super::DdcHiBudgets;
 use super::super::identity::{DisplayIdentity, EdidIdentity};
-use super::super::retry::RetryPolicy;
+use super::super::retry::RetryPolicies;
 use super::super::worker::{DdcHandle, DisplaySource, HandleError, WorkerClient};
 use super::{capabilities_text, display_identity, transaction_error, vcp_value};
 
@@ -141,10 +140,7 @@ impl DdcHandle for BrokenHandle {
 /// `Transport` text with every cause and no error object behind it.
 #[test]
 fn ddc_hi_error_chain_reaches_the_port_as_transport_text_only() {
-    let no_backoff = RetryPolicy {
-        backoff: Duration::ZERO,
-        ..RetryPolicy::default()
-    };
+    let no_backoff = RetryPolicies::without_backoff();
     let client = WorkerClient::spawn(BrokenBus, DdcHiBudgets::default(), no_backoff).unwrap();
     let id = MonitorId::new("broken");
 
