@@ -37,6 +37,8 @@ enum Behaviour {
     Fail(&'static str),
     /// Fails this many more times with [`FLAKY`], then answers.
     Flaky(u32),
+    /// Answers every transaction that it does not support the VCP code.
+    Refuse,
     /// Fails and is unplugged, like a monitor pulled mid-transaction.
     Vanish,
     Block(Gate),
@@ -44,6 +46,7 @@ enum Behaviour {
 }
 
 const FLAKY: &str = "flaky i2c bus";
+const REFUSED: &str = "unsupported vcp code";
 
 #[derive(Debug, Clone)]
 struct FakeDisplay {
@@ -164,6 +167,7 @@ impl FakeHandle {
             None => Err(HandleError::new("no such device")),
             Some(Behaviour::Answer | Behaviour::Flaky(_)) => Ok(answer),
             Some(Behaviour::Fail(message)) => Err(HandleError::new(message)),
+            Some(Behaviour::Refuse) => Err(HandleError::unsupported(REFUSED)),
             Some(Behaviour::Vanish) => {
                 lock(&self.bus)
                     .displays
@@ -315,6 +319,7 @@ type SlowWorker = Worker<SlowDisplays<VirtualClock>, VirtualClock>;
 #[derive(Debug)]
 struct SlowRun<T> {
     result: Result<T, DdcError>,
+    attempts: usize,
     enumerations: usize,
     took: Duration,
 }
@@ -340,6 +345,7 @@ fn on_slow_worker<T>(
 
     SlowRun {
         result,
+        attempts: source.calls().len(),
         enumerations: source.enumerations(),
         took: clock.now() - started,
     }
@@ -656,4 +662,34 @@ fn failed_capabilities_read_checks_presence_when_it_fits() {
         (present.enumerations, present.took),
         (2, Duration::from_millis(1000) + ENUMERATION)
     );
+}
+
+/// The monitor's "unsupported VCP code" answer is final
+/// (D-2026-09-26-cli-4): one attempt, no pause, and no presence check even
+/// where one fits. A VCP caller learns which code was refused.
+#[test]
+fn unsupported_reply_is_final_without_retry_or_presence_check() {
+    let budget = Duration::from_secs(8);
+
+    let read = on_slow_worker(Behaviour::Refuse, budget, read_brightness);
+    let write = on_slow_worker(Behaviour::Refuse, budget, |worker, id, deadline| {
+        worker.write_vcp(id, VcpCode::CONTRAST, 7, deadline)
+    });
+    let caps = on_slow_worker(Behaviour::Refuse, budget, Worker::read_capabilities);
+
+    assert_eq!(
+        read.result,
+        Err(DdcError::UnsupportedFeature(VcpCode::BRIGHTNESS))
+    );
+    assert_eq!(
+        write.result,
+        Err(DdcError::UnsupportedFeature(VcpCode::CONTRAST))
+    );
+    assert_eq!(caps.result, Err(DdcError::Transport(REFUSED.to_owned())));
+    let costs = [
+        (read.attempts, read.enumerations, read.took),
+        (write.attempts, write.enumerations, write.took),
+        (caps.attempts, caps.enumerations, caps.took),
+    ];
+    assert_eq!(costs, [(1, 1, Duration::ZERO); 3]);
 }

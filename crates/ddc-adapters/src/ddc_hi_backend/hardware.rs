@@ -3,6 +3,8 @@
 //!
 //! Only the worker thread ever calls into this module's shell (D-6).
 
+use std::error::Error;
+
 use ddc_core::domain::{VcpCode, VcpValue};
 use ddc_hi::{Ddc, DdcHost, DisplayInfo, Handle};
 
@@ -43,10 +45,34 @@ impl DdcHandle for Handle {
     }
 }
 
+/// How `ddc` 0.2.2 words a Get VCP Feature reply with result code 0x01: the
+/// monitor does not support the VCP code.
+const UNSUPPORTED_VCP_CODE: &str = "Unsupported VCP code";
+/// What `ddc-i2c` puts before the text of a `ddc` protocol error.
+const DDC_I2C_PROTOCOL_PREFIX: &str = "DDC/CI error: ";
+
 /// A failed `ddc-hi` transaction as the worker sees it: the whole cause
-/// chain as text, so no `ddc-hi` error type crosses the seam.
+/// chain as text, so no `ddc-hi` error type crosses the seam. The monitor's
+/// "unsupported VCP code" reply is final; any other failure is transient
+/// (D-2026-09-26-cli-4). On Windows `dxva2` decodes replies itself and
+/// `ddc-winapi` hands back only an OS error, so every failure there stays
+/// transient.
 pub(crate) fn transaction_error(error: <Handle as DdcHost>::Error) -> HandleError {
-    HandleError::new(error)
+    if error.chain().any(is_unsupported_reply) {
+        HandleError::unsupported(error)
+    } else {
+        HandleError::new(error)
+    }
+}
+
+/// Whether `cause` is the "unsupported VCP code" reply, bare or as
+/// `ddc-i2c` wraps it.
+// WHY text: `ddc-i2c` wraps `ddc::ErrorCode` in an error with no `source()`,
+// so `downcast_ref::<ddc::ErrorCode>()` over the chain never finds it.
+fn is_unsupported_reply(cause: &(dyn Error + 'static)) -> bool {
+    let text = cause.to_string();
+    let reply = text.strip_prefix(DDC_I2C_PROTOCOL_PREFIX).unwrap_or(&text);
+    reply == UNSUPPORTED_VCP_CODE
 }
 
 /// A Get VCP Feature reply in core terms: maximum then current, each a

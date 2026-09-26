@@ -8,8 +8,9 @@
 //!
 //! Every test only enumerates and reads; none changes a monitor setting.
 //! Each prints how long each operation took, as evidence for the default
-//! budgets of D-7 (enumerate < 5 s, capabilities < 8 s, VCP < 1 s) and for
-//! D-2026-09-26-ddc-backends-1 (no enumeration inside a VCP budget).
+//! budgets of D-7 (enumerate < 5 s, capabilities < 8 s, VCP < 1 s), for
+//! D-2026-09-26-ddc-backends-1 (no enumeration inside a VCP budget) and for
+//! D-2026-09-26-cli-4 (a refused code is unsupported, not a transport error).
 
 #![cfg(feature = "ddc-hi")]
 
@@ -29,6 +30,9 @@ const RTK_ID: &str = "RTK-RTK-QHD-HDR-01010101";
 const VCP_VERSION: VcpCode = VcpCode(0xDF);
 /// VCP version reply of an MCCS 2.2 monitor.
 const MCCS_2_2: u16 = 0x0202;
+/// 0x8D audio mute and 0xDC display mode: the dev monitor neither declares
+/// them nor supports them, and says so with result code 0x01.
+const REFUSED_BY_DEV_MONITOR: [VcpCode; 2] = [VcpCode(0x8D), VcpCode(0xDC)];
 /// Well under the default VCP budget of 1 s (D-7): a mute display fails
 /// after its three attempts (~100 ms), with no presence check that cannot
 /// fit the budget (D-2026-09-26-ddc-backends-1).
@@ -190,4 +194,25 @@ fn hardware_other_displays_fail_within_budget_and_worker_recovers() {
 
     assert!(after.is_ok(), "{after:?}");
     assert!(took < NO_STALL, "the dev monitor waited {took:?}");
+}
+
+/// A code the dev monitor answers as unsupported is reported as
+/// `UnsupportedFeature`, not as a transport failure, and the dev monitor
+/// keeps answering afterwards (D-2026-09-26-cli-4).
+#[test]
+#[ignore = "needs the dev monitor attached; run with DDC_HW_TESTS=1"]
+fn hardware_code_the_dev_monitor_refuses_is_unsupported() {
+    if !hardware_enabled() {
+        return;
+    }
+    let backend = ddc_adapters::DdcHiMonitorBackend::new().unwrap();
+    let dev = MonitorId::new(RTK_ID);
+
+    for code in REFUSED_BY_DEV_MONITOR {
+        let (refused, _) = timed_read(&backend, &dev, code);
+        assert_eq!(refused, Err(DdcError::UnsupportedFeature(code)));
+    }
+    let (after, _) = timed_read(&backend, &dev, VcpCode::BRIGHTNESS);
+
+    assert!(after.is_ok(), "{after:?}");
 }

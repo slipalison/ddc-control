@@ -1,6 +1,7 @@
 use std::error::Error as _;
 use std::io;
 
+use ddc::ErrorCode;
 use ddc_core::domain::{DdcError, MonitorId, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
 use ddc_hi::{Backend, DisplayInfo};
@@ -101,13 +102,30 @@ fn i2c_failure() -> anyhow::Error {
 /// `{:#}` of [`i2c_failure`]: every cause, outermost first.
 const I2C_FAILURE_CHAIN: &str = "Get VCP Feature: DDC/CI I2C error: remote I/O error";
 
-/// One display whose every transaction fails with [`i2c_failure`],
-/// converted by the production [`transaction_error`].
+/// What `ddc-hi` hands back on Linux when a reply fails `ddc`'s checks with
+/// `code`: `ddc-i2c`'s error around it, inside `anyhow`.
+fn ddc_i2c_failure(code: ErrorCode) -> anyhow::Error {
+    anyhow::Error::from(ddc_i2c::Error::<io::Error>::Ddc(code))
+}
+
+/// A Get VCP Feature reply with result code 0x01, as `ddc` 0.2.2 decodes it.
+fn unsupported_code() -> ErrorCode {
+    ErrorCode::Invalid("Unsupported VCP code".to_owned())
+}
+
+/// The monitor's "unsupported VCP code" reply as `ddc-hi` hands it back on
+/// Linux.
+fn unsupported_reply() -> anyhow::Error {
+    ddc_i2c_failure(unsupported_code())
+}
+
+/// One display whose every transaction fails with the error its function
+/// builds, converted by the production [`transaction_error`].
 #[derive(Debug, Clone, Copy)]
-struct BrokenBus;
+struct BrokenBus(fn() -> anyhow::Error);
 
 #[derive(Debug)]
-struct BrokenHandle;
+struct BrokenHandle(fn() -> anyhow::Error);
 
 impl DisplaySource for BrokenBus {
     type Handle = BrokenHandle;
@@ -117,21 +135,21 @@ impl DisplaySource for BrokenBus {
             description: "broken".to_owned(),
             edid: None,
         };
-        vec![(identity, BrokenHandle)]
+        vec![(identity, BrokenHandle(self.0))]
     }
 }
 
 impl DdcHandle for BrokenHandle {
     fn read_capabilities(&mut self) -> Result<Vec<u8>, HandleError> {
-        Err(transaction_error(i2c_failure()))
+        Err(transaction_error(self.0()))
     }
 
     fn read_vcp(&mut self, _code: VcpCode) -> Result<VcpValue, HandleError> {
-        Err(transaction_error(i2c_failure()))
+        Err(transaction_error(self.0()))
     }
 
     fn write_vcp(&mut self, _code: VcpCode, _value: u16) -> Result<(), HandleError> {
-        Err(transaction_error(i2c_failure()))
+        Err(transaction_error(self.0()))
     }
 }
 
@@ -141,7 +159,8 @@ impl DdcHandle for BrokenHandle {
 #[test]
 fn ddc_hi_error_chain_reaches_the_port_as_transport_text_only() {
     let no_backoff = RetryPolicies::without_backoff();
-    let client = WorkerClient::spawn(BrokenBus, DdcHiBudgets::default(), no_backoff).unwrap();
+    let client =
+        WorkerClient::spawn(BrokenBus(i2c_failure), DdcHiBudgets::default(), no_backoff).unwrap();
     let id = MonitorId::new("broken");
 
     let failures = [
@@ -156,4 +175,71 @@ fn ddc_hi_error_chain_reaches_the_port_as_transport_text_only() {
         assert!(error.source().is_none(), "{error:?}");
         assert_eq!(error, DdcError::Transport(expected.clone()));
     }
+}
+
+/// D-2026-09-26-cli-4: only the monitor's "unsupported VCP code" reply is
+/// final. The real Linux chain hides `ddc`'s `ErrorCode` from a downcast,
+/// which is why the reply is recognised by its text.
+#[test]
+fn transaction_error_classifies_only_the_unsupported_vcp_code_reply_as_final() {
+    let linux = unsupported_reply();
+    let bare = anyhow::Error::new(unsupported_code()).context("Get VCP Feature");
+
+    assert!(
+        linux
+            .chain()
+            .all(|cause| cause.downcast_ref::<ErrorCode>().is_none())
+    );
+    assert_eq!(
+        transaction_error(linux),
+        HandleError::unsupported("DDC/CI error: Unsupported VCP code")
+    );
+    assert_eq!(
+        transaction_error(bare),
+        HandleError::unsupported("Get VCP Feature: Unsupported VCP code")
+    );
+}
+
+#[test]
+fn transaction_error_keeps_every_other_ddc_hi_failure_transient() {
+    let unrecognized = ErrorCode::Invalid("Unrecognized VCP error code 0x02".to_owned());
+    let i2c_saying_unsupported =
+        ddc_i2c::Error::<io::Error>::I2c(io::Error::other("Unsupported VCP code"));
+    let failures = [
+        ddc_i2c_failure(ErrorCode::InvalidOffset),
+        ddc_i2c_failure(ErrorCode::InvalidChecksum),
+        ddc_i2c_failure(unrecognized),
+        anyhow::Error::from(i2c_saying_unsupported),
+        i2c_failure(),
+    ];
+
+    for failure in failures {
+        let chain = format!("{failure:#}");
+        assert_eq!(transaction_error(failure), HandleError::new(chain));
+    }
+}
+
+/// The real "unsupported VCP code" chain, through the conversion
+/// `impl DdcHandle for Handle` uses, reaches the port as
+/// `UnsupportedFeature` of the code asked for, never as `Transport`.
+#[test]
+fn unsupported_vcp_code_reply_reaches_the_port_as_unsupported_feature() {
+    let no_backoff = RetryPolicies::without_backoff();
+    let client = WorkerClient::spawn(
+        BrokenBus(unsupported_reply),
+        DdcHiBudgets::default(),
+        no_backoff,
+    )
+    .unwrap();
+    let id = MonitorId::new("broken");
+    let code = VcpCode(0x8D);
+
+    assert_eq!(
+        client.read_vcp(&id, code),
+        Err(DdcError::UnsupportedFeature(code))
+    );
+    assert_eq!(
+        client.write_vcp(&id, code, 1),
+        Err(DdcError::UnsupportedFeature(code))
+    );
 }
