@@ -8,6 +8,9 @@
 #![forbid(unsafe_code)]
 
 pub mod args;
+pub mod exit;
 pub mod output;
+pub mod select;
 
 pub use args::{Cli, Command};
+pub use exit::{CliError, Exit};
