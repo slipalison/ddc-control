@@ -55,7 +55,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - Hardware `#[ignore]`, só leitura: `hardware_reading_0x7e_never_stops_the_worker` (0x7E → `Err(Transport)`, depois 0x10 → `Ok`). Mutação no SUMMARY: sem `catch_unwind`, o teste novo falha.
 - **Dependencies:** none
 - **Test:** `cargo test -p ddc-adapters --locked worker`
-- **Status:** pending
+- **Status:** completed
 
 #### T-2: Catálogo MCCS único + risco e `Capabilities::feature` derivados dele (D-1, D-7)
 - **Specialist:** jdi-doer-ddc-control
@@ -67,7 +67,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - Premissas que mudaram, com os testes reescritos: 0x52 deixa de ser o exemplo de "não classificado" (troca por 0x8D), e preset sem caps passa a `NonContinuous`.
 - **Dependencies:** none
 - **Test:** DoD #1, #2, #4 e #5 (Verify da CONTEXT) + `cargo test -p ddc-core --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2
 
@@ -82,7 +82,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - DoD #9: 0xAC e 0xDF (declarados) e 0xC9 (não declarado), com `No` e com `Yes` e com valor no fake → `UnsupportedFeature`, log só com `ReadCapabilities`; `Table` provado via `ensure_writable`. Mutações no SUMMARY: sem a restrição a `Continuous`, o #8 falha; sem o guard, o #9 falha.
 - **Dependencies:** T-2
 - **Test:** DoD #3, #7, #8 e #9 (Verify da CONTEXT)
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3 (parallel-eligible)
 
@@ -95,7 +95,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - Extras: `set` Safe num código só sondado (0x6C) não relê o max; caps ilegível → sonda o catálogo inteiro; monitor inexistente → `Err(MonitorNotFound)`. Mutação no SUMMARY: abortar no 1º erro faz o #6 falhar.
 - **Dependencies:** T-1 (D-6 antes da sondagem), T-3
 - **Test:** DoD #6 (Verify da CONTEXT) + `cargo test -p ddc-core --locked`
-- **Status:** pending
+- **Status:** completed
 
 #### T-5: CLI por nome — aliases do catálogo, `<VALUE>` por nome, valor nomeado em `get`/`set`, `reset` (D-3, D-4)
 - **Specialist:** jdi-doer-ddc-control
@@ -108,7 +108,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - Testes de saída exata passam a esperar o alias (ex.: `0x87 sharpness:`); o JSON de `get volume` da phase `cli` continua idêntico.
 - **Dependencies:** T-3
 - **Test:** DoD #11 e #12 (Verify da CONTEXT) + `cargo test -p ddc-cli --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 
@@ -125,7 +125,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - Extras: caps ilegível → aviso, e só as linhas sondadas com `--probe`; `MonitorNotFound` numa linha → exit 3.
 - **Dependencies:** T-4, T-5
 - **Test:** DoD #10 (Verify da CONTEXT) + `cargo test -p ddc-cli --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5
 
@@ -143,7 +143,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - CHANGELOG `[Unreleased]`: Added; Changed (0x0C e 0x6C/0x6E/0x70 graváveis sem `--yes`; NC sem lista no caps deixa de aceitar qualquer valor ≤ max); Fixed (panic que derrubava o worker).
 - **Dependencies:** T-6
 - **Test:** `grep -q 'features --probe' README.md && grep -q 'reset factory' README.md && ! grep -q -- '--fake' README.md && grep -q '^## \[Unreleased\]' CHANGELOG.md`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 6
 
@@ -160,7 +160,7 @@ Lições das reviews: teste cuja premissa mudou é reescrito, nunca apagado. As 
   - NUNCA, com ou sem `--yes`: input, power, qualquer `reset`, osd-lock, 0x1E, 0x20, 0x30, 0x7E, 0xE6, 0xF1, código desconhecido.
 - **Dependencies:** T-6, T-7
 - **Test:** `grep -q 'features --probe' docs/hardware-validation.md && grep -q 'set preset srgb' docs/hardware-validation.md && ! grep -qE '\$B .*( reset |set (input|power|osd-lock|auto-setup|h-position|v-position|trapezoid|0x))' docs/hardware-validation.md`
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - 8 tasks, 6 waves (W1 e W3 paralelizáveis); speedup estimado 1.3x.
