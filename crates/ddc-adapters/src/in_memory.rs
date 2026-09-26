@@ -27,6 +27,7 @@ pub struct FakeMonitor {
     transient_capabilities_failures: u32,
     values: BTreeMap<VcpCode, VcpValue>,
     ignored_writes: BTreeSet<VcpCode>,
+    vcp_failures: BTreeMap<VcpCode, DdcError>,
 }
 
 impl FakeMonitor {
@@ -38,6 +39,7 @@ impl FakeMonitor {
             transient_capabilities_failures: 0,
             values: BTreeMap::new(),
             ignored_writes: BTreeSet::new(),
+            vcp_failures: BTreeMap::new(),
         }
     }
 
@@ -67,6 +69,14 @@ impl FakeMonitor {
         self
     }
 
+    /// Makes every read and write of `code` fail with `error`, as a monitor
+    /// that times out or NAKs that one code does. Any scripted value is left
+    /// untouched and other codes keep working.
+    pub fn with_vcp_failure(mut self, code: VcpCode, error: DdcError) -> Self {
+        self.vcp_failures.insert(code, error);
+        self
+    }
+
     fn capabilities(&mut self) -> Result<String, DdcError> {
         if self.transient_capabilities_failures > 0 {
             self.transient_capabilities_failures -= 1;
@@ -79,7 +89,12 @@ impl FakeMonitor {
             .ok_or_else(|| DdcError::Transport("capabilities string unavailable".to_owned()))
     }
 
+    fn scripted_failure(&self, code: VcpCode) -> Result<(), DdcError> {
+        self.vcp_failures.get(&code).cloned().map_or(Ok(()), Err)
+    }
+
     fn value(&self, code: VcpCode) -> Result<VcpValue, DdcError> {
+        self.scripted_failure(code)?;
         self.values
             .get(&code)
             .copied()
@@ -87,6 +102,7 @@ impl FakeMonitor {
     }
 
     fn store(&mut self, code: VcpCode, value: u16) -> Result<(), DdcError> {
+        self.scripted_failure(code)?;
         let stored = self
             .values
             .get_mut(&code)
