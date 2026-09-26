@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FakeMonitor::with_transient_capabilities_failures`, to script capabilities reads that fail before succeeding.
 - Read-only hardware tests (`crates/ddc-adapters/tests/real_monitor.rs`), `#[ignore]`d and gated by `DDC_HW_TESTS=1`.
 - `docs/linux-ddc-setup.md`: libudev build headers, loading `i2c-dev`, udev `uaccess` or `i2c` group permissions, why never to use `sudo`, and the proprietary NVIDIA driver caveat.
+- `ddc-cli`, the command-line binary (`crates/ddc-cli`): `list`, `caps [--refresh]`, `get <vcp>` and `set <vcp> <value> [--yes]`, with `--monitor` selection (exact id, `list` index, or a unique case-insensitive part of an id; never a guess) and `--json` output.
+  - `<vcp>` takes decimal, `0x` hex, or the shortcuts `brightness`, `contrast`, `input`, `preset`, `volume` and `power`.
+  - Dangerous writes need `--yes`, decided by the core; there is no prompt. The value read back after a write is printed, with a warning when the monitor ignored it.
+  - Exit codes: 0 success, 2 usage, 3 monitor selection, 4 invalid feature or value, 5 unconfirmed dangerous write, 6 transport or timeout.
+- `CachingMonitorBackend` and `default_cache_dir()` in `ddc-adapters`: capabilities strings kept on disk per monitor id (`%LOCALAPPDATA%\ddc-control\caps`, `$XDG_CACHE_HOME/ddc-control/caps` or `~/.cache/ddc-control/caps`), so a warm `ddc-cli get` skips the ~2.5 s capabilities read. Only successful reads are stored; `invalidate` backs `caps --refresh`.
+- `FakeMonitor::with_vcp_failure`, to script a VCP code whose reads and writes fail with a given error.
 
 ### Removed
 
