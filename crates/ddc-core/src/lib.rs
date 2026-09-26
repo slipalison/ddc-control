@@ -8,5 +8,6 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod app;
 pub mod domain;
 pub mod ports;

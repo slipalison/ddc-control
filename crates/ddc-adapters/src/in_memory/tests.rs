@@ -150,3 +150,22 @@ fn logs_every_call_in_order_including_failures() {
         ]
     );
 }
+
+#[test]
+fn clones_share_monitors_and_call_log() {
+    let backend =
+        single_monitor(FakeMonitor::new(info("m")).with_value(VcpCode::BRIGHTNESS, 50, 100));
+    let handle = backend.clone();
+
+    handle.write_vcp(&id("m"), VcpCode::BRIGHTNESS, 80).unwrap();
+
+    assert_eq!(
+        backend
+            .read_vcp(&id("m"), VcpCode::BRIGHTNESS)
+            .unwrap()
+            .current,
+        80
+    );
+    assert_eq!(handle.calls(), backend.calls());
+    assert_eq!(backend.calls().len(), 2);
+}

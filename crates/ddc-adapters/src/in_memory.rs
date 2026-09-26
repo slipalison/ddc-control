@@ -1,7 +1,7 @@
 //! A scripted, in-memory `MonitorBackend` — the test adapter of the hexagon.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
@@ -85,10 +85,13 @@ impl FakeMonitor {
 /// In-memory [`MonitorBackend`] serving [`FakeMonitor`]s and logging every
 /// call. Unknown monitors answer [`DdcError::MonitorNotFound`]; unscripted
 /// codes answer [`DdcError::UnsupportedFeature`].
-#[derive(Debug)]
+///
+/// Clones are handles to the same monitors and call log, so a test can hand
+/// one clone to the core and inspect the log through another.
+#[derive(Debug, Clone)]
 pub struct InMemoryMonitorBackend {
-    monitors: Mutex<Vec<FakeMonitor>>,
-    calls: Mutex<Vec<BackendCall>>,
+    monitors: Arc<Mutex<Vec<FakeMonitor>>>,
+    calls: Arc<Mutex<Vec<BackendCall>>>,
 }
 
 impl InMemoryMonitorBackend {
@@ -161,8 +164,8 @@ impl InMemoryMonitorBackendBuilder {
     /// Finishes the backend with an empty call log.
     pub fn build(self) -> InMemoryMonitorBackend {
         InMemoryMonitorBackend {
-            monitors: Mutex::new(self.monitors),
-            calls: Mutex::new(Vec::new()),
+            monitors: Arc::new(Mutex::new(self.monitors)),
+            calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
