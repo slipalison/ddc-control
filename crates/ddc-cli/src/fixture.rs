@@ -9,15 +9,16 @@ use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode};
 /// Id of the fake monitor.
 pub const FIXTURE_ID: &str = "FAKE-CLI-TEST";
 
-/// Capabilities string of the fake monitor, declaring the six shortcuts.
+/// Capabilities string of the fake monitor. It declares five of the six
+/// shortcuts: like on the dev monitor, 0x62 volume answers but is left out.
 pub const FIXTURE_CAPS: &str = "(prot(monitor)type(LCD)model(FAKE)vcp(10 12 14(01 02 03) \
-                                60(01 0F 11) 62 D6(01 04 05))mccs_ver(2.2))";
+                                60(01 0F 11) D6(01 04 05))mccs_ver(2.2))";
 
 /// A code whose every read and write times out, to exercise the
 /// transport exit code end to end.
 pub const SIMULATED_TIMEOUT: VcpCode = VcpCode(0xDF);
 
-/// The fake monitor, with a value for each of the six shortcuts.
+/// The fake monitor, answering each of the six shortcuts.
 #[doc(hidden)]
 pub fn fixture_monitor() -> FakeMonitor {
     FakeMonitor::new(MonitorInfo {

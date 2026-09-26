@@ -57,6 +57,26 @@ fn a_safe_write_is_applied_and_read_back() {
     );
 }
 
+/// Each run is a new process with no earlier read, and the fixture answers
+/// 0x62 volume without declaring it, like the dev monitor: the core reads
+/// the maximum once before writing (D-2026-09-26-cli-1).
+#[test]
+fn a_safe_write_to_an_answered_but_undeclared_code_succeeds_through_the_binary() {
+    fake_cli()
+        .args(["set", "volume", "40"])
+        .assert()
+        .code(0)
+        .stdout("0x62 volume: 40 (0x28), max 100 (0x64)\n")
+        .stderr("");
+
+    fake_cli()
+        .args(["set", "volume", "101"])
+        .assert()
+        .code(4)
+        .stdout("")
+        .stderr(predicate::str::contains("exceeds its maximum 100"));
+}
+
 #[test]
 fn a_safe_write_through_the_binary_reports_json() {
     let output = fake_cli()

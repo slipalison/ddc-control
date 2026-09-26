@@ -98,7 +98,7 @@ Some monitors, the dev one included, refuse a capabilities read issued within a 
 
 ### Known limitations
 
-- A write to a code the capabilities do not declare, such as `volume` on the dev monitor, is refused with exit 4 ("feature 0x62 is not supported"). The core only writes against a known maximum, taken from the capabilities or from an earlier read in the same process, and each `ddc-cli` run is a new process. The same happens to any continuous feature when the capabilities could not be read and are not cached yet.
+- Until the MCCS feature catalog exists (phase `full-osd-control`), a code whose capabilities entry lists no values, or that the capabilities do not declare at all, counts as continuous: a write is checked against the maximum the monitor reports. For a discrete feature outside the capabilities, such as an input source on a monitor that does not list its inputs, that maximum says little about which values are valid. Dangerous codes still need `--yes`.
 
 ## Layout
 
@@ -126,10 +126,10 @@ Architecture is locked to Hexagonal (Ports & Adapters) — see `.jdi/PROJECT.md`
 Every write goes through `MonitorControl::set_feature`, and the core — never an adapter — enforces, in order:
 
 1. **Risk.** Each VCP code has a `Risk`. Brightness, contrast, color preset, RGB gains, volume, sharpness and OSD language are `Safe`. Everything else — factory resets, input source, OSD lock, power mode, the manufacturer-specific range `0xE0`–`0xFF`, and any code not yet classified — is `Dangerous` and needs `Confirm::Yes`, checked before the monitor is touched at all.
-2. **No blind writes.** A feature whose capabilities list discrete values accepts only those values. Any other feature is checked against a known maximum (from an earlier read, or read on demand when the capabilities declare the code); with no known maximum the write is refused.
+2. **No blind writes.** A feature whose capabilities list discrete values accepts only those values. Any other feature is checked against its maximum: the one from an earlier read, else one read from the monitor right before the write, whether the capabilities declare the code or not (the dev monitor answers `0x62` volume without declaring it). If that read fails, the write is refused with the read's error and nothing is written.
 3. **Read-back.** After the write the value is read back once, and that reading is what `set_feature` returns — some monitors acknowledge writes they silently drop.
 
-Reads are never filtered by the capabilities string: monitors answer codes they do not declare (the dev monitor answers `0x62` volume), so `get_feature` always reads and reports `declared_in_capabilities` instead. A capabilities string that cannot be read or parsed does not block reads either: the monitor is treated as declaring no code, so a write needs the maximum from an earlier read. The failure is remembered per monitor, and only an explicit `capabilities` request asks the monitor again.
+Reads are never filtered by the capabilities string: monitors answer codes they do not declare (the dev monitor answers `0x62` volume), so `get_feature` always reads and reports `declared_in_capabilities` instead. A capabilities string that cannot be read or parsed does not block reads or writes either: the monitor is treated as declaring no code, so a write reads the feature's maximum first. The failure is remembered per monitor, and only an explicit `capabilities` request asks the monitor again.
 
 ## Dev setup
 

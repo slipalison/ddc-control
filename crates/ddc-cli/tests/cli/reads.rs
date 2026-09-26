@@ -48,7 +48,7 @@ fn caps_prints_the_fixture_capabilities_as_text_and_json() {
     assert_eq!(json["monitor"], FIXTURE_ID);
     assert_eq!(json["model"], "FAKE");
     assert_eq!(json["vcp"][0], json!({ "code": 16, "values": null }));
-    assert_eq!(json["vcp"].as_array().map(Vec::len), Some(6));
+    assert_eq!(json["vcp"].as_array().map(Vec::len), Some(5));
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn get_prints_a_reading_as_text_and_json() {
             "name": "volume",
             "current": 30,
             "max": 100,
-            "declared_in_capabilities": true
+            "declared_in_capabilities": false
         })
     );
 }
