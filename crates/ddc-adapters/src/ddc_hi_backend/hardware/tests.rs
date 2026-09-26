@@ -10,7 +10,9 @@ use super::super::DdcHiBudgets;
 use super::super::identity::{DisplayIdentity, EdidIdentity};
 use super::super::retry::RetryPolicies;
 use super::super::worker::{DdcHandle, DisplaySource, HandleError, WorkerClient};
-use super::{capabilities_text, display_identity, transaction_error, vcp_value};
+use super::{
+    capabilities_text, display_identity, ensure_reply_answers, transaction_error, vcp_value,
+};
 
 fn reply(mh: u8, ml: u8, sh: u8, sl: u8) -> ddc_hi::VcpValue {
     ddc_hi::VcpValue {
@@ -38,6 +40,27 @@ fn maps_ddc_hi_vcp_reply_to_core_current_and_max() {
             max: 100
         }
     );
+}
+
+/// Over `/dev/i2c-*`, a reply left on the bus by an earlier request that
+/// gave up can arrive for the next one: on the dev monitor a probe read
+/// 0x70's value as 0x7E's. Such a reply is refused as transient, so the read
+/// is tried again instead of reporting another feature's value.
+#[test]
+fn a_reply_that_answers_another_vcp_code_is_a_transient_failure() {
+    let trapezoid = VcpCode(0x7E);
+
+    let stale = ensure_reply_answers(trapezoid, Some(0x70));
+
+    let error = stale.unwrap_err();
+    assert!(!error.is_unsupported());
+    assert!(!error.is_panic());
+    assert_eq!(
+        HandleError::new("reply answers VCP code 0x70, not 0x7E"),
+        error
+    );
+    assert_eq!(ensure_reply_answers(trapezoid, Some(0x7E)), Ok(()));
+    assert_eq!(ensure_reply_answers(trapezoid, None), Ok(()));
 }
 
 #[test]

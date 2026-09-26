@@ -34,9 +34,9 @@ impl DdcHandle for Handle {
     }
 
     fn read_vcp(&mut self, code: VcpCode) -> Result<VcpValue, HandleError> {
-        self.get_vcp_feature(code.0)
-            .map(vcp_value)
-            .map_err(transaction_error)
+        let reply = self.get_vcp_feature(code.0).map_err(transaction_error)?;
+        ensure_reply_answers(code, echoed_code(&reply))?;
+        Ok(vcp_value(reply))
     }
 
     fn write_vcp(&mut self, code: VcpCode, value: u16) -> Result<(), HandleError> {
@@ -73,6 +73,34 @@ fn is_unsupported_reply(cause: &(dyn Error + 'static)) -> bool {
     let text = cause.to_string();
     let reply = text.strip_prefix(DDC_I2C_PROTOCOL_PREFIX).unwrap_or(&text);
     reply == UNSUPPORTED_VCP_CODE
+}
+
+/// The VCP code a Get VCP Feature reply says it answers, where the platform
+/// backend passes it on. `ddc` 0.2.2, under `ddc-i2c`, stores the code the
+/// monitor echoes in `ty` and never compares it with the request. `dxva2`
+/// checks replies itself, and `ddc-winapi` puts the value type in `ty`.
+#[cfg(target_os = "linux")]
+fn echoed_code(reply: &ddc_hi::VcpValue) -> Option<u8> {
+    Some(reply.ty)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn echoed_code(_: &ddc_hi::VcpValue) -> Option<u8> {
+    None
+}
+
+/// Refuses a reply that answers another VCP code: a late reply to an earlier
+/// request, left on the bus when that one gave up. Taking it would report,
+/// and bound writes by, another feature's value; like any garbled reply it is
+/// a transient failure, so the read is tried again.
+pub(crate) fn ensure_reply_answers(code: VcpCode, echoed: Option<u8>) -> Result<(), HandleError> {
+    match echoed {
+        Some(other) if other != code.0 => Err(HandleError::new(format_args!(
+            "reply answers VCP code {}, not {code}",
+            VcpCode(other)
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// A Get VCP Feature reply in core terms: maximum then current, each a
