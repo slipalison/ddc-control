@@ -23,8 +23,17 @@ pub fn monitor_info(id: MonitorId) -> MonitorInfo {
 /// The dev monitor: real capabilities plus values for a few codes, including
 /// 0x62 volume, which answers although the capabilities omit it.
 pub fn rtk_monitor() -> FakeMonitor {
-    FakeMonitor::new(monitor_info(rtk_id()))
-        .with_capabilities(RTK_QHD_HDR_CAPS)
+    with_rtk_values(FakeMonitor::new(monitor_info(rtk_id())).with_capabilities(RTK_QHD_HDR_CAPS))
+}
+
+/// The dev monitor's values behind a scaler that never answers the
+/// capabilities request.
+pub fn rtk_monitor_without_capabilities() -> FakeMonitor {
+    with_rtk_values(FakeMonitor::new(monitor_info(rtk_id())))
+}
+
+fn with_rtk_values(monitor: FakeMonitor) -> FakeMonitor {
+    monitor
         .with_value(VcpCode::BRIGHTNESS, 50, 100)
         .with_value(VcpCode::COLOR_PRESET, 0x05, 0x0B)
         .with_value(VcpCode::INPUT_SOURCE, 0x0F, 0x12)

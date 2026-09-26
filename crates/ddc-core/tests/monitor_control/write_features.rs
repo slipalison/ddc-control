@@ -2,7 +2,9 @@ use ddc_adapters::BackendCall;
 use ddc_core::domain::{Confirm, DdcError, VcpCode, VcpValue};
 use ddc_core::ports::MonitorControl;
 
-use crate::support::{osd_with, rtk_id, rtk_monitor, wrote_anything};
+use crate::support::{
+    osd_with, rtk_id, rtk_monitor, rtk_monitor_without_capabilities, wrote_anything,
+};
 
 #[test]
 fn dangerous_write_without_confirm_is_rejected() {
@@ -181,4 +183,75 @@ fn confirmed_dangerous_write_is_performed() {
         }
     );
     assert!(wrote_anything(&backend));
+}
+
+#[test]
+fn write_without_read_or_capabilities_is_unsupported() {
+    let (osd, backend) = osd_with([rtk_monitor_without_capabilities()]);
+
+    let result = osd.set_feature(&rtk_id(), VcpCode::BRIGHTNESS, 70, Confirm::No);
+
+    assert_eq!(
+        result.unwrap_err(),
+        DdcError::UnsupportedFeature(VcpCode::BRIGHTNESS)
+    );
+    assert_eq!(backend.calls(), [BackendCall::ReadCapabilities(rtk_id())]);
+}
+
+#[test]
+fn write_after_read_uses_cached_max_without_capabilities() {
+    let (osd, backend) = osd_with([rtk_monitor_without_capabilities()]);
+    osd.get_feature(&rtk_id(), VcpCode::BRIGHTNESS).unwrap();
+
+    let too_high = osd.set_feature(&rtk_id(), VcpCode::BRIGHTNESS, 101, Confirm::No);
+    let applied = osd.set_feature(&rtk_id(), VcpCode::BRIGHTNESS, 70, Confirm::No);
+
+    assert!(matches!(
+        too_high,
+        Err(DdcError::InvalidValue { max: 100, .. })
+    ));
+    assert_eq!(
+        applied.unwrap(),
+        VcpValue {
+            current: 70,
+            max: 100
+        }
+    );
+    assert_eq!(
+        backend.calls(),
+        [
+            BackendCall::ReadCapabilities(rtk_id()),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::BRIGHTNESS),
+            BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 70),
+            BackendCall::ReadVcp(rtk_id(), VcpCode::BRIGHTNESS),
+        ]
+    );
+}
+
+#[test]
+fn without_capabilities_a_listed_feature_is_bounded_by_its_max() {
+    let (osd, _) = osd_with([rtk_monitor_without_capabilities()]);
+    osd.get_feature(&rtk_id(), VcpCode::COLOR_PRESET).unwrap();
+
+    let unlisted_in_caps = osd.set_feature(&rtk_id(), VcpCode::COLOR_PRESET, 0x03, Confirm::No);
+    let above_max = osd.set_feature(&rtk_id(), VcpCode::COLOR_PRESET, 0x0C, Confirm::No);
+
+    assert_eq!(unlisted_in_caps.unwrap().current, 0x03);
+    assert!(matches!(
+        above_max,
+        Err(DdcError::InvalidValue { max: 0x0B, .. })
+    ));
+}
+
+#[test]
+fn dangerous_write_is_rejected_before_capabilities_are_fetched() {
+    let (osd, backend) = osd_with([rtk_monitor_without_capabilities()]);
+
+    let result = osd.set_feature(&rtk_id(), VcpCode::POWER_MODE, 0x04, Confirm::No);
+
+    assert_eq!(
+        result.unwrap_err(),
+        DdcError::DangerousWriteNotConfirmed(VcpCode::POWER_MODE)
+    );
+    assert!(backend.calls().is_empty());
 }

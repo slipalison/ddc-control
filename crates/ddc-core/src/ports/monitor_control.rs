@@ -7,11 +7,13 @@ pub trait MonitorControl {
     /// Lists the monitors currently reachable.
     fn list_monitors(&self) -> Result<Vec<MonitorInfo>, DdcError>;
 
-    /// The monitor's parsed capabilities.
+    /// The monitor's parsed capabilities, or the error that kept them from
+    /// being read or parsed.
     fn capabilities(&self, id: &MonitorId) -> Result<Capabilities, DdcError>;
 
     /// Reads a feature from the monitor. The read always reaches the monitor,
-    /// even for a code its capabilities do not declare.
+    /// even for a code its capabilities do not declare or when they cannot be
+    /// read or parsed at all.
     fn get_feature(&self, id: &MonitorId, code: VcpCode) -> Result<FeatureReading, DdcError>;
 
     /// Writes a feature and returns the value read back right after.

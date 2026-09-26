@@ -7,15 +7,23 @@ use crate::domain::{
 };
 use crate::ports::{MonitorBackend, MonitorControl};
 
+/// Outcome of fetching a monitor's capabilities: parsed, or why they could
+/// not be read or parsed.
+type CapabilitiesOutcome = Result<Capabilities, DdcError>;
+
 /// The software on-screen display: [`MonitorControl`] on top of any
 /// [`MonitorBackend`].
 ///
-/// Caches each monitor's parsed capabilities and the last maximum read for
-/// each feature, so writes can be validated without extra round-trips.
+/// Caches, per monitor, the outcome of fetching its capabilities and the last
+/// maximum read for each feature, so writes can be validated without extra
+/// round-trips. Capabilities that cannot be read or parsed never block a
+/// read: the monitor is then treated as declaring no code, so a write needs
+/// the maximum from an earlier read, and the failure is remembered so it is
+/// not fetched again on every read.
 #[derive(Debug)]
 pub struct SoftwareOsd<B> {
     backend: B,
-    capabilities: Mutex<HashMap<MonitorId, Capabilities>>,
+    capabilities: Mutex<HashMap<MonitorId, CapabilitiesOutcome>>,
     known_max: Mutex<HashMap<(MonitorId, VcpCode), u16>>,
 }
 
@@ -29,13 +37,29 @@ impl<B: MonitorBackend> SoftwareOsd<B> {
         }
     }
 
-    fn load_capabilities(&self, id: &MonitorId) -> Result<Capabilities, DdcError> {
-        if let Some(cached) = lock(&self.capabilities).get(id) {
-            return Ok(cached.clone());
+    /// Reads and parses the capabilities, remembering the outcome. A missing
+    /// monitor is not remembered: it says nothing about its capabilities.
+    fn fetch_capabilities(&self, id: &MonitorId) -> CapabilitiesOutcome {
+        let outcome = self
+            .backend
+            .read_capabilities(id)
+            .and_then(|raw| Capabilities::parse(&raw));
+        if !matches!(outcome, Err(DdcError::MonitorNotFound(_))) {
+            lock(&self.capabilities).insert(id.clone(), outcome.clone());
         }
-        let parsed = Capabilities::parse(&self.backend.read_capabilities(id)?)?;
-        lock(&self.capabilities).insert(id.clone(), parsed.clone());
-        Ok(parsed)
+        outcome
+    }
+
+    /// The capabilities a read or write is interpreted with: the remembered
+    /// outcome, else a fresh fetch. Capabilities that cannot be read or parsed
+    /// count as declaring nothing; only a missing monitor is an error.
+    fn capabilities_or_empty(&self, id: &MonitorId) -> Result<Capabilities, DdcError> {
+        let remembered = lock(&self.capabilities).get(id).cloned();
+        match remembered.unwrap_or_else(|| self.fetch_capabilities(id)) {
+            Err(DdcError::MonitorNotFound(missing)) => Err(DdcError::MonitorNotFound(missing)),
+            Err(_) => Ok(Capabilities::default()),
+            parsed => parsed,
+        }
     }
 
     fn remember_max(&self, id: &MonitorId, code: VcpCode, max: u16) {
@@ -75,12 +99,19 @@ impl<B: MonitorBackend> MonitorControl for SoftwareOsd<B> {
         self.backend.enumerate()
     }
 
+    /// Parsed capabilities are served from the cache. A remembered failure is
+    /// not: an explicit request always asks the monitor again, surfaces the
+    /// error if it persists, and replaces it in the cache once it succeeds —
+    /// this is how a caller recovers from a transient capabilities failure.
     fn capabilities(&self, id: &MonitorId) -> Result<Capabilities, DdcError> {
-        self.load_capabilities(id)
+        if let Some(Ok(parsed)) = lock(&self.capabilities).get(id) {
+            return Ok(parsed.clone());
+        }
+        self.fetch_capabilities(id)
     }
 
     fn get_feature(&self, id: &MonitorId, code: VcpCode) -> Result<FeatureReading, DdcError> {
-        let capabilities = self.load_capabilities(id)?;
+        let capabilities = self.capabilities_or_empty(id)?;
         let value = self.backend.read_vcp(id, code)?;
         self.remember_max(id, code, value.max);
         Ok(FeatureReading {
@@ -98,7 +129,7 @@ impl<B: MonitorBackend> MonitorControl for SoftwareOsd<B> {
         confirm: Confirm,
     ) -> Result<VcpValue, DdcError> {
         authorize_write(code, confirm)?;
-        let capabilities = self.load_capabilities(id)?;
+        let capabilities = self.capabilities_or_empty(id)?;
         let feature = capabilities.feature(code);
         let known_max = self.max_for_write(id, &capabilities, &feature)?;
         feature.validate_write(value, known_max)?;
