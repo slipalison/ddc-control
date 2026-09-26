@@ -4,6 +4,10 @@
 //! invocation lives for one command, so the in-process cache of the core
 //! does not help it. This decorator stores each successful read in one file
 //! per monitor and serves it from there on later runs.
+//!
+//! A file on disk is only ever replaced by a capabilities string the core can
+//! parse, so a truncated read or a failed refresh never costs a good cache
+//! (D-2026-09-26-cli-3).
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -14,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
+use ddc_core::domain::{Capabilities, DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
 
 /// Extension of a cached capabilities file.
@@ -26,10 +30,12 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Wraps a [`MonitorBackend`] and persists `read_capabilities` per
 /// [`MonitorId`] under `cache_dir`.
 ///
-/// Only successful reads are stored; failures always reach the wrapped
-/// backend again. Every other call is delegated untouched — enumeration in
-/// particular is never cached. Cache I/O never fails an operation: an
-/// unreadable or empty file is a miss, and a failed write is ignored.
+/// Only successful reads that [`Capabilities::parse`] accepts are stored;
+/// failures and unparseable strings reach the caller but never the disk, so
+/// they are asked of the wrapped backend again. Every other call is
+/// delegated untouched — enumeration in particular is never cached. Cache
+/// I/O never fails an operation: an unreadable, empty or unparseable file is
+/// a miss, and a failed write is ignored.
 #[derive(Debug)]
 pub struct CachingMonitorBackend<B> {
     inner: B,
@@ -48,12 +54,12 @@ impl<B: MonitorBackend> CachingMonitorBackend<B> {
         }
     }
 
-    /// Forgets the cached capabilities of `id`: the next read asks the
-    /// wrapped backend and overwrites the file. Holds even when the file
-    /// cannot be removed.
+    /// Stops serving the cached capabilities of `id` from this instance:
+    /// every read asks the wrapped backend until one succeeds and replaces
+    /// the file. The file itself is kept, so a failed re-read leaves it for
+    /// later runs.
     pub fn invalidate(&self, id: &MonitorId) {
         lock(&self.invalidated).insert(id.clone());
-        let _ = fs::remove_file(self.cache_file(id));
     }
 
     fn cache_file(&self, id: &MonitorId) -> PathBuf {
@@ -66,10 +72,15 @@ impl<B: MonitorBackend> CachingMonitorBackend<B> {
             return None;
         }
         let raw = fs::read_to_string(self.cache_file(id)).ok()?;
-        (!raw.is_empty()).then_some(raw)
+        (!raw.is_empty() && parses(&raw)).then_some(raw)
     }
 
+    /// Replaces the file of `id` with `raw`, unless the core could not parse
+    /// it: a truncated read must not outlive this call.
     fn store(&self, id: &MonitorId, raw: &str) {
+        if !parses(raw) {
+            return;
+        }
         if write_atomically(&self.cache_dir, &self.cache_file(id), raw).is_ok() {
             lock(&self.invalidated).remove(id);
         }
@@ -172,6 +183,11 @@ fn file_stem(id: &MonitorId) -> String {
         }
     }
     stem
+}
+
+/// Whether the core can make sense of `raw`: only such strings are cached.
+fn parses(raw: &str) -> bool {
+    Capabilities::parse(raw).is_ok()
 }
 
 /// Writes `contents` to a unique temporary file in `dir`, then renames it
