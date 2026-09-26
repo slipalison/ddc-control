@@ -209,6 +209,7 @@ fn yes_is_only_accepted_by_set_and_reset() {
     for args in [
         ["get", "brightness", "--yes"],
         ["caps", "--yes", "--refresh"],
+        ["features", "--probe", "--yes"],
     ] {
         let error = parse(&args).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnknownArgument, "{args:?}");
@@ -243,6 +244,16 @@ fn caps_refresh_is_optional() {
 
     assert_eq!(cached.command, Command::Caps { refresh: false });
     assert_eq!(refreshed.command, Command::Caps { refresh: true });
+}
+
+#[test]
+fn features_probe_is_optional() {
+    let declared = parse(&["features"]).unwrap();
+    let probed = parse(&["features", "--probe", "--json"]).unwrap();
+
+    assert_eq!(declared.command, Command::Features { probe: false });
+    assert_eq!(probed.command, Command::Features { probe: true });
+    assert!(probed.json);
 }
 
 #[test]

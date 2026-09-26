@@ -10,7 +10,8 @@ use std::io::Write;
 
 use ddc_core::domain::mccs_catalog::{Interpretation, catalog_entry, interpret};
 use ddc_core::domain::{
-    Access, Capabilities, FeatureReading, MonitorId, MonitorInfo, VcpCode, VcpValue,
+    Access, Capabilities, DdcError, Feature, FeatureKind, FeatureReading, MonitorId, MonitorInfo,
+    Risk, VcpCode, VcpValue,
 };
 use serde::Serialize;
 
@@ -23,6 +24,49 @@ pub enum Format {
     Text,
     /// One JSON document per command.
     Json,
+}
+
+/// One line of `features`: a feature, whether the capabilities declare it,
+/// and what reading it gave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeatureRow {
+    /// The feature, as the capabilities and the catalog describe it.
+    pub feature: Feature,
+    /// Whether the capabilities declare the code; `false` for a probed one.
+    pub declared: bool,
+    /// The value read, or why none was. Never
+    /// [`DdcError::MonitorNotFound`]: that ends the whole command.
+    pub outcome: Result<VcpValue, DdcError>,
+}
+
+/// Whether reading a feature gave a value, and if not, why
+/// (D-2026-09-26-full-osd-control-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeStatus {
+    /// The monitor answered.
+    Ok,
+    /// The monitor said it does not support the code.
+    Unsupported,
+    /// The monitor did not answer, or not in time.
+    Unresponsive,
+}
+
+impl ProbeStatus {
+    fn of(outcome: &Result<VcpValue, DdcError>) -> Self {
+        match outcome {
+            Ok(_) => Self::Ok,
+            Err(DdcError::UnsupportedFeature(_)) => Self::Unsupported,
+            Err(_) => Self::Unresponsive,
+        }
+    }
+
+    fn json(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Unsupported => "unsupported",
+            Self::Unresponsive => "unresponsive",
+        }
+    }
 }
 
 /// Writes each command's result in the chosen [`Format`].
@@ -112,6 +156,25 @@ impl<'w> Printer<'w> {
         }
     }
 
+    /// Prints the `features` table, one row per code in code order, first
+    /// warning when the capabilities could not be read, so that no code
+    /// counts as declared.
+    pub fn features(&mut self, rows: &[FeatureRow], unreadable_caps: Option<&DdcError>) {
+        if let Some(error) = unreadable_caps {
+            self.warn(format_args!(
+                "capabilities could not be read ({error}); no code counts as declared, \
+                 and --probe reads every catalogued one"
+            ));
+        }
+        match self.format {
+            Format::Text => self.emit_lines(feature_table(rows)),
+            Format::Json => {
+                let dtos: Vec<FeatureDto> = rows.iter().map(FeatureDto::new).collect();
+                self.emit_json(&dtos);
+            }
+        }
+    }
+
     /// Prints a write that was sent and, by design, not read back: the
     /// feature is write-only (D-2026-09-26-full-osd-control-8).
     pub fn sent(&mut self, monitor: &MonitorId, code: VcpCode, value: u16) {
@@ -197,6 +260,104 @@ fn feature_line(code: VcpCode, value: VcpValue) -> String {
         value_text(code, value.current),
         number(value.max)
     )
+}
+
+fn kind_label(kind: FeatureKind) -> &'static str {
+    match kind {
+        FeatureKind::Continuous => "C",
+        FeatureKind::NonContinuous => "NC",
+        FeatureKind::Table => "T",
+    }
+}
+
+fn access_label(access: Access) -> &'static str {
+    match access {
+        Access::ReadOnly => "RO",
+        Access::WriteOnly => "WO",
+        Access::ReadWrite => "RW",
+    }
+}
+
+fn risk_label(risk: Risk) -> &'static str {
+    match risk {
+        Risk::Safe => "safe",
+        Risk::Dangerous => "dangerous",
+    }
+}
+
+fn source_label(declared: bool) -> &'static str {
+    if declared { "caps" } else { "probe" }
+}
+
+/// The MCCS name of `code`, when the catalog knows it.
+fn description(code: VcpCode) -> Option<&'static str> {
+    catalog_entry(code).and_then(|entry| entry.name)
+}
+
+/// The value column of `features`: `current/max` and what it means, or why
+/// there is no value.
+fn outcome_text(code: VcpCode, outcome: &Result<VcpValue, DdcError>) -> String {
+    match (outcome, ProbeStatus::of(outcome)) {
+        (Ok(value), _) => match interpret(code, value.current) {
+            Some(meaning) => format!("{}/{} {meaning}", value.current, value.max),
+            None => format!("{}/{}", value.current, value.max),
+        },
+        (_, ProbeStatus::Unsupported) => "not supported by this monitor".to_owned(),
+        (_, _) => "not responding".to_owned(),
+    }
+}
+
+const FEATURE_HEADER: [&str; 8] = [
+    "CODE",
+    "NAME",
+    "TYPE",
+    "ACCESS",
+    "RISK",
+    "SOURCE",
+    "VALUE",
+    "DESCRIPTION",
+];
+
+fn feature_cells(row: &FeatureRow) -> [String; 8] {
+    let code = row.feature.code;
+    [
+        code.to_string(),
+        alias_of(code).unwrap_or("-").to_owned(),
+        kind_label(row.feature.kind).to_owned(),
+        access_label(row.feature.access).to_owned(),
+        risk_label(row.feature.risk).to_owned(),
+        source_label(row.declared).to_owned(),
+        outcome_text(code, &row.outcome),
+        description(code).unwrap_or("-").to_owned(),
+    ]
+}
+
+/// A header and one line per row, columns aligned; nothing at all for no
+/// row.
+fn feature_table(rows: &[FeatureRow]) -> Vec<String> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let lines: Vec<[String; 8]> = std::iter::once(FEATURE_HEADER.map(str::to_owned))
+        .chain(rows.iter().map(feature_cells))
+        .collect();
+    let mut widths = [0; 8];
+    for line in &lines {
+        for (width, cell) in widths.iter_mut().zip(line) {
+            *width = (*width).max(cell.chars().count());
+        }
+    }
+    lines
+        .iter()
+        .map(|line| {
+            let padded: Vec<String> = line
+                .iter()
+                .zip(widths)
+                .map(|(cell, width)| format!("{cell:<width$}"))
+                .collect();
+            padded.join("  ").trim_end().to_owned()
+        })
+        .collect()
 }
 
 fn hex_list(bytes: &[u8]) -> String {
@@ -360,6 +521,47 @@ impl<'a> WriteDto<'a> {
             value_name,
             interpreted,
             applied: read_back.current == requested,
+        }
+    }
+}
+
+/// One `features` row. Every field is always present, `null` when there
+/// is nothing to show (D-2026-09-26-full-osd-control-3).
+#[derive(Serialize)]
+struct FeatureDto {
+    code: u8,
+    name: Option<&'static str>,
+    description: Option<&'static str>,
+    kind: &'static str,
+    access: &'static str,
+    risk: &'static str,
+    declared_in_capabilities: bool,
+    probe_status: &'static str,
+    current: Option<u16>,
+    max: Option<u16>,
+    value_name: Option<&'static str>,
+    interpreted: Option<String>,
+}
+
+impl FeatureDto {
+    fn new(row: &FeatureRow) -> Self {
+        let code = row.feature.code;
+        let value = row.outcome.as_ref().ok();
+        let (value_name, interpreted) =
+            value.map_or((None, None), |value| meaning(code, value.current));
+        Self {
+            code: code.0,
+            name: alias_of(code),
+            description: description(code),
+            kind: kind_label(row.feature.kind),
+            access: access_label(row.feature.access),
+            risk: risk_label(row.feature.risk),
+            declared_in_capabilities: row.declared,
+            probe_status: ProbeStatus::of(&row.outcome).json(),
+            current: value.map(|value| value.current),
+            max: value.map(|value| value.max),
+            value_name,
+            interpreted,
         }
     }
 }

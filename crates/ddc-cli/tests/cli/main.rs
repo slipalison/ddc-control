@@ -3,6 +3,7 @@
 //! backend's call log.
 
 mod exit_codes;
+mod features;
 mod reads;
 mod reset;
 mod selection;

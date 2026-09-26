@@ -43,6 +43,14 @@ pub enum Command {
         #[arg(long)]
         refresh: bool,
     },
+    /// List the monitor's features with their current values: every code
+    /// its capabilities declare, and with --probe every catalogued one they
+    /// leave out. Only reads.
+    Features {
+        /// Also read the catalogued codes the capabilities do not declare.
+        #[arg(long)]
+        probe: bool,
+    },
     /// Read a VCP feature.
     Get {
         /// VCP code: decimal, 0x-prefixed hex, or a feature name such as

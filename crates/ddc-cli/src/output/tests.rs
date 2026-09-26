@@ -1,9 +1,11 @@
 use std::io::{self, Write};
 
-use ddc_core::domain::{Capabilities, FeatureReading, MonitorId, MonitorInfo, VcpCode, VcpValue};
+use ddc_core::domain::{
+    Capabilities, DdcError, FeatureReading, MonitorId, MonitorInfo, VcpCode, VcpValue,
+};
 use serde_json::{Value, json};
 
-use super::{Format, Printer, monitor_line};
+use super::{FeatureRow, Format, Printer, monitor_line};
 
 const CAPS: &str =
     "(prot(monitor)type(LCD)model(FAKE)cmds(01 02 F3)vcp(10 14(01 0B) 60(0F 11))mccs_ver(2.2))";
@@ -483,6 +485,112 @@ fn errors_go_to_the_error_stream_in_both_formats() {
     }
 }
 
+fn feature_rows() -> Vec<FeatureRow> {
+    let caps = Capabilities::parse(CAPS).unwrap();
+    vec![
+        FeatureRow {
+            feature: caps.feature(VcpCode::BRIGHTNESS),
+            declared: true,
+            outcome: Ok(VcpValue {
+                current: 50,
+                max: 100,
+            }),
+        },
+        FeatureRow {
+            feature: caps.feature(VcpCode::VERTICAL_FREQUENCY),
+            declared: false,
+            outcome: Ok(VcpValue {
+                current: 14400,
+                max: 0xFFFF,
+            }),
+        },
+        FeatureRow {
+            feature: caps.feature(VcpCode(0xC6)),
+            declared: false,
+            outcome: Err(DdcError::UnsupportedFeature(VcpCode(0xC6))),
+        },
+        FeatureRow {
+            feature: caps.feature(VcpCode(0x7E)),
+            declared: false,
+            outcome: Err(DdcError::Timeout),
+        },
+    ]
+}
+
+#[test]
+fn features_as_text_is_an_aligned_table_with_a_header() {
+    let captured = capture(Format::Text, |p| p.features(&feature_rows(), None));
+
+    assert_eq!(
+        captured.out,
+        "CODE  NAME         TYPE  ACCESS  RISK       SOURCE  VALUE                          DESCRIPTION\n\
+         0x10  brightness   C     RW      safe       caps    50/100                         Luminance\n\
+         0xAE  v-frequency  C     RO      safe       probe   14400/65535 144.00 Hz          Vertical Frequency\n\
+         0xC6  -            C     RO      safe       probe   not supported by this monitor  -\n\
+         0x7E  trapezoid    C     RW      dangerous  probe   not responding                 Trapezoid\n"
+    );
+    assert!(captured.err.is_empty());
+}
+
+#[test]
+fn features_as_json_always_has_every_field() {
+    let listed = capture(Format::Json, |p| p.features(&feature_rows(), None)).json();
+
+    assert_eq!(
+        listed[1],
+        json!({
+            "code": 174,
+            "name": "v-frequency",
+            "description": "Vertical Frequency",
+            "kind": "C",
+            "access": "RO",
+            "risk": "safe",
+            "declared_in_capabilities": false,
+            "probe_status": "ok",
+            "current": 14400,
+            "max": 65535,
+            "value_name": null,
+            "interpreted": "144.00 Hz"
+        })
+    );
+    assert_eq!(
+        listed[2],
+        json!({
+            "code": 198,
+            "name": null,
+            "description": null,
+            "kind": "C",
+            "access": "RO",
+            "risk": "safe",
+            "declared_in_capabilities": false,
+            "probe_status": "unsupported",
+            "current": null,
+            "max": null,
+            "value_name": null,
+            "interpreted": null
+        })
+    );
+    assert_eq!(listed[3]["probe_status"], "unresponsive");
+}
+
+#[test]
+fn features_warn_when_the_capabilities_could_not_be_read_and_print_no_empty_table() {
+    let broken = DdcError::Transport("capabilities string unavailable".to_owned());
+    for format in [Format::Text, Format::Json] {
+        let captured = capture(format, |p| p.features(&[], Some(&broken)));
+
+        assert_eq!(
+            captured.err,
+            "warning: capabilities could not be read (transport error: capabilities string \
+             unavailable); no code counts as declared, and --probe reads every catalogued one\n"
+        );
+        match format {
+            Format::Text => assert!(captured.out.is_empty(), "{}", captured.out),
+            Format::Json => assert_eq!(captured.json(), json!([])),
+        }
+    }
+}
+
 /// A stream that refuses every write, like a closed pipe.
 struct Broken;
 
@@ -516,6 +624,8 @@ fn failing_streams_are_ignored() {
                 max: 100,
             },
         );
+        printer.features(&feature_rows(), None);
+        printer.sent(&id(), VcpCode::RESTORE_FACTORY_DEFAULTS, 1);
         printer.error("still no panic");
     }
     assert!(Broken.flush().is_err());

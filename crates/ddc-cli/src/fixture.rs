@@ -19,6 +19,15 @@ pub const FIXTURE_CAPS: &str = "(prot(monitor)type(LCD)model(FAKE)vcp(10 12 14(0
 /// transport exit code end to end.
 pub const SIMULATED_TIMEOUT: VcpCode = VcpCode(0xDF);
 
+/// 0x7E trapezoid fails as it does on the dev monitor, whose reply makes
+/// `ddc-i2c` 0.2.2 panic inside the real backend
+/// (D-2026-09-26-full-osd-control-6).
+pub const SIMULATED_PANIC: VcpCode = VcpCode(0x7E);
+
+/// The transport error the real backend reports for [`SIMULATED_PANIC`].
+pub const SIMULATED_PANIC_MESSAGE: &str =
+    "ddc-hi panicked: index out of bounds: the len is 11 but the index is 11";
+
 /// The fake monitor, answering the six original feature names, the OSD
 /// language and the four factory resets — the fake only takes a write to a
 /// code that has a value.
@@ -43,4 +52,8 @@ pub fn fixture_monitor() -> FakeMonitor {
     .with_value(VcpCode::RESTORE_FACTORY_GEOMETRY, 0x00, 0x01)
     .with_value(VcpCode::RESTORE_FACTORY_COLOR, 0x00, 0x01)
     .with_vcp_failure(SIMULATED_TIMEOUT, DdcError::Timeout)
+    .with_vcp_failure(
+        SIMULATED_PANIC,
+        DdcError::Transport(SIMULATED_PANIC_MESSAGE.to_owned()),
+    )
 }

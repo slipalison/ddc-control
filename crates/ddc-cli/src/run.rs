@@ -2,12 +2,14 @@
 
 use std::io::Write;
 
-use ddc_core::domain::{Confirm, DdcError, MonitorId, VcpCode, VcpValue};
+use ddc_core::domain::{
+    Capabilities, Confirm, DdcError, MonitorId, ProbedFeature, VcpCode, VcpValue,
+};
 use ddc_core::ports::MonitorControl;
 
 use crate::args::{Cli, Command};
 use crate::exit::{CliError, Exit};
-use crate::output::{Format, Printer};
+use crate::output::{FeatureRow, Format, Printer};
 use crate::select::select_monitor;
 
 /// Runs `cli` against `control`, printing the result to `out` and errors
@@ -76,13 +78,15 @@ fn execute(
             if *again {
                 refresh(&id);
             }
-            let caps = control.capabilities(&id).map_err(on(&id))?;
-            printer.caps(&id, &caps);
+            printer.caps(&id, &control.capabilities(&id).map_err(on(&id))?);
+        }
+        Command::Features { probe } => {
+            let (rows, unreadable_caps) = feature_rows(control, &select()?, *probe)?;
+            printer.features(&rows, unreadable_caps.as_ref());
         }
         Command::Get { vcp } => {
             let id = select()?;
-            let reading = control.get_feature(&id, *vcp).map_err(on(&id))?;
-            printer.get(&id, &reading);
+            printer.get(&id, &control.get_feature(&id, *vcp).map_err(on(&id))?);
         }
         Command::Set { vcp, value, yes } => {
             let value = value.resolve(*vcp).map_err(CliError::Usage)?;
@@ -99,6 +103,56 @@ fn execute(
         }
     }
     Ok(())
+}
+
+/// The rows of `features`: every code the capabilities declare, then with
+/// `probe` every catalogued code they leave out, in code order — plus why
+/// the capabilities could not be read, if they could not. Only reads. A
+/// monitor found missing on any row ends the command
+/// (D-2026-09-26-full-osd-control-3).
+fn feature_rows(
+    control: &impl MonitorControl,
+    id: &MonitorId,
+    probe: bool,
+) -> Result<(Vec<FeatureRow>, Option<DdcError>), CliError> {
+    let (caps, unreadable) = match control.capabilities(id) {
+        Ok(caps) => (caps, None),
+        Err(missing @ DdcError::MonitorNotFound(_)) => return Err(on(id)(missing)),
+        Err(error) => (Capabilities::default(), Some(error)),
+    };
+    let mut rows = Vec::new();
+    for code in caps.vcp.keys().map(|code| VcpCode(*code)) {
+        let outcome = control.get_feature(id, code).map(|reading| reading.value);
+        rows.push(feature_row(&caps, code, true, outcome).map_err(on(id))?);
+    }
+    let probed = if probe {
+        control.probe_undeclared_features(id).map_err(on(id))?
+    } else {
+        Vec::new()
+    };
+    for ProbedFeature { code, outcome } in probed {
+        let outcome = outcome.map(|reading| reading.value);
+        rows.push(feature_row(&caps, code, false, outcome).map_err(on(id))?);
+    }
+    rows.sort_by_key(|row| row.feature.code);
+    Ok((rows, unreadable))
+}
+
+/// The row of `code`, unless reading it found the monitor missing.
+fn feature_row(
+    caps: &Capabilities,
+    code: VcpCode,
+    declared: bool,
+    outcome: Result<VcpValue, DdcError>,
+) -> Result<FeatureRow, DdcError> {
+    if let Err(missing @ DdcError::MonitorNotFound(_)) = outcome {
+        return Err(missing);
+    }
+    Ok(FeatureRow {
+        feature: caps.feature(code),
+        declared,
+        outcome,
+    })
 }
 
 /// Writes through the core; `yes` is the user's `--yes`.
