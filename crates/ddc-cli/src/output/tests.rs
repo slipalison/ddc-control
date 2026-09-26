@@ -203,6 +203,8 @@ fn get_as_text_shows_code_name_and_values() {
     assert!(captured.err.is_empty());
 }
 
+/// The core reports unreadable capabilities as declaring nothing, so the
+/// warning must not claim the monitor left the code out.
 #[test]
 fn get_warns_when_the_code_is_not_declared_in_capabilities() {
     for format in [Format::Text, Format::Json] {
@@ -210,12 +212,10 @@ fn get_warns_when_the_code_is_not_declared_in_capabilities() {
             p.get(&id(), &reading(VcpCode::AUDIO_VOLUME, 30, 100, false));
         });
 
-        assert!(
-            captured
-                .err
-                .starts_with("warning: 0x62 volume is not declared in capabilities"),
-            "{}",
-            captured.err
+        assert_eq!(
+            captured.err,
+            "warning: 0x62 volume is not declared in capabilities, or they could not \
+             be read; showing what the monitor answered\n"
         );
     }
 }

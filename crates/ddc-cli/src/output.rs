@@ -68,12 +68,14 @@ impl<'w> Printer<'w> {
     }
 
     /// Prints a feature reading, warning when the capabilities do not
-    /// declare the code.
+    /// declare the code — which is also how the core reports capabilities
+    /// it could not read, so the warning names both causes.
     pub fn get(&mut self, monitor: &MonitorId, reading: &FeatureReading) {
         let code = reading.feature.code;
         if !reading.declared_in_capabilities {
             self.warn(format_args!(
-                "{} is not declared in capabilities; showing what the monitor answered",
+                "{} is not declared in capabilities, or they could not be read; \
+                 showing what the monitor answered",
                 code_label(code)
             ));
         }
