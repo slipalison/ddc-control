@@ -2,16 +2,23 @@
 
 Control everything your monitor's physical OSD offers — brightness, contrast, input source, color preset, volume, power — from software, over DDC/CI, with the same Rust binary on Windows and Linux.
 
-**Status:** pre-alpha. Phase 1 (`core-domain`) is implemented: a cargo workspace with two library crates and no binary yet — nothing talks to a real monitor until phase `ddc-backends`, and there is nothing to run until phase `cli`. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
+**Status:** pre-alpha. Phases 1 (`core-domain`) and 2 (`ddc-backends`) are implemented: a cargo workspace with two library crates that can already talk to real monitors, but no binary yet. There is nothing to run until phase `cli`. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
 
 ## Layout
 
 - `crates/ddc-core` — the hexagon. Domain types (`VcpCode`, `VcpValue`, `MonitorId`, `Feature`, `Risk`, `Confirm`, `DdcError`), `Capabilities` with its own MCCS capabilities-string parser, the ports `MonitorBackend` (driven) and `MonitorControl` (driving), and `SoftwareOsd`, which implements `MonitorControl` on top of any `MonitorBackend`. Depends on `thiserror` only.
-- `crates/ddc-adapters` — driven adapters. Today only `InMemoryMonitorBackend`, a scripted fake the core's use-case tests run against.
+- `crates/ddc-adapters` — driven adapters:
+  - `DdcHiMonitorBackend`, the real backend over [`ddc-hi`](https://docs.rs/ddc-hi) 0.4 (Windows `dxva2`, Linux `/dev/i2c-*`). It sits behind the crate feature `ddc-hi`, which is on by default; `--no-default-features` builds only the fake.
+    - **One worker thread** owns every monitor handle and runs every DDC/CI transaction. The Windows handles cannot cross threads, so this is what makes the backend `Send + Sync` without `unsafe`.
+    - **Budgets.** Callers wait at most a per-operation budget: 1 s for a VCP read or write, 8 s for a capabilities read, 5 s for an enumeration (`DdcHiBudgets`, overridable with `with_budgets`). Past the budget they get `Timeout`. A job whose caller already gave up never reaches the monitor.
+    - **No `enumerate()` needed first.** A monitor id the backend has not seen yet (a fresh backend, a saved id, a monitor plugged in later) costs one enumeration under the enumeration budget; then the call runs under its own budget. An id still missing after that answers `MonitorNotFound`.
+    - **Retries.** A failed transaction is retried up to 3 times, 50 ms apart, within the budget. If it still fails, the answer is `Transport`, which names the attempts. Only when one more enumeration (as long as the last one) still fits the rest of the budget is the monitor looked up again first, so an unplugged one answers `MonitorNotFound`. With the default budgets that happens for capabilities reads (8 s), not for VCP reads and writes (1 s, against a ~1.1 s enumeration): a display with mute DDC/CI answers `Transport` in about 100 ms and does not hold up calls to other monitors.
+    - **`MonitorId` scheme.** With EDID (Linux), the id is `manufacturer-model-serial`, sanitized to ASCII letters, digits and single dashes. The dev monitor is `RTK-RTK-QHD-HDR-01010101`. Without EDID (Windows), the id is the sanitized device description, else `index-N`. A repeated id in one enumeration gets `#2`, `#3`…; that suffix follows enumeration order, so it may change across hotplugs.
+    - **Enumeration** only reads EDID and never probes DDC/CI. A display with mute DDC/CI is listed, and fails on its first read.
+  - `InMemoryMonitorBackend`, a scripted fake the core's use-case tests run against.
 
 Still to come:
 
-- `crates/ddc-adapters` — a `ddc-hi` adapter (Windows `dxva2`, Linux `/dev/i2c-*`), phase `ddc-backends`.
 - `crates/ddc-cli` — `list`, `caps`, `get`, `set`, named shortcuts, `--json`, phase `cli`.
 - `apps/ddc-tray` — Tauri 2 tray popup: monitor picker, sliders, input/preset/power, profiles, global hotkeys, phase `tray-app`.
 
@@ -33,9 +40,12 @@ Reads are never filtered by the capabilities string: monitors answer codes they 
 rustup toolchain install stable
 rustup component add clippy rustfmt llvm-tools-preview
 rustup target add x86_64-unknown-linux-gnu      # cross `cargo check` of the pure-Rust crates from Windows
+rustup target add x86_64-pc-windows-msvc        # cross `cargo check` of the Windows backend from Linux
 cargo install cargo-llvm-cov --locked
 git config core.hooksPath .githooks             # once per clone — see below
 ```
+
+On Linux the real backend needs the libudev headers to build (`systemd-devel` on Fedora, `libudev-dev` and `pkg-config` on Debian/Ubuntu).
 
 Quality gates (the reviewer runs exactly these):
 
@@ -46,7 +56,20 @@ cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D
 cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'
 ```
 
-Linux: load `i2c-dev` and make sure your user can open `/dev/i2c-*` (group `i2c` or a udev rule). Never run the tool with `sudo`.
+Cross-platform checks: the Windows one also proves, through a static assertion, that `DdcHiMonitorBackend` is `Send + Sync` on Windows.
+
+```sh
+cargo check -p ddc-core -p ddc-adapters --locked --target x86_64-unknown-linux-gnu
+cargo check -p ddc-adapters --locked --features ddc-hi --target x86_64-pc-windows-msvc
+```
+
+Hardware tests are read-only, `#[ignore]`d, and do nothing unless `DDC_HW_TESTS=1`. They expect the dev monitor "RTK QHD HDR" to be attached. CI and reviewers never run them.
+
+```sh
+DDC_HW_TESTS=1 cargo test -p ddc-adapters --locked --test real_monitor -- --ignored --test-threads=1 --nocapture
+```
+
+Linux: load `i2c-dev` and make sure your user can open `/dev/i2c-*` (a udev `uaccess` rule or group `i2c`). Never run the tool with `sudo`. Step by step: [`docs/linux-ddc-setup.md`](docs/linux-ddc-setup.md).
 
 ## Commits
 
