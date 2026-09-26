@@ -263,17 +263,49 @@ fn unlisted_non_continuous_write_is_checked_against_the_catalog_values() {
     );
 }
 
+/// 0x1E and 0xCA take only their catalog values
+/// (D-2026-09-26-full-osd-control-10), and 0xCA only with the button byte
+/// (SH) at zero, since the value is checked as a single byte.
+#[test]
+fn auto_setup_and_osd_control_accept_only_their_catalog_values() {
+    let non_continuous = |code| Feature {
+        kind: FeatureKind::NonContinuous,
+        ..feature(code, None)
+    };
+    let auto_setup = non_continuous(VcpCode(0x1E));
+    let osd = non_continuous(VcpCode::OSD_LOCK);
+    let not_allowed = |code, value| Err(DdcError::ValueNotAllowed { code, value });
+
+    for value in [0x00, 0x01, 0x02] {
+        assert_eq!(auto_setup.validate_write(value, None), Ok(()), "{value}");
+    }
+    assert_eq!(
+        auto_setup.validate_write(0x03, Some(0xFF)),
+        not_allowed(VcpCode(0x1E), 0x03)
+    );
+    for value in [0x01, 0x02] {
+        assert_eq!(osd.validate_write(value, None), Ok(()), "{value}");
+    }
+    for value in [0x00, 0x03, 0x0102] {
+        assert_eq!(
+            osd.validate_write(value, Some(0xFFFF)),
+            not_allowed(VcpCode::OSD_LOCK, value),
+            "{value:#06X}"
+        );
+    }
+}
+
 /// A code the catalog gives no value names keeps needing a maximum, and
 /// without one it is refused, never written blind.
 #[test]
 fn unlisted_non_continuous_write_without_catalog_values_needs_a_max() {
-    let auto_setup = Feature {
+    let new_control_value = Feature {
         kind: FeatureKind::NonContinuous,
-        ..feature(VcpCode(0x1E), None)
+        ..feature(VcpCode(0x02), None)
     };
 
     assert_eq!(
-        auto_setup.validate_write(1, None),
-        Err(DdcError::UnsupportedFeature(VcpCode(0x1E)))
+        new_control_value.validate_write(1, None),
+        Err(DdcError::UnsupportedFeature(VcpCode(0x02)))
     );
 }

@@ -1,7 +1,7 @@
 //! The MCCS 2.2 catalog: name, keyword, type, access, write risk and value
 //! names of every VCP code observed on the dev monitor "RTK QHD HDR" — the
 //! codes its capabilities declare plus the ones it answers without declaring
-//! them (D-2026-09-26-full-osd-control-1, -7, -8).
+//! them (D-2026-09-26-full-osd-control-1, -7, -8, -10).
 //!
 //! The table is closed on purpose: naming a code never seen on real hardware
 //! could put a wrong label in front of a user. A code outside it keeps the
@@ -103,6 +103,13 @@ const POWER_MODES: &[(u8, &str)] = &[
     (0x05, "Off (write-only)"),
 ];
 
+/// MCCS simple non-continuous values of 0x1E (D-2026-09-26-full-osd-control-10).
+const AUTO_SETUP: &[(u8, &str)] = &[(0x00, "Off"), (0x01, "Run"), (0x02, "Continuous")];
+
+/// MCCS values of the OSD byte (SL) of 0xCA; the button byte (SH) is out of
+/// scope and written as zero (D-2026-09-26-full-osd-control-10).
+const OSD_CONTROL: &[(u8, &str)] = &[(0x01, "OSD disabled"), (0x02, "OSD enabled")];
+
 /// Sorted by code, one row per code: code, MCCS name, alias, kind, access,
 /// risk, value names.
 #[rustfmt::skip]
@@ -120,7 +127,7 @@ const CATALOG: [CatalogEntry; 39] = [
     row(0x16, Some("Video Gain (Red)"),                            Some("red-gain"),             C,  RW, Safe),
     row(0x18, Some("Video Gain (Green)"),                          Some("green-gain"),           C,  RW, Safe),
     row(0x1A, Some("Video Gain (Blue)"),                           Some("blue-gain"),            C,  RW, Safe),
-    row(0x1E, Some("Auto Setup"),                                  Some("auto-setup"),           NC, RW, Dangerous),
+    row(0x1E, Some("Auto Setup"),                                  Some("auto-setup"),           NC, RW, Dangerous).with_values(AUTO_SETUP),
     row(0x20, Some("Horizontal Position"),                         Some("h-position"),           C,  RW, Dangerous),
     row(0x30, Some("Vertical Position"),                           Some("v-position"),           C,  RW, Dangerous),
     row(0x52, None,                                                None,                         C,  RO, Safe),
@@ -138,7 +145,7 @@ const CATALOG: [CatalogEntry; 39] = [
     row(0xC6, None,                                                None,                         C,  RO, Safe),
     row(0xC8, Some("Display Controller Type"),                     Some("controller-type"),      NC, RO, Safe),
     row(0xC9, Some("Display Firmware Level"),                      Some("firmware-level"),       C,  RO, Safe),
-    row(0xCA, Some("OSD/Button Control"),                          Some("osd-lock"),             NC, RW, Dangerous),
+    row(0xCA, Some("OSD/Button Control"),                          Some("osd-lock"),             NC, RW, Dangerous).with_values(OSD_CONTROL),
     row(0xCC, Some("OSD Language"),                                Some("osd-language"),         NC, RW, Safe).with_values(OSD_LANGUAGES),
     row(0xD6, Some("Power Mode"),                                  Some("power"),                NC, RW, Dangerous).with_values(POWER_MODES),
     row(0xDF, Some("VCP Version"),                                 Some("vcp-version"),          C,  RO, Safe),

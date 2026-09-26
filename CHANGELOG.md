@@ -41,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Write risk comes from the catalog, and any code outside it stays dangerous. `0x0C` (color temperature) and `0x6C`/`0x6E`/`0x70` (black levels) can now be written without `--yes`. Read-only codes (`0x0B`, `0x52`, `0xAC`, `0xAE`, `0xB2`, `0xB6`, `0xC6`, `0xC8`, `0xC9`, `0xDF`, `0xFD`, `0xFF`) are refused as not writable (exit 4) instead of asking for `--yes` (exit 5).
-- A non-continuous feature whose capabilities list no values (a preset or OSD language with unreadable capabilities, an input source a monitor does not list) no longer accepts any value up to the maximum it reports: it is checked against the catalog's value names, and refused when there are none (`0x02`, `0x1E`).
+- A non-continuous feature whose capabilities list no values (a preset or OSD language with unreadable capabilities, an input source a monitor does not list) no longer accepts any value up to the maximum it reports: it is checked against the catalog's value names, and refused when there are none (`0x02`).
+- `0x1E` (auto setup) and `0xCA` (OSD/button control) are written only with their MCCS values, still with `--yes`: `00` Off, `01` Run, `02` Continuous for `0x1E`; `01` OSD disabled, `02` OSD enabled for `0xCA`, with the button byte always zero. Before, `0xCA` took any value up to the maximum the monitor reported.
 - `set_feature` refuses read-only and `Table` features before reading anything, reads a maximum only for continuous features, and never reads a write-only feature: no maximum, no read-back, the value sent is returned.
 - `Capabilities::feature` takes kind and access from the catalog, for declared and undeclared codes alike.
 - `ddc-cli` labels every catalogued code by its catalog name in text and in JSON `name` (`0x87 sharpness:`); the six names of earlier versions are unchanged. The `SHORTCUTS` table and `shortcut_name` are gone.

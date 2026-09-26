@@ -187,3 +187,74 @@ fn set_command_resolves_a_catalog_value_name_to_its_byte_when_declared_and_rejec
             "0x10 brightness has no value named 'srgb'",
         ));
 }
+
+/// 0x1E — auto setup, which the fixture answers without declaring it.
+const AUTO_SETUP: VcpCode = VcpCode(0x1E);
+
+/// Auto setup and OSD control take their catalog values, and only with
+/// `--yes`: both stay dangerous (D-2026-09-26-full-osd-control-10). The
+/// fixture lists values for neither, so the catalog list is the one
+/// checked, and a value outside it, or with the button byte set, exits 4.
+#[test]
+fn auto_setup_and_osd_lock_take_only_their_catalog_values_and_only_with_yes() {
+    for (args, code, byte) in [
+        (["set", "auto-setup", "run", "--yes"], AUTO_SETUP, 0x01),
+        (["set", "auto-setup", "0", "--yes"], AUTO_SETUP, 0x00),
+        (["set", "osd-lock", "2", "--yes"], VcpCode::OSD_LOCK, 0x02),
+        (
+            ["set", "osd-lock", "osd-disabled", "--yes"],
+            VcpCode::OSD_LOCK,
+            0x01,
+        ),
+    ] {
+        let set = run_with(&fixture_backend(), &args);
+        assert_eq!(set.exit, Exit::Success, "{args:?}: {}", set.err);
+        assert_eq!(writes(&set.calls), [(code, byte)], "{args:?}");
+    }
+    for args in [["set", "auto-setup", "run"], ["set", "osd-lock", "2"]] {
+        let refused = run_with(&fixture_backend(), &args);
+        assert_eq!(refused.exit, Exit::Unconfirmed, "{args:?}");
+        assert_eq!(refused.calls, [BackendCall::Enumerate], "{args:?}");
+    }
+    for args in [
+        ["set", "auto-setup", "3", "--yes"],
+        ["set", "osd-lock", "0", "--yes"],
+        ["set", "osd-lock", "0x0102", "--yes"],
+    ] {
+        let refused = run_with(&fixture_backend(), &args);
+        assert_eq!(refused.exit, Exit::Invalid, "{args:?}");
+        assert!(writes(&refused.calls).is_empty(), "{args:?}");
+        assert!(
+            refused.err.contains("not an allowed value"),
+            "{}",
+            refused.err
+        );
+    }
+
+    fake_cli()
+        .args(["set", "auto-setup", "run", "--yes"])
+        .assert()
+        .code(0)
+        .stdout("0x1E auto-setup: 1 (0x01) Run, max 2 (0x02)\n")
+        .stderr("");
+    fake_cli()
+        .args(["set", "osd-lock", "2", "--yes"])
+        .assert()
+        .code(0)
+        .stdout("0xCA osd-lock: 2 (0x02) OSD enabled, max 2 (0x02)\n")
+        .stderr("");
+    for args in [["set", "auto-setup", "run"], ["set", "osd-lock", "2"]] {
+        fake_cli()
+            .args(args)
+            .assert()
+            .code(5)
+            .stdout("")
+            .stderr(predicate::str::contains("--yes"));
+    }
+    fake_cli()
+        .args(["set", "auto-setup", "3", "--yes"])
+        .assert()
+        .code(4)
+        .stdout("")
+        .stderr(predicate::str::contains("not an allowed value"));
+}

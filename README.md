@@ -213,7 +213,7 @@ The core knows the 39 VCP codes observed on the dev monitor "RTK QHD HDR": the 2
 | `0x16` | `red-gain` | Video Gain (Red) | C | RW | safe |  |
 | `0x18` | `green-gain` | Video Gain (Green) | C | RW | safe |  |
 | `0x1A` | `blue-gain` | Video Gain (Blue) | C | RW | safe |  |
-| `0x1E` | `auto-setup` | Auto Setup | NC | RW | refused: no value list |  |
+| `0x1E` | `auto-setup` | Auto Setup | NC | RW | dangerous, `--yes` | `00` Off, `01` Run, `02` Continuous |
 | `0x20` | `h-position` | Horizontal Position | C | RW | dangerous, `--yes` |  |
 | `0x30` | `v-position` | Vertical Position | C | RW | dangerous, `--yes` |  |
 | `0x52` | — | — | C | RO | never (read-only) |  |
@@ -231,7 +231,7 @@ The core knows the 39 VCP codes observed on the dev monitor "RTK QHD HDR": the 2
 | `0xC6` | — | — | C | RO | never (read-only) |  |
 | `0xC8` | `controller-type` | Display Controller Type | NC | RO | never (read-only) |  |
 | `0xC9` | `firmware-level` | Display Firmware Level | C | RO | never (read-only) |  |
-| `0xCA` | `osd-lock` | OSD/Button Control | NC | RW | dangerous, `--yes` |  |
+| `0xCA` | `osd-lock` | OSD/Button Control | NC | RW | dangerous, `--yes` | `01` OSD disabled, `02` OSD enabled |
 | `0xCC` | `osd-language` | OSD Language | NC | RW | safe | `01` Chinese (traditional), `02` English, `03` French, `04` German, `06` Japanese, `0A` Spanish, `0D` Chinese (simplified) |
 | `0xD6` | `power` | Power Mode | NC | RW | dangerous, `--yes` | `01` On, `04` Off (DPM), `05` Off (write-only) |
 | `0xDF` | `vcp-version` | VCP Version | C | RO | never (read-only) |  |
@@ -240,7 +240,7 @@ The core knows the 39 VCP codes observed on the dev monitor "RTK QHD HDR": the 2
 | `0xFD` | — | — | C | RO | never (read-only) |  |
 | `0xFF` | — | — | C | RO | never (read-only) |  |
 
-Value names match as described in [Features by name](#features-by-name). "Refused" codes are non-continuous with no value list in the capabilities or the catalog: the core never writes them blind, with or without `--yes`.
+Value names match as described in [Features by name](#features-by-name). A non-continuous code takes only the values its capabilities list, else the ones in the last column; "refused" codes are non-continuous with no value list in the capabilities or the catalog, and the core never writes them blind, with or without `--yes`. Continuous codes take any value up to their maximum.
 
 ### Known limitations
 
@@ -249,7 +249,9 @@ Value names match as described in [Features by name](#features-by-name). "Refuse
 - `0xAC` (horizontal frequency) is shown raw; MCCS does not fix its unit the way it does for `0xAE`, which is shown in hundredths of a hertz.
 - `0xFD` and `0xFF` are declared by the RTK, which then answers them as unsupported.
 - `0xE6` and `0xF1` answer but their meaning is unknown: they are dangerous and should never be written.
-- `0x02` (new control value) and `0x1E` (auto setup) have no value list anywhere, so writes to them are refused.
+- `0x02` (new control value) has no value list anywhere, so writes to it are refused.
+- `0xCA` (OSD/button control) covers only the OSD byte of MCCS 2.2 (`01` OSD disabled, `02` OSD enabled); the button byte is out of scope and always written as zero, so `set osd-lock 0x0102` is refused. `set osd-lock osd-disabled --yes` can leave a monitor without a working OSD or buttons until `set osd-lock osd-enabled --yes` runs. The RTK reads `0xCA` as `0x01`, which MCCS and `ddcutil` both name OSD disabled.
+- `0x1E` (auto setup) and `0xCA` have never been written on real hardware by this project: auto setup can move the picture, and OSD control can lock the monitor's own menu.
 - The reset codes are write-only: a reset reports what was sent, never a value read back.
 - On Windows, `dxva2` keeps the monitor's "unsupported VCP code" reply to itself, so `features --probe` shows `not responding` where Linux shows `not supported by this monitor`, and spends three attempts on each such code.
 - Reading `0x7E` on the RTK makes `ddc-i2c` 0.2.2 panic. The backend isolates the panic, so only that read fails (`not responding`, exit 6 for `get`), but Rust still prints the panic message on stderr.

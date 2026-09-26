@@ -110,8 +110,9 @@ const RESET: &[(u8, &str)] = &[(0x01, "Reset")];
 
 /// Every value list of the catalog, whole, by code. The catalog's list is
 /// the one a write is checked against when the capabilities list none, so a
-/// value added here is a value `set` accepts (D-2026-09-26-full-osd-control-1).
-const VALUE_LISTS: [(u8, &[(u8, &str)]); 8] = [
+/// value added here is a value `set` accepts (D-2026-09-26-full-osd-control-1,
+/// -10).
+const VALUE_LISTS: [(u8, &[(u8, &str)]); 10] = [
     (0x04, RESET),
     (0x05, RESET),
     (0x06, RESET),
@@ -128,6 +129,7 @@ const VALUE_LISTS: [(u8, &[(u8, &str)]); 8] = [
             (0x0B, "User 1"),
         ],
     ),
+    (0x1E, &[(0x00, "Off"), (0x01, "Run"), (0x02, "Continuous")]),
     (
         0x60,
         &[
@@ -140,6 +142,7 @@ const VALUE_LISTS: [(u8, &[(u8, &str)]); 8] = [
             (0x12, "HDMI-2"),
         ],
     ),
+    (0xCA, &[(0x01, "OSD disabled"), (0x02, "OSD enabled")]),
     (
         0xCC,
         &[

@@ -11,7 +11,8 @@ use crate::support::{
 
 /// 0x02 — new control value: non-continuous, no value list anywhere.
 const NEW_CONTROL_VALUE: VcpCode = VcpCode(0x02);
-/// 0x1E — auto setup: non-continuous, dangerous, no value list anywhere.
+/// 0x1E — auto setup: non-continuous and dangerous; only the catalog lists
+/// its values, the dev monitor's capabilities leave it out.
 const AUTO_SETUP: VcpCode = VcpCode(0x1E);
 /// 0xAC — horizontal frequency: read-only, declared by the dev monitor.
 const HORIZONTAL_FREQUENCY: VcpCode = VcpCode(0xAC);
@@ -355,8 +356,9 @@ fn write_after_read_uses_cached_max_without_capabilities() {
 /// A non-continuous code without a list from the capabilities is never
 /// bounded by a maximum read from the monitor: the catalog's value names
 /// are the list, and without them the write is refused
-/// (D-2026-09-26-full-osd-control-1, -8). No case reads anything before
-/// it writes or fails.
+/// (D-2026-09-26-full-osd-control-1, -8, -10). 0xCA is the dev monitor's
+/// case of a code declared with no list. No case reads anything before it
+/// writes or fails.
 #[test]
 fn set_feature_never_reads_a_max_for_a_non_continuous_code_without_a_known_list_and_validates_against_the_catalog_or_refuses_it()
  {
@@ -367,7 +369,12 @@ fn set_feature_never_reads_a_max_for_a_non_continuous_code_without_a_known_list_
             .with_value(NEW_CONTROL_VALUE, 1, 2)
             .with_value(AUTO_SETUP, 0, 1)
     };
-    let declared = rtk_monitor().with_value(NEW_CONTROL_VALUE, 1, 2);
+    let declared = || {
+        rtk_monitor()
+            .with_value(NEW_CONTROL_VALUE, 1, 2)
+            .with_value(VcpCode::OSD_LOCK, 1, 2)
+    };
+    let osd = VcpCode::OSD_LOCK;
     let preset = VcpCode::COLOR_PRESET;
     let reset = VcpCode::RESTORE_FACTORY_DEFAULTS;
     let not_allowed = |code, value| Err(DdcError::ValueNotAllowed { code, value });
@@ -429,9 +436,39 @@ fn set_feature_never_reads_a_max_for_a_non_continuous_code_without_a_known_list_
         (
             unreadable(),
             AUTO_SETUP,
-            1,
+            0x01,
             Confirm::Yes,
-            unsupported(AUTO_SETUP),
+            Ok(VcpValue {
+                current: 0x01,
+                max: 0x01,
+            }),
+            written_and_read_back(AUTO_SETUP, 0x01),
+        ),
+        (
+            unreadable(),
+            AUTO_SETUP,
+            0x03,
+            Confirm::Yes,
+            not_allowed(AUTO_SETUP, 0x03),
+            caps_only(),
+        ),
+        (
+            declared(),
+            osd,
+            0x02,
+            Confirm::Yes,
+            Ok(VcpValue {
+                current: 0x02,
+                max: 0x02,
+            }),
+            written_and_read_back(osd, 0x02),
+        ),
+        (
+            declared(),
+            osd,
+            0x00,
+            Confirm::Yes,
+            not_allowed(osd, 0x00),
             caps_only(),
         ),
         (
@@ -443,7 +480,7 @@ fn set_feature_never_reads_a_max_for_a_non_continuous_code_without_a_known_list_
             caps_only(),
         ),
         (
-            declared,
+            declared(),
             NEW_CONTROL_VALUE,
             1,
             Confirm::No,

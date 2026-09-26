@@ -29,8 +29,8 @@ pub const SIMULATED_PANIC_MESSAGE: &str =
     "ddc-hi panicked: index out of bounds: the len is 11 but the index is 11";
 
 /// The fake monitor, answering the six original feature names, the OSD
-/// language and the four factory resets — the fake only takes a write to a
-/// code that has a value.
+/// language, auto setup, OSD control and the four factory resets — the fake
+/// only takes a write to a code that has a value.
 #[doc(hidden)]
 pub fn fixture_monitor() -> FakeMonitor {
     FakeMonitor::new(MonitorInfo {
@@ -47,6 +47,8 @@ pub fn fixture_monitor() -> FakeMonitor {
     .with_value(VcpCode::INPUT_SOURCE, 0x0F, 0x11)
     .with_value(VcpCode::POWER_MODE, 0x01, 0x05)
     .with_value(VcpCode::OSD_LANGUAGE, 0x03, 0x0D)
+    .with_value(VcpCode(0x1E), 0x00, 0x02)
+    .with_value(VcpCode::OSD_LOCK, 0x02, 0x02)
     .with_value(VcpCode::RESTORE_FACTORY_DEFAULTS, 0x00, 0x01)
     .with_value(VcpCode::RESTORE_FACTORY_LUMINANCE_CONTRAST, 0x00, 0x01)
     .with_value(VcpCode::RESTORE_FACTORY_GEOMETRY, 0x00, 0x01)
