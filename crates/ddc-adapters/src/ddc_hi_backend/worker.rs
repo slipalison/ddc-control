@@ -7,6 +7,11 @@
 //! [`DdcError::Timeout`] even if the worker is still busy. A job whose
 //! caller already gave up never reaches the hardware, so a write reported
 //! as timed out is never applied later.
+//!
+//! Every step runs under the budget of its own kind
+//! (D-2026-09-26-ddc-backends-1): the worker never enumerates inside a
+//! transaction's budget. An unknown id is reported back at once, and the
+//! client enumerates under the enumeration budget before asking again.
 
 use std::fmt;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -54,12 +59,40 @@ impl HandleError {
     }
 }
 
+/// Why the worker ended a transaction without a value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TransactError {
+    /// The id is not in the display table. Never reaches a caller: the
+    /// client enumerates and asks once more.
+    UnknownMonitor,
+    /// The caller's answer.
+    Failed(DdcError),
+}
+
+impl TransactError {
+    /// The caller's error once the id has been looked up afresh.
+    fn for_caller(self, id: &MonitorId) -> DdcError {
+        match self {
+            Self::UnknownMonitor => DdcError::MonitorNotFound(id.clone()),
+            Self::Failed(error) => error,
+        }
+    }
+}
+
+impl From<DdcError> for TransactError {
+    fn from(error: DdcError) -> Self {
+        Self::Failed(error)
+    }
+}
+
 type Job<S> = Box<dyn FnOnce(&mut Worker<S, SystemClock>) + Send>;
 
 /// Owner of the displays; runs one job at a time on its own thread.
 pub(crate) struct Worker<S: DisplaySource, C> {
     source: S,
     displays: Vec<(MonitorId, S::Handle)>,
+    /// How long the last enumeration took; `None` before the first one.
+    enumeration_cost: Option<Duration>,
     policy: RetryPolicy,
     clock: C,
 }
@@ -78,6 +111,7 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         Self {
             source,
             displays: Vec::new(),
+            enumeration_cost: None,
             policy,
             clock,
         }
@@ -85,20 +119,23 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
 
     /// Runs `op` unless its caller's `deadline` has passed: a job nobody
     /// waits for anymore touches no hardware.
-    fn serve<T>(
+    fn serve<T, E: From<DdcError>>(
         &mut self,
         deadline: Instant,
-        op: impl FnOnce(&mut Self, Instant) -> Result<T, DdcError>,
-    ) -> Result<T, DdcError> {
+        op: impl FnOnce(&mut Self, Instant) -> Result<T, E>,
+    ) -> Result<T, E> {
         if self.clock.now() >= deadline {
-            return Err(DdcError::Timeout);
+            return Err(DdcError::Timeout.into());
         }
         op(self, deadline)
     }
 
-    /// Replaces the whole display table with a fresh enumeration.
+    /// Replaces the whole display table with a fresh enumeration, and
+    /// remembers how long it took.
     fn enumerate(&mut self) -> Vec<MonitorInfo> {
+        let started = self.clock.now();
         let (identities, handles): (Vec<_>, Vec<_>) = self.source.enumerate().into_iter().unzip();
+        self.enumeration_cost = Some(self.clock.now().saturating_duration_since(started));
         let infos = monitor_infos(&identities);
         self.displays = infos
             .iter()
@@ -108,7 +145,11 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         infos
     }
 
-    fn read_capabilities(&mut self, id: &MonitorId, deadline: Instant) -> Result<String, DdcError> {
+    fn read_capabilities(
+        &mut self,
+        id: &MonitorId,
+        deadline: Instant,
+    ) -> Result<String, TransactError> {
         self.transact(id, deadline, DdcHandle::read_capabilities)
             .map(|raw| capabilities_text(&raw))
     }
@@ -118,7 +159,7 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         id: &MonitorId,
         code: VcpCode,
         deadline: Instant,
-    ) -> Result<VcpValue, DdcError> {
+    ) -> Result<VcpValue, TransactError> {
         self.transact(id, deadline, |handle| handle.read_vcp(code))
     }
 
@@ -128,36 +169,37 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         code: VcpCode,
         value: u16,
         deadline: Instant,
-    ) -> Result<(), DdcError> {
+    ) -> Result<(), TransactError> {
         self.transact(id, deadline, |handle| handle.write_vcp(code, value))
     }
 
     /// Runs `op` on the handle of `id` under the retry policy. An unknown id
-    /// is looked up with one fresh enumeration first.
+    /// is reported at once, without enumerating inside this `deadline`.
     fn transact<T>(
         &mut self,
         id: &MonitorId,
         deadline: Instant,
         mut op: impl FnMut(&mut S::Handle) -> Result<T, HandleError>,
-    ) -> Result<T, DdcError> {
-        if !self.knows(id) {
-            self.enumerate();
-        }
-        let handle = handle_of(&mut self.displays, id)?;
+    ) -> Result<T, TransactError> {
+        let handle = handle_of(&mut self.displays, id).ok_or(TransactError::UnknownMonitor)?;
         let outcome = self.policy.run(&self.clock, deadline, || op(handle));
-        outcome.map_err(|failure| self.explain(id, failure))
+        outcome.map_err(|failure| TransactError::Failed(self.explain(id, failure, deadline)))
     }
 
-    /// The caller's error for a give-up. After failed attempts the monitor
-    /// is looked up again: an unplugged one is reported missing, not as a
-    /// transport failure the core would remember against its id.
-    fn explain(&mut self, id: &MonitorId, failure: Failure) -> DdcError {
+    /// The caller's error for a give-up. When one more enumeration fits
+    /// before `deadline`, the monitor is looked up again: an unplugged one
+    /// is reported missing, not as a transport failure the core would
+    /// remember against its id. Otherwise the transport failure is reported
+    /// at once, so a mute display frees the queue fast.
+    fn explain(&mut self, id: &MonitorId, failure: Failure, deadline: Instant) -> DdcError {
         let Failure::Exhausted { attempts, last } = failure else {
             return DdcError::Timeout;
         };
-        self.enumerate();
-        if !self.knows(id) {
-            return DdcError::MonitorNotFound(id.clone());
+        if self.enumeration_fits(deadline) {
+            self.enumerate();
+            if !self.knows(id) {
+                return DdcError::MonitorNotFound(id.clone());
+            }
         }
         let HandleError(message) = last;
         let max = self.policy.max_attempts;
@@ -166,20 +208,24 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         ))
     }
 
+    /// Whether an enumeration as long as the last one would end before
+    /// `deadline`. Never true before the first enumeration.
+    fn enumeration_fits(&self, deadline: Instant) -> bool {
+        self.enumeration_cost
+            .and_then(|cost| self.clock.now().checked_add(cost))
+            .is_some_and(|end| end < deadline)
+    }
+
     fn knows(&self, id: &MonitorId) -> bool {
         self.displays.iter().any(|(known, _)| known == id)
     }
 }
 
-fn handle_of<'a, H>(
-    displays: &'a mut [(MonitorId, H)],
-    id: &MonitorId,
-) -> Result<&'a mut H, DdcError> {
+fn handle_of<'a, H>(displays: &'a mut [(MonitorId, H)], id: &MonitorId) -> Option<&'a mut H> {
     displays
         .iter_mut()
         .find(|(known, _)| known == id)
         .map(|(_, handle)| handle)
-        .ok_or_else(|| DdcError::MonitorNotFound(id.clone()))
 }
 
 /// [`MonitorBackend`] that forwards every call to a [`Worker`] thread.
@@ -216,11 +262,11 @@ impl<S: DisplaySource> WorkerClient<S> {
 
     /// Queues `op` and waits at most `budget` for its answer; the worker
     /// gets the matching deadline.
-    fn call<T: Send + 'static>(
+    fn call<T: Send + 'static, E: From<DdcError> + Send + 'static>(
         &self,
         budget: Duration,
-        op: impl FnOnce(&mut Worker<S, SystemClock>, Instant) -> Result<T, DdcError> + Send + 'static,
-    ) -> Result<T, DdcError> {
+        op: impl FnOnce(&mut Worker<S, SystemClock>, Instant) -> Result<T, E> + Send + 'static,
+    ) -> Result<T, E> {
         let deadline = Instant::now() + budget;
         let (reply, answer) = mpsc::channel();
         let job: Job<S> = Box::new(move |worker| {
@@ -233,6 +279,31 @@ impl<S: DisplaySource> WorkerClient<S> {
             RecvTimeoutError::Timeout => DdcError::Timeout,
             RecvTimeoutError::Disconnected => worker_gone(),
         })?
+    }
+
+    /// Runs `op` on monitor `id` within `budget`. An id the worker does not
+    /// know costs one enumeration under the enumeration budget, then one
+    /// more try under `budget`; still unknown, the monitor is missing.
+    fn transact<T: Send + 'static>(
+        &self,
+        id: &MonitorId,
+        budget: Duration,
+        op: impl FnOnce(&mut Worker<S, SystemClock>, &MonitorId, Instant) -> Result<T, TransactError>
+        + Copy
+        + Send
+        + 'static,
+    ) -> Result<T, DdcError> {
+        let ask = || {
+            let id = id.clone();
+            self.call(budget, move |worker, deadline| op(worker, &id, deadline))
+        };
+        match ask() {
+            Err(TransactError::UnknownMonitor) => {
+                self.enumerate()?;
+            }
+            answer => return answer.map_err(|error| error.for_caller(id)),
+        }
+        ask().map_err(|error| error.for_caller(id))
     }
 }
 
@@ -250,23 +321,18 @@ impl<S: DisplaySource> MonitorBackend for WorkerClient<S> {
     }
 
     fn read_capabilities(&self, id: &MonitorId) -> Result<String, DdcError> {
-        let id = id.clone();
-        self.call(self.budgets.capabilities, move |worker, deadline| {
-            worker.read_capabilities(&id, deadline)
-        })
+        self.transact(id, self.budgets.capabilities, Worker::read_capabilities)
     }
 
     fn read_vcp(&self, id: &MonitorId, code: VcpCode) -> Result<VcpValue, DdcError> {
-        let id = id.clone();
-        self.call(self.budgets.vcp, move |worker, deadline| {
-            worker.read_vcp(&id, code, deadline)
+        self.transact(id, self.budgets.vcp, move |worker, id, deadline| {
+            worker.read_vcp(id, code, deadline)
         })
     }
 
     fn write_vcp(&self, id: &MonitorId, code: VcpCode, value: u16) -> Result<(), DdcError> {
-        let id = id.clone();
-        self.call(self.budgets.vcp, move |worker, deadline| {
-            worker.write_vcp(&id, code, value, deadline)
+        self.transact(id, self.budgets.vcp, move |worker, id, deadline| {
+            worker.write_vcp(id, code, value, deadline)
         })
     }
 }
