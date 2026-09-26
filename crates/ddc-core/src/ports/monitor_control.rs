@@ -19,11 +19,19 @@ pub trait MonitorControl {
     /// Writes a feature and returns the value read back right after.
     ///
     /// A dangerous feature needs explicit user [`Confirm`]ation, checked
-    /// before the monitor is touched at all. The value is then validated
-    /// against the feature's allowed values or its maximum; a maximum not
+    /// before the monitor is touched at all. A read-only or `Table` feature
+    /// is then refused as unsupported, still before anything is read. The
+    /// value is validated against the feature's value list — the one its
+    /// capabilities declare, else the catalog's value names — or, for a
+    /// continuous feature without one, against its maximum; a maximum not
     /// known yet is read from the monitor first, and if that read fails the
-    /// write is refused with its error. Compare the returned value with
-    /// `value` to catch monitors that acknowledge a write without applying it.
+    /// write is refused with its error. A non-continuous feature with no
+    /// list anywhere is refused as unsupported, never written blind.
+    ///
+    /// Compare the returned value with `value` to catch monitors that
+    /// acknowledge a write without applying it. A write-only feature (the
+    /// factory resets) is never read: nothing is read back, and the value
+    /// returned is the one written, as both current and maximum.
     fn set_feature(
         &self,
         id: &MonitorId,

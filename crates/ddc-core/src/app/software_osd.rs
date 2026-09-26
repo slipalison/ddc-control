@@ -18,8 +18,9 @@ type CapabilitiesOutcome = Result<Capabilities, DdcError>;
 /// maximum read for each feature, so writes can be validated without extra
 /// round-trips. Capabilities that cannot be read or parsed never block a
 /// read: the monitor is then treated as declaring no code, and the failure is
-/// remembered so it is not fetched again on every read. A write whose
-/// maximum is not known yet reads the feature once to learn it.
+/// remembered so it is not fetched again on every read. A write to a
+/// continuous feature whose maximum is not known yet reads the feature once
+/// to learn it; no other write reads anything before it is sent.
 #[derive(Debug)]
 pub struct SoftwareOsd<B> {
     backend: B,
@@ -72,10 +73,12 @@ impl<B: MonitorBackend> SoftwareOsd<B> {
 
     /// The maximum a write to `feature` is validated against: the last one
     /// read, else one read now, whether or not the capabilities declare the
-    /// code (D-2026-09-26-cli-1). A failed read is the write's error. `None`
-    /// when the feature lists its allowed values and needs no maximum.
+    /// code (D-2026-09-26-cli-1). Only a continuous feature without a value
+    /// list needs one; any other feature, and a write-only one, gets `None`
+    /// without touching the monitor (D-2026-09-26-full-osd-control-1, -8). A
+    /// failed read is the write's error.
     fn max_for_write(&self, id: &MonitorId, feature: &Feature) -> Result<Option<u16>, DdcError> {
-        if !feature.requires_known_max() {
+        if !feature.requires_known_max() || !feature.is_readable() {
             return Ok(None);
         }
         if let Some(max) = self.cached_max(id, feature.code) {
@@ -124,9 +127,16 @@ impl<B: MonitorBackend> MonitorControl for SoftwareOsd<B> {
         authorize_write(code, confirm)?;
         let capabilities = self.capabilities_or_empty(id)?;
         let feature = capabilities.feature(code);
+        feature.ensure_writable()?;
         let known_max = self.max_for_write(id, &feature)?;
         feature.validate_write(value, known_max)?;
         self.backend.write_vcp(id, code, value)?;
+        if !feature.is_readable() {
+            return Ok(VcpValue {
+                current: value,
+                max: value,
+            });
+        }
         let read_back = self.backend.read_vcp(id, code)?;
         self.remember_max(id, code, read_back.max);
         Ok(read_back)

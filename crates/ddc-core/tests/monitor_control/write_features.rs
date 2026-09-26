@@ -1,10 +1,45 @@
-use ddc_adapters::BackendCall;
-use ddc_core::domain::{Confirm, DdcError, VcpCode, VcpValue};
+use ddc_adapters::{BackendCall, FakeMonitor};
+use ddc_core::domain::{
+    Access, Capabilities, Confirm, DdcError, Feature, FeatureKind, Risk, VcpCode, VcpValue,
+};
 use ddc_core::ports::MonitorControl;
 
 use crate::support::{
-    osd_with, rtk_id, rtk_monitor, rtk_monitor_without_capabilities, wrote_anything,
+    RED_BLACK_LEVEL, RTK_QHD_HDR_CAPS, osd_with, rtk_id, rtk_monitor,
+    rtk_monitor_without_capabilities, wrote_anything,
 };
+
+/// 0x02 — new control value: non-continuous, no value list anywhere.
+const NEW_CONTROL_VALUE: VcpCode = VcpCode(0x02);
+/// 0x1E — auto setup: non-continuous, dangerous, no value list anywhere.
+const AUTO_SETUP: VcpCode = VcpCode(0x1E);
+/// 0xAC — horizontal frequency: read-only, declared by the dev monitor.
+const HORIZONTAL_FREQUENCY: VcpCode = VcpCode(0xAC);
+
+/// Writes `value` to `code` on a fresh core over `monitor`, and returns the
+/// outcome with every backend call it made.
+fn write_on(
+    monitor: FakeMonitor,
+    code: VcpCode,
+    value: u16,
+    confirm: Confirm,
+) -> (Result<VcpValue, DdcError>, Vec<BackendCall>) {
+    let (osd, backend) = osd_with([monitor]);
+    let result = osd.set_feature(&rtk_id(), code, value, confirm);
+    (result, backend.calls())
+}
+
+fn caps_only() -> Vec<BackendCall> {
+    vec![BackendCall::ReadCapabilities(rtk_id())]
+}
+
+fn written_and_read_back(code: VcpCode, value: u16) -> Vec<BackendCall> {
+    vec![
+        BackendCall::ReadCapabilities(rtk_id()),
+        BackendCall::WriteVcp(rtk_id(), code, value),
+        BackendCall::ReadVcp(rtk_id(), code),
+    ]
+}
 
 #[test]
 fn dangerous_write_without_confirm_is_rejected() {
@@ -91,30 +126,39 @@ fn declared_code_learns_its_max_before_the_first_write() {
     );
 }
 
-/// The dev monitor answers 0x62 volume without declaring it; a fresh core
-/// learns its maximum with one read, then writes (D-2026-09-26-cli-1).
+/// The dev monitor answers 0x62 volume and 0x6C red black level without
+/// declaring them. Both are continuous, so a fresh core learns the maximum
+/// with one read, then writes (D-2026-09-26-cli-1, restricted to continuous
+/// codes by D-2026-09-26-full-osd-control-1).
 #[test]
-fn safe_write_to_an_answered_but_undeclared_code_reads_its_max_first() {
-    let (osd, backend) = osd_with([rtk_monitor()]);
+fn set_feature_learns_the_max_with_one_read_for_a_continuous_code_that_answers_but_is_undeclared_and_a_safe_write_succeeds()
+ {
+    let caps = Capabilities::parse(RTK_QHD_HDR_CAPS).unwrap();
+    for (code, value) in [(VcpCode::AUDIO_VOLUME, 40), (RED_BLACK_LEVEL, 45)] {
+        assert!(!caps.declares(code), "{code}");
+        assert_eq!(caps.feature(code).kind, FeatureKind::Continuous, "{code}");
 
-    let result = osd.set_feature(&rtk_id(), VcpCode::AUDIO_VOLUME, 40, Confirm::No);
+        let (result, calls) = write_on(rtk_monitor(), code, value, Confirm::No);
 
-    assert_eq!(
-        result.unwrap(),
-        VcpValue {
-            current: 40,
-            max: 100
-        }
-    );
-    assert_eq!(
-        backend.calls(),
-        [
-            BackendCall::ReadCapabilities(rtk_id()),
-            BackendCall::ReadVcp(rtk_id(), VcpCode::AUDIO_VOLUME),
-            BackendCall::WriteVcp(rtk_id(), VcpCode::AUDIO_VOLUME, 40),
-            BackendCall::ReadVcp(rtk_id(), VcpCode::AUDIO_VOLUME),
-        ]
-    );
+        assert_eq!(
+            result,
+            Ok(VcpValue {
+                current: value,
+                max: 100
+            }),
+            "{code}"
+        );
+        assert_eq!(
+            calls,
+            [
+                BackendCall::ReadCapabilities(rtk_id()),
+                BackendCall::ReadVcp(rtk_id(), code),
+                BackendCall::WriteVcp(rtk_id(), code, value),
+                BackendCall::ReadVcp(rtk_id(), code),
+            ],
+            "{code}"
+        );
+    }
 }
 
 #[test]
@@ -308,19 +352,176 @@ fn write_after_read_uses_cached_max_without_capabilities() {
     );
 }
 
+/// A non-continuous code without a list from the capabilities is never
+/// bounded by a maximum read from the monitor: the catalog's value names
+/// are the list, and without them the write is refused
+/// (D-2026-09-26-full-osd-control-1, -8). No case reads anything before
+/// it writes or fails.
 #[test]
-fn without_capabilities_a_listed_feature_is_bounded_by_its_max() {
-    let (osd, _) = osd_with([rtk_monitor_without_capabilities()]);
-    osd.get_feature(&rtk_id(), VcpCode::COLOR_PRESET).unwrap();
+fn set_feature_never_reads_a_max_for_a_non_continuous_code_without_a_known_list_and_validates_against_the_catalog_or_refuses_it()
+ {
+    let unreadable = || {
+        rtk_monitor_without_capabilities()
+            .with_value(VcpCode::OSD_LANGUAGE, 0x01, 0x0D)
+            .with_value(VcpCode::RESTORE_FACTORY_DEFAULTS, 0, 1)
+            .with_value(NEW_CONTROL_VALUE, 1, 2)
+            .with_value(AUTO_SETUP, 0, 1)
+    };
+    let declared = rtk_monitor().with_value(NEW_CONTROL_VALUE, 1, 2);
+    let preset = VcpCode::COLOR_PRESET;
+    let reset = VcpCode::RESTORE_FACTORY_DEFAULTS;
+    let not_allowed = |code, value| Err(DdcError::ValueNotAllowed { code, value });
+    let unsupported = |code| Err(DdcError::UnsupportedFeature(code));
 
-    let unlisted_in_caps = osd.set_feature(&rtk_id(), VcpCode::COLOR_PRESET, 0x03, Confirm::No);
-    let above_max = osd.set_feature(&rtk_id(), VcpCode::COLOR_PRESET, 0x0C, Confirm::No);
+    let cases = [
+        (
+            unreadable(),
+            preset,
+            0x03,
+            Confirm::No,
+            not_allowed(preset, 0x03),
+            caps_only(),
+        ),
+        (
+            unreadable(),
+            preset,
+            0x05,
+            Confirm::No,
+            Ok(VcpValue {
+                current: 0x05,
+                max: 0x0B,
+            }),
+            written_and_read_back(preset, 0x05),
+        ),
+        (
+            unreadable(),
+            VcpCode::OSD_LANGUAGE,
+            0x02,
+            Confirm::No,
+            Ok(VcpValue {
+                current: 0x02,
+                max: 0x0D,
+            }),
+            written_and_read_back(VcpCode::OSD_LANGUAGE, 0x02),
+        ),
+        (
+            unreadable(),
+            reset,
+            0x01,
+            Confirm::Yes,
+            Ok(VcpValue {
+                current: 0x01,
+                max: 0x01,
+            }),
+            vec![
+                BackendCall::ReadCapabilities(rtk_id()),
+                BackendCall::WriteVcp(rtk_id(), reset, 0x01),
+            ],
+        ),
+        (
+            unreadable(),
+            reset,
+            0x00,
+            Confirm::Yes,
+            not_allowed(reset, 0x00),
+            caps_only(),
+        ),
+        (
+            unreadable(),
+            AUTO_SETUP,
+            1,
+            Confirm::Yes,
+            unsupported(AUTO_SETUP),
+            caps_only(),
+        ),
+        (
+            unreadable(),
+            NEW_CONTROL_VALUE,
+            1,
+            Confirm::No,
+            unsupported(NEW_CONTROL_VALUE),
+            caps_only(),
+        ),
+        (
+            declared,
+            NEW_CONTROL_VALUE,
+            1,
+            Confirm::No,
+            unsupported(NEW_CONTROL_VALUE),
+            caps_only(),
+        ),
+    ];
+    for (monitor, code, value, confirm, expected, expected_calls) in cases {
+        let (result, calls) = write_on(monitor, code, value, confirm);
 
-    assert_eq!(unlisted_in_caps.unwrap().current, 0x03);
-    assert!(matches!(
-        above_max,
-        Err(DdcError::InvalidValue { max: 0x0B, .. })
-    ));
+        assert_eq!(result, expected, "{code} = {value}");
+        assert_eq!(calls, expected_calls, "{code} = {value}");
+    }
+}
+
+/// Read-only codes, declared or not, are refused before the monitor is read,
+/// with or without confirmation; `Table` features are refused by the same
+/// guard (D-2026-09-26-full-osd-control-1, -5).
+#[test]
+fn set_feature_rejects_a_read_only_or_table_code_before_reading_its_value_from_the_backend() {
+    let caps = Capabilities::parse(RTK_QHD_HDR_CAPS).unwrap();
+    let monitor = || {
+        rtk_monitor()
+            .with_value(HORIZONTAL_FREQUENCY, 3, 0xFFFF)
+            .with_value(VcpCode::VCP_VERSION, 0x0202, 0xFFFF)
+            .with_value(VcpCode::FIRMWARE_LEVEL, 0x0001, 0xFFFF)
+    };
+    let read_only = [
+        (HORIZONTAL_FREQUENCY, true),
+        (VcpCode::VCP_VERSION, true),
+        (VcpCode::FIRMWARE_LEVEL, false),
+    ];
+    for (code, declared) in read_only {
+        assert_eq!(caps.declares(code), declared, "{code}");
+        assert_eq!(caps.feature(code).access, Access::ReadOnly, "{code}");
+        for confirm in [Confirm::No, Confirm::Yes] {
+            let (result, calls) = write_on(monitor(), code, 1, confirm);
+
+            assert_eq!(result, Err(DdcError::UnsupportedFeature(code)), "{code}");
+            assert_eq!(calls, caps_only(), "{code} {confirm:?}");
+        }
+    }
+    let table = Feature {
+        code: VcpCode(0x73),
+        kind: FeatureKind::Table,
+        access: Access::ReadWrite,
+        risk: Risk::Safe,
+        allowed_values: Some(vec![0x01]),
+    };
+    assert_eq!(
+        table.ensure_writable(),
+        Err(DdcError::UnsupportedFeature(VcpCode(0x73)))
+    );
+}
+
+/// A factory reset writes 0x01 — MCCS ignores zero — and is never read
+/// back: the code is write-only (D-2026-09-26-full-osd-control-8).
+#[test]
+fn reset_writes_one_and_skips_read_back() {
+    let reset = VcpCode::RESTORE_FACTORY_DEFAULTS;
+    let monitor = rtk_monitor().with_value(reset, 0, 1);
+
+    let (result, calls) = write_on(monitor, reset, 0x01, Confirm::Yes);
+
+    assert_eq!(result, Ok(VcpValue { current: 1, max: 1 }));
+    assert_eq!(
+        calls,
+        [
+            BackendCall::ReadCapabilities(rtk_id()),
+            BackendCall::WriteVcp(rtk_id(), reset, 0x01),
+        ]
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|call| matches!(call, BackendCall::ReadVcp(..))),
+        "{calls:?}"
+    );
 }
 
 #[test]

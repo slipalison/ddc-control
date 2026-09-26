@@ -22,8 +22,12 @@ pub fn monitor_info(id: MonitorId) -> MonitorInfo {
     }
 }
 
+/// 0x6C — video black level, red: answered by the dev monitor, undeclared.
+pub const RED_BLACK_LEVEL: VcpCode = VcpCode(0x6C);
+
 /// The dev monitor: real capabilities plus values for a few codes, including
-/// 0x62 volume, which answers although the capabilities omit it.
+/// 0x62 volume and 0x6C red black level, which answer although the
+/// capabilities omit them.
 pub fn rtk_monitor() -> FakeMonitor {
     with_rtk_values(FakeMonitor::new(monitor_info(rtk_id())).with_capabilities(RTK_QHD_HDR_CAPS))
 }
@@ -40,6 +44,7 @@ fn with_rtk_values(monitor: FakeMonitor) -> FakeMonitor {
         .with_value(VcpCode::COLOR_PRESET, 0x05, 0x0B)
         .with_value(VcpCode::INPUT_SOURCE, 0x0F, 0x12)
         .with_value(VcpCode::AUDIO_VOLUME, 30, 100)
+        .with_value(RED_BLACK_LEVEL, 50, 100)
         .with_value(VcpCode::POWER_MODE, 0x01, 0x05)
 }
 
