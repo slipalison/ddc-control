@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -7,7 +9,8 @@ use ddc_core::ports::MonitorBackend;
 
 use super::super::DdcHiBudgets;
 use super::super::identity::DisplayIdentity;
-use super::{DdcHandle, DisplaySource, HandleError, WorkerClient};
+use super::super::retry::{Clock, RetryPolicy};
+use super::{DdcHandle, DisplaySource, HandleError, Worker, WorkerClient};
 
 /// Holds a transaction until the test opens it.
 #[derive(Debug, Clone, Default)]
@@ -34,9 +37,15 @@ impl Gate {
 enum Behaviour {
     Answer,
     Fail(&'static str),
+    /// Fails this many more times with [`FLAKY`], then answers.
+    Flaky(u32),
+    /// Fails and is unplugged, like a monitor pulled mid-transaction.
+    Vanish,
     Block(Gate),
     Crash,
 }
+
+const FLAKY: &str = "flaky i2c bus";
 
 #[derive(Debug, Clone)]
 struct FakeDisplay {
@@ -47,6 +56,18 @@ struct FakeDisplay {
 impl FakeDisplay {
     fn new(name: &'static str, behaviour: Behaviour) -> Self {
         Self { name, behaviour }
+    }
+
+    /// How this transaction goes; a flaky display spends one failure.
+    fn take_turn(&mut self) -> Behaviour {
+        match &mut self.behaviour {
+            Behaviour::Flaky(0) => Behaviour::Answer,
+            Behaviour::Flaky(left) => {
+                *left -= 1;
+                Behaviour::Fail(FLAKY)
+            }
+            other => other.clone(),
+        }
     }
 }
 
@@ -123,24 +144,31 @@ impl FakeHandle {
     /// Logs `call`, then answers as the display's behaviour says. A display
     /// unplugged since enumeration fails like a dead bus.
     fn transact<T>(&self, call: Call, answer: T) -> Result<T, HandleError> {
-        let behaviour = {
-            let mut bus = lock(&self.bus);
-            bus.calls.push(call);
-            bus.displays
-                .iter()
-                .find(|display| display.name == self.name)
-                .map(|display| display.behaviour.clone())
-        };
-        match behaviour {
+        match self.turn(call) {
             None => Err(HandleError::new("no such device")),
-            Some(Behaviour::Answer) => Ok(answer),
+            Some(Behaviour::Answer | Behaviour::Flaky(_)) => Ok(answer),
             Some(Behaviour::Fail(message)) => Err(HandleError::new(message)),
+            Some(Behaviour::Vanish) => {
+                lock(&self.bus)
+                    .displays
+                    .retain(|display| display.name != self.name);
+                Err(HandleError::new("no such device"))
+            }
             Some(Behaviour::Block(gate)) => {
                 gate.wait();
                 Ok(answer)
             }
             Some(Behaviour::Crash) => crash(),
         }
+    }
+
+    fn turn(&self, call: Call) -> Option<Behaviour> {
+        let mut bus = lock(&self.bus);
+        bus.calls.push(call);
+        bus.displays
+            .iter_mut()
+            .find(|display| display.name == self.name)
+            .map(FakeDisplay::take_turn)
     }
 }
 
@@ -182,8 +210,62 @@ fn budgets(vcp: Duration) -> DdcHiBudgets {
     }
 }
 
+/// A worker on its own thread, retrying without pauses so no test sleeps.
 fn spawn(source: &FakeDisplays, budgets: DdcHiBudgets) -> WorkerClient<FakeDisplays> {
-    WorkerClient::spawn(source.clone(), budgets).unwrap()
+    let no_backoff = RetryPolicy {
+        backoff: Duration::ZERO,
+        ..RetryPolicy::default()
+    };
+    WorkerClient::spawn(source.clone(), budgets, no_backoff).unwrap()
+}
+
+/// Time that only moves when the worker sleeps.
+#[derive(Debug, Clone)]
+struct VirtualClock(Rc<RefCell<(Instant, Vec<Duration>)>>);
+
+impl VirtualClock {
+    fn new() -> Self {
+        Self(Rc::new(RefCell::new((Instant::now(), Vec::new()))))
+    }
+
+    fn sleeps(&self) -> Vec<Duration> {
+        self.0.borrow().1.clone()
+    }
+}
+
+impl Clock for VirtualClock {
+    fn now(&self) -> Instant {
+        self.0.borrow().0
+    }
+
+    fn sleep(&self, duration: Duration) {
+        let mut time = self.0.borrow_mut();
+        time.0 += duration;
+        time.1.push(duration);
+    }
+}
+
+/// What a single read did on a worker run in the test thread, with the
+/// default retry policy and virtual time.
+#[derive(Debug)]
+struct ReadRun {
+    result: Result<VcpValue, DdcError>,
+    reads: usize,
+    sleeps: Vec<Duration>,
+}
+
+fn read_on_worker(behaviour: Behaviour, budget: Duration) -> ReadRun {
+    let source = FakeDisplays::with([FakeDisplay::new("a", behaviour)]);
+    let clock = VirtualClock::new();
+    let mut worker = Worker::new(source.clone(), RetryPolicy::default(), clock.clone());
+
+    let result = worker.read_vcp(&id("a"), VcpCode::BRIGHTNESS, clock.now() + budget);
+
+    ReadRun {
+        result,
+        reads: source.calls().len(),
+        sleeps: clock.sleeps(),
+    }
 }
 
 fn assert_transport<T: fmt::Debug>(result: &Result<T, DdcError>, containing: &str) {
@@ -303,4 +385,65 @@ fn capabilities_reply_reaches_the_caller_as_text() {
     let caps = client.read_capabilities(&id("a")).unwrap();
 
     assert_eq!(caps, "(prot(monitor)vcp(10 12))");
+}
+
+#[test]
+fn retries_transient_errors_up_to_three_times_within_timeout_budget() {
+    let backoff = Duration::from_millis(50);
+
+    let recovers = read_on_worker(Behaviour::Flaky(2), Duration::from_secs(1));
+    let persists = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_secs(1));
+    let short = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(80));
+
+    assert_eq!(recovers.result, Ok(FAKE_VALUE));
+    assert_eq!(
+        (recovers.reads, recovers.sleeps),
+        (3, vec![backoff, backoff])
+    );
+    assert_transport(&persists.result, "gave up after attempt 3 of 3");
+    assert_eq!(
+        (persists.reads, persists.sleeps),
+        (3, vec![backoff, backoff])
+    );
+    assert_transport(&short.result, FLAKY);
+    assert_eq!((short.reads, short.sleeps), (2, vec![backoff]));
+}
+
+#[test]
+fn expired_write_is_never_sent_to_the_monitor() {
+    let gate = Gate::default();
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Block(gate.clone()))]);
+    let client = spawn(&source, budgets(Duration::from_millis(20)));
+
+    let stuck = client.read_vcp(&id("a"), VcpCode::BRIGHTNESS);
+    let write = client.write_vcp(&id("a"), VcpCode::BRIGHTNESS, 80);
+    gate.open();
+    client.enumerate().unwrap();
+
+    assert_eq!(stuck, Err(DdcError::Timeout));
+    assert_eq!(write, Err(DdcError::Timeout));
+    assert!(
+        !source
+            .calls()
+            .iter()
+            .any(|call| matches!(call, Call::Write(..))),
+        "{:?}",
+        source.calls()
+    );
+}
+
+#[test]
+fn monitor_gone_after_a_failure_is_not_found() {
+    let run = read_on_worker(Behaviour::Vanish, Duration::from_secs(1));
+
+    assert_eq!(run.result, Err(DdcError::MonitorNotFound(id("a"))));
+    assert_eq!(run.reads, 3);
+}
+
+#[test]
+fn deadline_spent_finding_the_monitor_sends_nothing() {
+    let run = read_on_worker(Behaviour::Answer, Duration::ZERO);
+
+    assert_eq!(run.result, Err(DdcError::Timeout));
+    assert_eq!(run.reads, 0);
 }

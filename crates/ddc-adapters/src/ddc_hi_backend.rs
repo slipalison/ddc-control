@@ -1,12 +1,15 @@
 //! [`MonitorBackend`] over real DDC/CI through `ddc-hi`: dxva2 on Windows,
 //! `/dev/i2c-*` on Linux — `ddc-hi` picks the platform backend itself.
 //!
-//! One worker thread owns every display handle (D-6); callers wait on a
-//! per-operation budget (D-7) and get [`DdcError::Timeout`] past it.
-//! Monitors are identified by EDID when available (D-2).
+//! One worker thread owns every display handle (D-6) and retries a failed
+//! transaction up to 3 times, 50 ms apart, within the caller's budget
+//! (D-3); callers wait on a per-operation budget (D-7) and get
+//! [`DdcError::Timeout`] past it. Monitors are identified by EDID when
+//! available (D-2).
 
 mod hardware;
 mod identity;
+mod retry;
 mod worker;
 
 use std::time::Duration;
@@ -15,6 +18,7 @@ use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
 
 use hardware::DdcHiDisplays;
+use retry::RetryPolicy;
 use worker::WorkerClient;
 
 /// Default wait for a Get or Set VCP Feature (D-7).
@@ -51,10 +55,10 @@ impl Default for DdcHiBudgets {
 /// The real [`MonitorBackend`]: DDC/CI through `ddc-hi`, on a single worker
 /// thread that owns every monitor handle.
 ///
-/// A monitor that stays unknown after a fresh enumeration answers
-/// [`DdcError::MonitorNotFound`]; transport failures answer
-/// [`DdcError::Transport`], and a caller whose budget runs out answers
-/// [`DdcError::Timeout`]. Dropping the backend stops the worker once its
+/// A monitor that stays unknown after a fresh enumeration, or that is gone
+/// after a failed transaction, answers [`DdcError::MonitorNotFound`];
+/// failures that outlast the retries answer [`DdcError::Transport`], and a
+/// caller whose budget runs out answers [`DdcError::Timeout`]. Dropping the backend stops the worker once its
 /// current transaction ends; it never waits for it.
 #[derive(Debug)]
 pub struct DdcHiMonitorBackend {
@@ -65,7 +69,12 @@ impl DdcHiMonitorBackend {
     /// Starts the worker thread with the default [`DdcHiBudgets`]. No
     /// monitor is touched until the first call.
     pub fn new() -> Result<Self, DdcError> {
-        WorkerClient::spawn(DdcHiDisplays, DdcHiBudgets::default()).map(|client| Self { client })
+        WorkerClient::spawn(
+            DdcHiDisplays,
+            DdcHiBudgets::default(),
+            RetryPolicy::default(),
+        )
+        .map(|client| Self { client })
     }
 
     /// Replaces the per-operation budgets.
