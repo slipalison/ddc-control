@@ -171,8 +171,10 @@ name = "ddc-adapters"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ddc",
  "ddc-core",
  "ddc-hi",
+ "ddc-i2c",
 ]
 
 [[package]]

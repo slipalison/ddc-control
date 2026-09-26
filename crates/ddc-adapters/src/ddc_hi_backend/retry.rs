@@ -42,8 +42,9 @@ impl Clock for SystemClock {
 /// How many times, and how patiently, a failed transaction is retried.
 ///
 /// `ddc-hi` does not tell a NAK from any other failure, so every failure
-/// counts as transient. Retrying a write is safe: Set VCP Feature carries an
-/// absolute value.
+/// counts as transient, except the monitor's answer that it does not support
+/// the VCP code, which is never retried (D-2026-09-26-cli-4). Retrying a
+/// write is safe: Set VCP Feature carries an absolute value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RetryPolicy {
     /// Attempts per transaction, the first one included.
@@ -96,9 +97,9 @@ impl RetryPolicies {
 }
 
 impl RetryPolicy {
-    /// Runs `op` until it succeeds, the attempts run out, or the next
-    /// backoff would end at or past `deadline`. Nothing is attempted once
-    /// `deadline` has passed.
+    /// Runs `op` until it succeeds, the monitor refuses it as unsupported,
+    /// the attempts run out, or the next backoff would end at or past
+    /// `deadline`. Nothing is attempted once `deadline` has passed.
     pub(crate) fn run<T>(
         &self,
         clock: &impl Clock,
@@ -114,6 +115,9 @@ impl RetryPolicy {
                 Ok(value) => return Ok(value),
                 Err(error) => error,
             };
+            if last.is_unsupported() {
+                return Err(Failure::Unsupported(last));
+            }
             if attempts >= self.max_attempts || clock.now() + self.backoff >= deadline {
                 return Err(Failure::Exhausted {
                     attempts,
@@ -132,6 +136,9 @@ impl RetryPolicy {
 pub(crate) enum Failure {
     /// The deadline had passed before the first attempt; nothing was sent.
     Expired,
+    /// The monitor refused the request as unsupported. Asking again gets
+    /// the same answer, so no other attempt was made.
+    Unsupported(HandleError),
     /// Attempt number `attempts` failed with `last`, and no other was made.
     Exhausted {
         /// Attempts made.
