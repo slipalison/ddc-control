@@ -1,4 +1,4 @@
-use super::{VcpCode, VcpValue};
+use super::{DdcError, VcpCode, VcpValue};
 
 /// How a feature's value is interpreted (MCCS feature type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +57,38 @@ pub struct Feature {
     pub allowed_values: Option<Vec<u8>>,
 }
 
+impl Feature {
+    /// Whether validating a write needs the feature's maximum: true unless the
+    /// feature lists its allowed values, since scalers often misreport the
+    /// maximum of non-continuous features.
+    pub fn requires_known_max(&self) -> bool {
+        self.allowed_values.is_none()
+    }
+
+    /// Checks `value` before it is written. A listed feature accepts only its
+    /// listed values; any other feature needs a `known_max` — without one the
+    /// write is refused rather than sent blind.
+    pub fn validate_write(&self, value: u16, known_max: Option<u16>) -> Result<(), DdcError> {
+        let code = self.code;
+        if self.access == Access::ReadOnly {
+            return Err(DdcError::UnsupportedFeature(code));
+        }
+        if let Some(allowed) = &self.allowed_values {
+            let listed = u8::try_from(value).is_ok_and(|byte| allowed.contains(&byte));
+            return if listed {
+                Ok(())
+            } else {
+                Err(DdcError::ValueNotAllowed { code, value })
+            };
+        }
+        let max = known_max.ok_or(DdcError::UnsupportedFeature(code))?;
+        if value > max {
+            return Err(DdcError::InvalidValue { code, value, max });
+        }
+        Ok(())
+    }
+}
+
 /// The result of reading a feature from a monitor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeatureReading {
@@ -88,6 +120,15 @@ pub fn risk_for_code(code: VcpCode) -> Risk {
         | VcpCode::SHARPNESS
         | VcpCode::OSD_LANGUAGE => Risk::Safe,
         _ => Risk::Dangerous,
+    }
+}
+
+/// Refuses a write to a dangerous code that the user did not confirm. Needs
+/// only the code, so it runs before anything is read from the monitor.
+pub fn authorize_write(code: VcpCode, confirm: Confirm) -> Result<(), DdcError> {
+    match (risk_for_code(code), confirm) {
+        (Risk::Dangerous, Confirm::No) => Err(DdcError::DangerousWriteNotConfirmed(code)),
+        _ => Ok(()),
     }
 }
 

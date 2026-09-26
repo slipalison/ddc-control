@@ -1,4 +1,4 @@
-use ddc_adapters::{FakeMonitor, InMemoryMonitorBackend};
+use ddc_adapters::{BackendCall, FakeMonitor, InMemoryMonitorBackend};
 use ddc_core::app::SoftwareOsd;
 use ddc_core::domain::{MonitorId, MonitorInfo, VcpCode};
 
@@ -41,4 +41,12 @@ pub fn osd_with(monitors: impl IntoIterator<Item = FakeMonitor>) -> (Osd, InMemo
         })
         .build();
     (SoftwareOsd::new(backend.clone()), backend)
+}
+
+/// Whether any `write_vcp` reached the backend.
+pub fn wrote_anything(backend: &InMemoryMonitorBackend) -> bool {
+    backend
+        .calls()
+        .iter()
+        .any(|call| matches!(call, BackendCall::WriteVcp(..)))
 }
