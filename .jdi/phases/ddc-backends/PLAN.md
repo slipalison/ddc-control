@@ -53,7 +53,7 @@ Scope `ddc-backends`, D-XX citada no corpo, nunca junto com `.jdi/`.
   - Lock gerado uma vez sem `--locked`, no mesmo commit (`chore`). Verify #1 do DoD = OK; check Windows verde. `cargo audit` rodado e anotado no SUMMARY (WARN, não bloqueia — CONTEXT).
 - **Dependencies:** none
 - **Test:** verify #1 do DoD + gates acima
-- **Status:** pending
+- **Status:** completed
 
 #### T-2: Fake com falha transitória de caps + recuperação no core (W-4)
 - **Specialist:** jdi-doer-ddc-control
@@ -63,7 +63,7 @@ Scope `ddc-backends`, D-XX citada no corpo, nunca junto com `.jdi/`.
   - `explicit_capabilities_request_recovers_from_transient_failure`: caps RTK + 1 falha. `get_feature(0x10)` dá `declared_in_capabilities == false`; `capabilities()` dá `Ok` (model `RTK`); o `get_feature(0x10)` seguinte dá `declared_in_capabilities == true`. Log exato `[ReadCapabilities, ReadVcp, ReadCapabilities, ReadVcp]`: o cache foi substituído, sem refetch.
 - **Dependencies:** none
 - **Test:** `cargo test -p ddc-adapters --locked in_memory && cargo test -p ddc-core --locked --test monitor_control`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2
 
@@ -88,7 +88,7 @@ Scope `ddc-backends`, D-XX citada no corpo, nunca junto com `.jdi/`.
   - Casca que não dá para testar sem monitor: `DdcHiDisplays::enumerate`, os 3 métodos de `impl DdcHandle for ddc_hi::Handle` (1 linha cada: delegam e traduzem) e `new`/`with_timeout`/delegações do newtype. Soma ≤ 40 linhas. Nenhum teste fora de `#[ignore]` envia request ao backend real; só construir é permitido (A-4). Nenhum `unsafe`; greps 5.3/5.4/5.6 sem saída; funções ≤ 30 linhas.
 - **Dependencies:** T-1
 - **Test:** `cargo test -p ddc-adapters --locked` + verifies #2–#6, #8, #9 do DoD
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3
 
@@ -107,7 +107,7 @@ Scope `ddc-backends`, D-XX citada no corpo, nunca junto com `.jdi/`.
   - Testes do DoD de T-3 intactos. Testes com worker spawnado injetam clock fake ou política sem backoff: nada dorme de verdade mais que poucos ms, fora o teste de timeout. Cobertura ≥ 80% (esperado ≥ 90%).
 - **Dependencies:** T-3
 - **Test:** verify #7 do DoD + `cargo test -p ddc-adapters --locked` + cobertura (abaixo)
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 
@@ -125,7 +125,7 @@ Scope `ddc-backends`, D-XX citada no corpo, nunca junto com `.jdi/`.
   - A rodada real é do orquestrador: `DDC_HW_TESTS=1 cargo test -p ddc-adapters --locked --test real_monitor -- --ignored --test-threads=1 --nocapture`. O doer pode rodar (só lê), mas não é gate do commit.
 - **Dependencies:** T-4
 - **Test:** `cargo test -p ddc-adapters --locked --test real_monitor -- --ignored` sem a env (passa sem executar nada)
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5
 
@@ -149,7 +149,7 @@ Scope `ddc-backends`, D-XX citada no corpo, nunca junto com `.jdi/`.
   - `CHANGELOG.md` `[Unreleased]` com o que a phase adicionou. Commit `docs`.
 - **Dependencies:** T-2, T-5
 - **Test:** verify #10 do DoD
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - Total tasks: 6 | Waves: 5 (só a W1 é paralelizável) | Speedup estimado: 1.2x
