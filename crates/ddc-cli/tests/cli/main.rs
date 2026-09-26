@@ -4,6 +4,7 @@
 
 mod exit_codes;
 mod reads;
+mod reset;
 mod selection;
 mod support;
 mod writes;

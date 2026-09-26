@@ -107,3 +107,83 @@ fn a_write_the_monitor_ignores_is_reported_but_still_succeeds() {
         ignored.err
     );
 }
+
+/// The value `code` got written with, per write in the log.
+fn writes(calls: &[BackendCall]) -> Vec<(VcpCode, u16)> {
+    calls
+        .iter()
+        .filter_map(|call| match call {
+            BackendCall::WriteVcp(_, code, value) => Some((*code, *value)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A value name is turned into its byte by the catalog; whether this
+/// monitor takes it is the core's check against the declared list, else the
+/// catalog's (exit 4). A name that is no value of the feature is a usage
+/// error found before any monitor is touched (exit 2)
+/// (D-2026-09-26-full-osd-control-3).
+#[test]
+fn set_command_resolves_a_catalog_value_name_to_its_byte_when_declared_and_rejects_it_with_exit_four_when_not()
+ {
+    for (name, byte) in [("srgb", 0x01), ("SRGB", 0x01), ("display-native", 0x02)] {
+        let set = run_with(&fixture_backend(), &["set", "preset", name]);
+        assert_eq!(set.exit, Exit::Success, "{name}: {}", set.err);
+        assert_eq!(
+            writes(&set.calls),
+            [(VcpCode::COLOR_PRESET, byte)],
+            "{name}"
+        );
+    }
+
+    let language = run_with(&fixture_backend(), &["set", "osd-language", "english"]);
+    assert_eq!(language.exit, Exit::Success, "{}", language.err);
+    assert_eq!(writes(&language.calls), [(VcpCode::OSD_LANGUAGE, 0x02)]);
+    assert_eq!(
+        language.out,
+        "0xCC osd-language: 2 (0x02) English, max 13 (0x0D)\n"
+    );
+
+    let refused = run_with(&fixture_backend(), &["set", "preset", "6500k"]);
+    assert_eq!(refused.exit, Exit::Invalid);
+    assert!(writes(&refused.calls).is_empty(), "{:?}", refused.calls);
+    assert!(
+        refused.err.contains("not an allowed value"),
+        "{}",
+        refused.err
+    );
+
+    for args in [["set", "brightness", "srgb"], ["set", "preset", "nonsense"]] {
+        let backend = fixture_backend();
+        let misused = run_with(&backend, &args);
+        assert_eq!(misused.exit, Exit::Usage, "{args:?}");
+        assert!(
+            backend.calls().is_empty(),
+            "{args:?}: {:?}",
+            backend.calls()
+        );
+        assert!(misused.out.is_empty(), "{args:?}");
+    }
+
+    fake_cli()
+        .args(["set", "preset", "srgb"])
+        .assert()
+        .code(0)
+        .stdout("0x14 preset: 1 (0x01) sRGB, max 3 (0x03)\n")
+        .stderr("");
+    fake_cli()
+        .args(["set", "preset", "6500k"])
+        .assert()
+        .code(4)
+        .stdout("")
+        .stderr(predicate::str::contains("not an allowed value"));
+    fake_cli()
+        .args(["set", "brightness", "srgb"])
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains(
+            "0x10 brightness has no value named 'srgb'",
+        ));
+}

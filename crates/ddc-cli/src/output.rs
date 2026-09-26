@@ -8,10 +8,13 @@
 use std::fmt::Display;
 use std::io::Write;
 
-use ddc_core::domain::{Capabilities, FeatureReading, MonitorId, MonitorInfo, VcpCode, VcpValue};
+use ddc_core::domain::mccs_catalog::{Interpretation, catalog_entry, interpret};
+use ddc_core::domain::{
+    Access, Capabilities, FeatureReading, MonitorId, MonitorInfo, VcpCode, VcpValue,
+};
 use serde::Serialize;
 
-use crate::args::shortcut_name;
+use crate::args::{alias_of, code_label};
 
 /// How results are printed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,8 +89,13 @@ impl<'w> Printer<'w> {
     }
 
     /// Prints the value read back after writing `requested` to `code`,
-    /// warning when the monitor did not apply it.
+    /// warning when the monitor did not apply it. A write-only feature is
+    /// never read back, so only what was sent is printed.
     pub fn set(&mut self, monitor: &MonitorId, code: VcpCode, requested: u16, read_back: VcpValue) {
+        if is_write_only(code) {
+            self.sent(monitor, code, requested);
+            return;
+        }
         if read_back.current != requested {
             self.warn(format_args!(
                 "the monitor accepted {} = {} but reads back {}; it may have ignored the write",
@@ -101,6 +109,19 @@ impl<'w> Printer<'w> {
             Format::Json => {
                 self.emit_json(&WriteDto::new(monitor, code, requested, read_back));
             }
+        }
+    }
+
+    /// Prints a write that was sent and, by design, not read back: the
+    /// feature is write-only (D-2026-09-26-full-osd-control-8).
+    pub fn sent(&mut self, monitor: &MonitorId, code: VcpCode, value: u16) {
+        match self.format {
+            Format::Text => self.emit_lines([format!(
+                "{}: sent {} (write-only, not read back)",
+                code_label(code),
+                value_text(code, value)
+            )]),
+            Format::Json => self.emit_json(&SentDto::new(monitor, code, value)),
         }
     }
 
@@ -140,25 +161,40 @@ pub fn monitor_line(index: usize, monitor: &MonitorInfo) -> String {
     }
 }
 
-/// `0xNN` followed by the shortcut name, when the code has one.
-fn code_label(code: VcpCode) -> String {
-    match shortcut_name(code) {
-        Some(name) => format!("{code} {name}"),
-        None => code.to_string(),
-    }
-}
-
 /// A value in decimal with its hex form, since some features are read as
 /// quantities and others as codes.
 fn number(value: u16) -> String {
     format!("{value} (0x{value:02X})")
 }
 
+/// [`number`], followed by what the catalog says `raw` means for `code`:
+/// `1 (0x01) sRGB`, `14400 (0x3840) 144.00 Hz`.
+fn value_text(code: VcpCode, raw: u16) -> String {
+    match interpret(code, raw) {
+        Some(meaning) => format!("{} {meaning}", number(raw)),
+        None => number(raw),
+    }
+}
+
+/// What the catalog says `raw` means for `code`, split as the JSON shows
+/// it: a value name, or any other interpretation as text.
+fn meaning(code: VcpCode, raw: u16) -> (Option<&'static str>, Option<String>) {
+    match interpret(code, raw) {
+        Some(Interpretation::Named(name)) => (Some(name), None),
+        Some(other) => (None, Some(other.to_string())),
+        None => (None, None),
+    }
+}
+
+fn is_write_only(code: VcpCode) -> bool {
+    catalog_entry(code).is_some_and(|entry| entry.access == Access::WriteOnly)
+}
+
 fn feature_line(code: VcpCode, value: VcpValue) -> String {
     format!(
         "{}: {}, max {}",
         code_label(code),
-        number(value.current),
+        value_text(code, value.current),
         number(value.max)
     )
 }
@@ -261,6 +297,8 @@ struct VcpEntryDto<'a> {
     values: Option<&'a [u8]>,
 }
 
+/// `value_name` and `interpreted` appear only when the catalog gives the
+/// value a meaning, so the JSON of a plain reading is unchanged.
 #[derive(Serialize)]
 struct ReadingDto<'a> {
     monitor: &'a str,
@@ -268,23 +306,32 @@ struct ReadingDto<'a> {
     name: Option<&'static str>,
     current: u16,
     max: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value_name: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    interpreted: Option<String>,
     declared_in_capabilities: bool,
 }
 
 impl<'a> ReadingDto<'a> {
     fn new(monitor: &'a MonitorId, reading: &FeatureReading) -> Self {
         let code = reading.feature.code;
+        let (value_name, interpreted) = meaning(code, reading.value.current);
         Self {
             monitor: monitor.as_str(),
             code: code.0,
-            name: shortcut_name(code),
+            name: alias_of(code),
             current: reading.value.current,
             max: reading.value.max,
+            value_name,
+            interpreted,
             declared_in_capabilities: reading.declared_in_capabilities,
         }
     }
 }
 
+/// `value_name` and `interpreted` describe the value read back, as in
+/// [`ReadingDto`].
 #[derive(Serialize)]
 struct WriteDto<'a> {
     monitor: &'a str,
@@ -293,19 +340,52 @@ struct WriteDto<'a> {
     requested: u16,
     current: u16,
     max: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value_name: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    interpreted: Option<String>,
     applied: bool,
 }
 
 impl<'a> WriteDto<'a> {
     fn new(monitor: &'a MonitorId, code: VcpCode, requested: u16, read_back: VcpValue) -> Self {
+        let (value_name, interpreted) = meaning(code, read_back.current);
         Self {
             monitor: monitor.as_str(),
             code: code.0,
-            name: shortcut_name(code),
+            name: alias_of(code),
             requested,
             current: read_back.current,
             max: read_back.max,
+            value_name,
+            interpreted,
             applied: read_back.current == requested,
+        }
+    }
+}
+
+/// A write to a write-only feature: what was sent, and that nothing was
+/// read back.
+#[derive(Serialize)]
+struct SentDto<'a> {
+    monitor: &'a str,
+    code: u8,
+    name: Option<&'static str>,
+    requested: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value_name: Option<&'static str>,
+    read_back: bool,
+}
+
+impl<'a> SentDto<'a> {
+    fn new(monitor: &'a MonitorId, code: VcpCode, requested: u16) -> Self {
+        Self {
+            monitor: monitor.as_str(),
+            code: code.0,
+            name: alias_of(code),
+            requested,
+            value_name: meaning(code, requested).0,
+            read_back: false,
         }
     }
 }

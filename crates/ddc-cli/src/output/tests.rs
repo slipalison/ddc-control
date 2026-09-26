@@ -239,8 +239,9 @@ fn get_as_json_has_the_reading_fields() {
     );
 }
 
+/// The label and the JSON `name` are the catalog alias.
 #[test]
-fn a_code_without_a_shortcut_has_no_name() {
+fn a_catalogued_code_is_labelled_by_its_alias() {
     let text = capture(Format::Text, |p| {
         p.get(&id(), &reading(VcpCode::SHARPNESS, 5, 10, true));
     });
@@ -248,9 +249,89 @@ fn a_code_without_a_shortcut_has_no_name() {
         p.get(&id(), &reading(VcpCode::SHARPNESS, 5, 10, true));
     });
 
-    assert_eq!(text.out, "0x87: 5 (0x05), max 10 (0x0A)\n");
+    assert_eq!(text.out, "0x87 sharpness: 5 (0x05), max 10 (0x0A)\n");
+    assert_eq!(json.json()["name"], "sharpness");
+}
+
+#[test]
+fn a_code_without_an_alias_has_no_name() {
+    let text = capture(Format::Text, |p| {
+        p.get(&id(), &reading(VcpCode(0x8D), 1, 2, true));
+    });
+    let json = capture(Format::Json, |p| {
+        p.get(&id(), &reading(VcpCode(0x8D), 1, 2, true));
+    });
+
+    assert_eq!(text.out, "0x8D: 1 (0x01), max 2 (0x02)\n");
     assert_eq!(json.json()["name"], Value::Null);
-    assert_eq!(json.json()["code"], 135);
+    assert_eq!(json.json()["code"], 141);
+}
+
+/// Text puts the meaning right after the raw value; JSON adds
+/// `value_name` for a named value and `interpreted` for any other meaning
+/// (D-2026-09-26-full-osd-control-3).
+#[test]
+fn get_shows_what_the_catalog_says_the_value_means() {
+    let cases = [
+        (
+            VcpCode::COLOR_PRESET,
+            0x01,
+            0x0B,
+            "0x14 preset: 1 (0x01) sRGB, max 11 (0x0B)\n",
+            json!("sRGB"),
+            Value::Null,
+        ),
+        (
+            VcpCode::VERTICAL_FREQUENCY,
+            14400,
+            0xFFFF,
+            "0xAE v-frequency: 14400 (0x3840) 144.00 Hz, max 65535 (0xFFFF)\n",
+            Value::Null,
+            json!("144.00 Hz"),
+        ),
+        (
+            VcpCode::VCP_VERSION,
+            0x0202,
+            0xFFFF,
+            "0xDF vcp-version: 514 (0x202) 2.2, max 65535 (0xFFFF)\n",
+            Value::Null,
+            json!("2.2"),
+        ),
+        (
+            VcpCode(0xAC),
+            3,
+            0xFFFF,
+            "0xAC h-frequency: 3 (0x03), max 65535 (0xFFFF)\n",
+            Value::Null,
+            Value::Null,
+        ),
+    ];
+    for (code, current, max, line, value_name, interpreted) in cases {
+        let text = capture(Format::Text, |p| {
+            p.get(&id(), &reading(code, current, max, true));
+        });
+        let json = capture(Format::Json, |p| {
+            p.get(&id(), &reading(code, current, max, true));
+        })
+        .json();
+
+        assert_eq!(text.out, line, "{code}");
+        assert_eq!(json["value_name"], value_name, "{code}");
+        assert_eq!(json["interpreted"], interpreted, "{code}");
+    }
+}
+
+/// A plain reading keeps exactly the JSON of the phase `cli`: the new
+/// fields are left out, not null.
+#[test]
+fn a_reading_without_a_meaning_has_no_value_name_or_interpreted_field() {
+    let json = capture(Format::Json, |p| {
+        p.get(&id(), &reading(VcpCode::BRIGHTNESS, 50, 100, true));
+    })
+    .json();
+
+    assert!(json.get("value_name").is_none(), "{json}");
+    assert!(json.get("interpreted").is_none(), "{json}");
 }
 
 #[test]
@@ -267,8 +348,74 @@ fn set_as_text_shows_the_value_read_back() {
         );
     });
 
-    assert_eq!(captured.out, "0x60 input: 17 (0x11), max 18 (0x12)\n");
+    assert_eq!(
+        captured.out,
+        "0x60 input: 17 (0x11) HDMI-1, max 18 (0x12)\n"
+    );
     assert!(captured.err.is_empty());
+}
+
+#[test]
+fn set_as_json_names_the_value_read_back() {
+    let captured = capture(Format::Json, |p| {
+        p.set(
+            &id(),
+            VcpCode::COLOR_PRESET,
+            0x05,
+            VcpValue {
+                current: 0x05,
+                max: 0x0B,
+            },
+        );
+    });
+
+    assert_eq!(
+        captured.json(),
+        json!({
+            "monitor": "FAKE-OUT-1",
+            "code": 20,
+            "name": "preset",
+            "requested": 5,
+            "current": 5,
+            "max": 11,
+            "value_name": "6500 K",
+            "applied": true
+        })
+    );
+}
+
+/// A write-only feature is never read back, so `set` on one prints what
+/// was sent, as `reset` does (D-2026-09-26-full-osd-control-8).
+#[test]
+fn a_write_only_feature_prints_only_what_was_sent() {
+    fn via_sent(p: &mut Printer<'_>) {
+        p.sent(&id(), VcpCode::RESTORE_FACTORY_COLOR, 1);
+    }
+    fn via_set(p: &mut Printer<'_>) {
+        let sent = VcpValue { current: 1, max: 1 };
+        p.set(&id(), VcpCode::RESTORE_FACTORY_COLOR, 1, sent);
+    }
+    for print in [via_sent as fn(&mut Printer<'_>), via_set] {
+        let text = capture(Format::Text, print);
+        let json = capture(Format::Json, print);
+
+        assert_eq!(
+            text.out,
+            "0x08: sent 1 (0x01) Reset (write-only, not read back)\n"
+        );
+        assert!(text.err.is_empty(), "{}", text.err);
+        assert_eq!(
+            json.json(),
+            json!({
+                "monitor": "FAKE-OUT-1",
+                "code": 8,
+                "name": null,
+                "requested": 1,
+                "value_name": "Reset",
+                "read_back": false
+            })
+        );
+    }
 }
 
 #[test]

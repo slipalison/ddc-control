@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use ddc_core::domain::{Confirm, DdcError, MonitorId};
+use ddc_core::domain::{Confirm, DdcError, MonitorId, VcpCode, VcpValue};
 use ddc_core::ports::MonitorControl;
 
 use crate::args::{Cli, Command};
@@ -13,7 +13,8 @@ use crate::select::select_monitor;
 /// Runs `cli` against `control`, printing the result to `out` and errors
 /// to `err`, and returns the exit code.
 ///
-/// Every command but `list` first enumerates the monitors and selects one.
+/// Every command but `list` first enumerates the monitors and selects one;
+/// a value name that does not fit its feature is refused before that.
 /// `caps --refresh` calls `refresh` with the selected monitor before
 /// reading its capabilities, so the caller can drop any cached copy.
 /// `--yes` is the only source of [`Confirm::Yes`]; whether a write needs
@@ -61,13 +62,15 @@ fn execute(
     refresh: &dyn Fn(&MonitorId),
     printer: &mut Printer<'_>,
 ) -> Result<(), CliError> {
-    let monitors = control.list_monitors().map_err(|error| CliError::Ddc {
-        monitor: None,
-        error,
-    })?;
-    let select = || select_monitor(&monitors, cli.monitor.as_deref());
+    let enumerate = || {
+        control.list_monitors().map_err(|error| CliError::Ddc {
+            monitor: None,
+            error,
+        })
+    };
+    let select = || Ok::<_, CliError>(select_monitor(&enumerate()?, cli.monitor.as_deref())?);
     match &cli.command {
-        Command::List => printer.list(&monitors),
+        Command::List => printer.list(&enumerate()?),
         Command::Caps { refresh: again } => {
             let id = select()?;
             if *again {
@@ -82,15 +85,34 @@ fn execute(
             printer.get(&id, &reading);
         }
         Command::Set { vcp, value, yes } => {
+            let value = value.resolve(*vcp).map_err(CliError::Usage)?;
             let id = select()?;
-            let confirm = if *yes { Confirm::Yes } else { Confirm::No };
-            let read_back = control
-                .set_feature(&id, *vcp, *value, confirm)
-                .map_err(on(&id))?;
-            printer.set(&id, *vcp, *value, read_back);
+            let read_back = write(control, &id, *vcp, value, *yes)?;
+            printer.set(&id, *vcp, value, read_back);
+        }
+        Command::Reset { target, yes } => {
+            let code = target.code();
+            let value = target.value().resolve(code).map_err(CliError::Usage)?;
+            let id = select()?;
+            write(control, &id, code, value, *yes)?;
+            printer.sent(&id, code, value);
         }
     }
     Ok(())
+}
+
+/// Writes through the core; `yes` is the user's `--yes`.
+fn write(
+    control: &impl MonitorControl,
+    id: &MonitorId,
+    code: VcpCode,
+    value: u16,
+    yes: bool,
+) -> Result<VcpValue, CliError> {
+    let confirm = if yes { Confirm::Yes } else { Confirm::No };
+    control
+        .set_feature(id, code, value, confirm)
+        .map_err(on(id))
 }
 
 /// Wraps a core error with the monitor it happened on.

@@ -79,7 +79,7 @@ fn get_warns_about_a_code_the_capabilities_do_not_declare() {
     let read = run_with(&backend, &["get", "0x87"]);
 
     assert_eq!(read.exit, Exit::Success);
-    assert_eq!(read.out, "0x87: 3 (0x03), max 10 (0x0A)\n");
+    assert_eq!(read.out, "0x87 sharpness: 3 (0x03), max 10 (0x0A)\n");
     assert!(
         read.err.contains("not declared in capabilities"),
         "{}",
@@ -174,4 +174,20 @@ fn arguments_clap_rejects_never_reach_the_backend() {
     assert_eq!(rejected.exit, Exit::Usage);
     assert!(rejected.err.contains("brightness"), "{}", rejected.err);
     assert!(backend.calls().is_empty());
+}
+
+/// `get` shows the name the catalog gives the value, in text and in JSON
+/// (D-2026-09-26-full-osd-control-3).
+#[test]
+fn get_names_a_value_the_catalog_knows() {
+    assert_eq!(
+        stdout_of(&["get", "preset"]),
+        "0x14 preset: 1 (0x01) sRGB, max 3 (0x03)\n"
+    );
+
+    let input: Value = serde_json::from_str(&stdout_of(&["get", "input", "--json"])).unwrap();
+    assert_eq!(input["name"], "input");
+    assert_eq!(input["current"], 15);
+    assert_eq!(input["value_name"], "DisplayPort-1");
+    assert!(input.get("interpreted").is_none(), "{input}");
 }
