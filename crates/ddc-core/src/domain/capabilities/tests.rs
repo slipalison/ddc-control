@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::Capabilities;
+use super::{Capabilities, hex_bytes};
 use crate::domain::{Access, DdcError, FeatureKind, Risk, VcpCode};
 
 /// Capabilities string of the dev monitor "RTK QHD HDR" (MCCS 2.2, probed
@@ -104,6 +104,25 @@ fn invalid_hex_tokens_and_junk_between_tags_are_skipped() {
     assert_eq!(caps.vcp.keys().copied().collect::<Vec<_>>(), [0x10, 0x12]);
     assert_eq!(caps.monitor_type.as_deref(), Some("LCD"));
     assert_eq!(caps.mccs_version, None);
+}
+
+#[test]
+fn hex_tokens_are_even_digit_runs_or_single_digits() {
+    assert_eq!(hex_bytes("10 1 12"), [0x10, 0x01, 0x12]);
+    assert_eq!(hex_bytes("10 bad 12"), [0x10, 0x12]);
+    assert_eq!(hex_bytes("0102 zz 0F"), [0x01, 0x02, 0x0F]);
+}
+
+#[test]
+fn words_of_hex_letters_declare_no_code() {
+    let caps = Capabilities::parse("(vcp(10 bad 12 ace 1)cmds(0102 zz 0F))").unwrap();
+
+    assert_eq!(
+        caps.vcp.keys().copied().collect::<Vec<_>>(),
+        [0x01, 0x10, 0x12]
+    );
+    assert!(!caps.declares(VcpCode(0xBA)));
+    assert_eq!(caps.commands, [0x01, 0x02, 0x0F]);
 }
 
 #[test]

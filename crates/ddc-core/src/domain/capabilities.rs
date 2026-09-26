@@ -30,9 +30,10 @@ type Segment<'a> = (&'a str, Option<&'a str>);
 impl Capabilities {
     /// Parses a capabilities string as reported by a monitor.
     ///
-    /// Tolerant by design: missing spaces, lowercase hex, unknown tags,
-    /// invalid hex tokens and garbage after the closing parenthesis are all
-    /// accepted. Only parentheses that never close are an error.
+    /// Tolerant by design: missing spaces between tags or around groups,
+    /// concatenated or lowercase hex bytes, unknown tags and garbage after
+    /// the closing parenthesis are all accepted, and tokens that are not hex
+    /// bytes are skipped. Only parentheses that never close are an error.
     pub fn parse(raw: &str) -> Result<Self, DdcError> {
         let mut caps = Self::default();
         for (prefix, group) in segments(outer_body(raw)?)? {
@@ -145,14 +146,24 @@ fn tag_name(prefix: &str) -> &str {
         .unwrap_or_default()
 }
 
-/// Hex bytes in `text`, two digits each, with or without separating spaces.
-/// Characters that are not hex digits only separate tokens.
+/// Hex bytes in the whitespace-separated tokens of `text`. A token of an even
+/// number of hex digits is read as consecutive two-digit bytes (`0102` is
+/// `01 02`); a single hex digit is one byte, for scalers that drop a leading
+/// zero. Any other token — an odd run of three or more digits, or one with a
+/// character that is not a hex digit — is ignored as a whole.
 fn hex_bytes(text: &str) -> Vec<u8> {
-    text.split(|c: char| !c.is_ascii_hexdigit())
-        .flat_map(|run| run.as_bytes().chunks(2))
+    text.split_whitespace()
+        .filter(|token| is_hex_byte_run(token))
+        .flat_map(|token| token.as_bytes().chunks(2))
         .filter_map(|pair| std::str::from_utf8(pair).ok())
         .filter_map(|pair| u8::from_str_radix(pair, 16).ok())
         .collect()
+}
+
+/// Whether `token` is a single hex digit or an even-length run of them.
+fn is_hex_byte_run(token: &str) -> bool {
+    let whole_bytes = token.len() == 1 || token.len().is_multiple_of(2);
+    whole_bytes && token.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn parse_version(text: &str) -> Option<(u8, u8)> {
