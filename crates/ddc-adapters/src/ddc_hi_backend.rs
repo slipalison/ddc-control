@@ -5,7 +5,9 @@
 //! transaction up to 3 times within the caller's budget: 50 ms apart for
 //! VCP reads and writes (D-3), 500 ms apart for capabilities reads
 //! (D-2026-09-26-cli-2). A VCP code the monitor answers as unsupported is
-//! never retried (D-2026-09-26-cli-4). Callers wait on a per-operation budget
+//! never retried (D-2026-09-26-cli-4). A panic inside `ddc-hi` fails only the
+//! transaction it happened in, without a retry, and the worker keeps serving
+//! (D-2026-09-26-full-osd-control-6). Callers wait on a per-operation budget
 //! (D-7) and get [`DdcError::Timeout`] past it. Monitors are identified by
 //! EDID when available (D-2).
 
@@ -64,7 +66,10 @@ impl Default for DdcHiBudgets {
 /// [`DdcError::MonitorNotFound`]. A VCP code the monitor answers as
 /// unsupported answers [`DdcError::UnsupportedFeature`] after one attempt
 /// (D-2026-09-26-cli-4); on Windows, where `dxva2` keeps that reply to
-/// itself, it counts as any other failure. Failures that outlast the retries
+/// itself, it counts as any other failure. A panic inside `ddc-hi` answers
+/// [`DdcError::Transport`] starting with `ddc-hi panicked:` after that one
+/// attempt, and the next call is served as usual
+/// (D-2026-09-26-full-osd-control-6). Failures that outlast the retries
 /// answer [`DdcError::Transport`], or `MonitorNotFound` when a fresh
 /// enumeration fits the rest of the budget and no longer lists the monitor.
 /// A caller whose budget runs out answers [`DdcError::Timeout`]. Dropping

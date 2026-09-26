@@ -43,7 +43,8 @@ impl Clock for SystemClock {
 ///
 /// `ddc-hi` does not tell a NAK from any other failure, so every failure
 /// counts as transient, except the monitor's answer that it does not support
-/// the VCP code, which is never retried (D-2026-09-26-cli-4). Retrying a
+/// the VCP code (D-2026-09-26-cli-4) and a panic inside the transport
+/// (D-2026-09-26-full-osd-control-6), which are never retried. Retrying a
 /// write is safe: Set VCP Feature carries an absolute value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RetryPolicy {
@@ -98,7 +99,7 @@ impl RetryPolicies {
 
 impl RetryPolicy {
     /// Runs `op` until it succeeds, the monitor refuses it as unsupported,
-    /// the attempts run out, or the next backoff would end at or past
+    /// the transport panics, the attempts run out, or the next backoff would end at or past
     /// `deadline`. Nothing is attempted once `deadline` has passed.
     pub(crate) fn run<T>(
         &self,
@@ -117,6 +118,9 @@ impl RetryPolicy {
             };
             if last.is_unsupported() {
                 return Err(Failure::Unsupported(last));
+            }
+            if last.is_panic() {
+                return Err(Failure::Panicked(last));
             }
             if attempts >= self.max_attempts || clock.now() + self.backoff >= deadline {
                 return Err(Failure::Exhausted {
@@ -139,6 +143,9 @@ pub(crate) enum Failure {
     /// The monitor refused the request as unsupported. Asking again gets
     /// the same answer, so no other attempt was made.
     Unsupported(HandleError),
+    /// The transport panicked. The same request would panic again, so no
+    /// other attempt was made.
+    Panicked(HandleError),
     /// Attempt number `attempts` failed with `last`, and no other was made.
     Exhausted {
         /// Attempts made.

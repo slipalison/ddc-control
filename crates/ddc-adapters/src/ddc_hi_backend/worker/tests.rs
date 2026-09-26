@@ -43,6 +43,9 @@ enum Behaviour {
     Vanish,
     Block(Gate),
     Crash,
+    /// Panics on every read of this code, like `ddc-i2c` 0.2.2 on the dev
+    /// monitor's reply to 0x7E; answers everything else.
+    CrashOn(VcpCode),
 }
 
 const FLAKY: &str = "flaky i2c bus";
@@ -78,6 +81,16 @@ enum Call {
     Capabilities(&'static str),
     Read(&'static str, VcpCode),
     Write(&'static str, VcpCode, u16),
+}
+
+impl Call {
+    /// The VCP code a read is about.
+    fn read_code(&self) -> Option<VcpCode> {
+        match self {
+            Self::Read(_, code) => Some(*code),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -163,6 +176,7 @@ impl FakeHandle {
     /// Logs `call`, then answers as the display's behaviour says. A display
     /// unplugged since enumeration fails like a dead bus.
     fn transact<T>(&self, call: Call, answer: T) -> Result<T, HandleError> {
+        let read = call.read_code();
         match self.turn(call) {
             None => Err(HandleError::new("no such device")),
             Some(Behaviour::Answer | Behaviour::Flaky(_)) => Ok(answer),
@@ -179,6 +193,8 @@ impl FakeHandle {
                 Ok(answer)
             }
             Some(Behaviour::Crash) => crash(),
+            Some(Behaviour::CrashOn(code)) if read == Some(code) => crash_on(code),
+            Some(Behaviour::CrashOn(_)) => Ok(answer),
         }
     }
 
@@ -192,10 +208,30 @@ impl FakeHandle {
     }
 }
 
-// reason: simulates a bug inside the transport, which unwinds the worker.
+// reason: simulates a bug inside the transport; its payload is a `&str`.
 #[allow(clippy::panic)]
 fn crash() -> ! {
     panic!("scripted transport bug")
+}
+
+// reason: simulates the out-of-bounds panic of `ddc-i2c` 0.2.2; a formatted
+// message makes its payload a `String`.
+#[allow(clippy::panic)]
+fn crash_on(code: VcpCode) -> ! {
+    panic!("index out of bounds reading {code}")
+}
+
+/// Displays whose enumeration panics: a bug outside any transaction, which
+/// unwinds the worker thread.
+#[derive(Debug)]
+struct CrashingDisplays;
+
+impl DisplaySource for CrashingDisplays {
+    type Handle = FakeHandle;
+
+    fn enumerate(&mut self) -> Vec<(DisplayIdentity, FakeHandle)> {
+        crash()
+    }
 }
 
 const FAKE_CAPABILITIES: &[u8] = b"(prot(monitor)vcp(10 12))\0";
@@ -395,6 +431,12 @@ fn maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors()
         FakeDisplay::new("buggy", Behaviour::Crash),
     ]);
     let client = spawn(&source, budgets(Duration::from_millis(250)));
+    let doomed = WorkerClient::spawn(
+        CrashingDisplays,
+        budgets(Duration::from_secs(1)),
+        no_backoff(),
+    )
+    .unwrap();
 
     let failures = [
         client.read_capabilities(&id("mute")).map(drop),
@@ -405,13 +447,83 @@ fn maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors()
     gate.open();
     let crashed = client.read_vcp(&id("buggy"), VcpCode::BRIGHTNESS);
     let after_crash = client.enumerate().map(drop);
+    let enumeration_crashed = doomed.enumerate().map(drop);
+    let after_worker_died = doomed.read_vcp(&id("a"), VcpCode::BRIGHTNESS);
 
     for failure in &failures {
         assert_transport(failure, NAK);
     }
     assert_eq!(stuck, Err(DdcError::Timeout));
-    assert_transport(&crashed, "worker");
-    assert_transport(&after_crash, "worker");
+    assert_eq!(
+        crashed,
+        Err(DdcError::Transport(
+            "ddc-hi panicked: scripted transport bug".to_owned()
+        ))
+    );
+    assert_eq!(after_crash, Ok(()));
+    assert_transport(&enumeration_crashed, "worker thread is not running");
+    assert_transport(&after_worker_died, "worker thread is not running");
+}
+
+/// `ddc-i2c` 0.2.2 panics on the dev monitor's reply to 0x7E; the panic
+/// fails that one read, after one attempt, and the same worker keeps
+/// serving other codes and enumerations (D-2026-09-26-full-osd-control-6).
+#[test]
+fn a_panic_inside_one_transaction_fails_only_that_call_and_the_worker_keeps_serving() {
+    let trapezoid = VcpCode(0x7E);
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::CrashOn(trapezoid))]);
+    let client = spawn(&source, budgets(Duration::from_secs(1)));
+
+    let crashed = client.read_vcp(&id("a"), trapezoid);
+    let next = client.read_vcp(&id("a"), VcpCode::BRIGHTNESS);
+    let written = client.write_vcp(&id("a"), VcpCode::BRIGHTNESS, 40);
+    let listed = client.enumerate();
+
+    assert_eq!(
+        crashed,
+        Err(DdcError::Transport(
+            "ddc-hi panicked: index out of bounds reading 0x7E".to_owned()
+        ))
+    );
+    assert_eq!(next, Ok(FAKE_VALUE));
+    assert_eq!(written, Ok(()));
+    assert_eq!(listed.map(|monitors| monitors.len()), Ok(1));
+    assert_eq!(
+        source.calls(),
+        [
+            Call::Read("a", trapezoid),
+            Call::Read("a", VcpCode::BRIGHTNESS),
+            Call::Write("a", VcpCode::BRIGHTNESS, 40),
+        ]
+    );
+    assert_eq!(source.enumerations(), 2);
+}
+
+/// A panic is final: no retry, no pause and no presence check, even where
+/// one fits the budget.
+#[test]
+fn a_panic_is_never_retried_nor_followed_by_a_presence_check() {
+    let run = on_slow_worker(Behaviour::Crash, Duration::from_secs(8), read_brightness);
+
+    assert_eq!(
+        run.result,
+        Err(DdcError::Transport(
+            "ddc-hi panicked: scripted transport bug".to_owned()
+        ))
+    );
+    assert_eq!(
+        (run.attempts, run.enumerations, run.took),
+        (1, 1, Duration::ZERO)
+    );
+}
+
+#[test]
+fn a_panic_payload_that_is_not_text_still_names_the_panic() {
+    let error = HandleError::panicked(&42_u32);
+
+    assert!(error.is_panic());
+    assert!(!error.is_unsupported());
+    assert_eq!(error.message, "panic payload is not text");
 }
 
 #[test]
