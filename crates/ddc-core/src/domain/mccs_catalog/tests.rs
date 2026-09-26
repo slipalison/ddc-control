@@ -105,59 +105,82 @@ fn mccs_catalog_covers_every_observed_code_with_the_locked_kind_access_and_risk_
     }
 }
 
+/// The one value of every factory reset (D-2026-09-26-full-osd-control-8).
+const RESET: &[(u8, &str)] = &[(0x01, "Reset")];
+
+/// Every value list of the catalog, whole, by code. The catalog's list is
+/// the one a write is checked against when the capabilities list none, so a
+/// value added here is a value `set` accepts (D-2026-09-26-full-osd-control-1).
+const VALUE_LISTS: [(u8, &[(u8, &str)]); 8] = [
+    (0x04, RESET),
+    (0x05, RESET),
+    (0x06, RESET),
+    (0x08, RESET),
+    (
+        0x14,
+        &[
+            (0x01, "sRGB"),
+            (0x02, "Display Native"),
+            (0x04, "5000 K"),
+            (0x05, "6500 K"),
+            (0x06, "7500 K"),
+            (0x08, "9300 K"),
+            (0x0B, "User 1"),
+        ],
+    ),
+    (
+        0x60,
+        &[
+            (0x01, "VGA-1"),
+            (0x03, "DVI-1"),
+            (0x04, "DVI-2"),
+            (0x0F, "DisplayPort-1"),
+            (0x10, "DisplayPort-2"),
+            (0x11, "HDMI-1"),
+            (0x12, "HDMI-2"),
+        ],
+    ),
+    (
+        0xCC,
+        &[
+            (0x01, "Chinese (traditional)"),
+            (0x02, "English"),
+            (0x03, "French"),
+            (0x04, "German"),
+            (0x06, "Japanese"),
+            (0x0A, "Spanish"),
+            (0x0D, "Chinese (simplified)"),
+        ],
+    ),
+    (
+        0xD6,
+        &[
+            (0x01, "On"),
+            (0x04, "Off (DPM)"),
+            (0x05, "Off (write-only)"),
+        ],
+    ),
+];
+
+/// Pins every list by equality — codes and names, nothing added, dropped or
+/// renamed — and which codes have one at all.
 #[test]
 fn mccs_catalog_value_names_match_the_declared_lists_for_preset_input_language_power_mode_and_the_factory_reset_commands()
  {
-    let names = |raw: u8, values: &[u8]| -> Vec<Option<&'static str>> {
-        values
-            .iter()
-            .map(|value| value_name(VcpCode(raw), *value))
-            .collect()
-    };
-
-    assert_eq!(
-        names(0x14, &[0x01, 0x02, 0x04, 0x05, 0x06, 0x08, 0x0B]),
-        [
-            Some("sRGB"),
-            Some("Display Native"),
-            Some("5000 K"),
-            Some("6500 K"),
-            Some("7500 K"),
-            Some("9300 K"),
-            Some("User 1")
-        ]
-    );
-    assert_eq!(
-        names(0x60, &[0x01, 0x03, 0x04, 0x0F, 0x10, 0x11, 0x12]),
-        [
-            Some("VGA-1"),
-            Some("DVI-1"),
-            Some("DVI-2"),
-            Some("DisplayPort-1"),
-            Some("DisplayPort-2"),
-            Some("HDMI-1"),
-            Some("HDMI-2")
-        ]
-    );
-    assert_eq!(
-        names(0xCC, &[0x01, 0x02, 0x03, 0x04, 0x06, 0x0A, 0x0D]),
-        [
-            Some("Chinese (traditional)"),
-            Some("English"),
-            Some("French"),
-            Some("German"),
-            Some("Japanese"),
-            Some("Spanish"),
-            Some("Chinese (simplified)")
-        ]
-    );
-    assert_eq!(
-        names(0xD6, &[0x01, 0x04, 0x05]),
-        [Some("On"), Some("Off (DPM)"), Some("Off (write-only)")]
-    );
+    for (raw, values) in VALUE_LISTS {
+        let code = VcpCode(raw);
+        assert_eq!(catalog_entry(code).unwrap().values, values, "{code}");
+        for (byte, name) in values {
+            assert_eq!(value_name(code, *byte), Some(*name), "{code} = {byte:#04X}");
+        }
+    }
+    let named: Vec<u8> = catalog()
+        .iter()
+        .filter(|entry| !entry.values.is_empty())
+        .map(|entry| entry.code.0)
+        .collect();
+    assert_eq!(named, VALUE_LISTS.map(|(raw, _)| raw));
     for reset in [0x04, 0x05, 0x06, 0x08] {
-        let entry = catalog_entry(VcpCode(reset)).unwrap();
-        assert_eq!(entry.values, [(0x01, "Reset")], "{}", VcpCode(reset));
         assert_eq!(value_name(VcpCode(reset), 0x00), None);
     }
     assert_eq!(value_name(VcpCode::COLOR_PRESET, 0x03), None);
