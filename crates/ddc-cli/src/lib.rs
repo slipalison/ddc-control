@@ -9,8 +9,11 @@
 
 pub mod args;
 pub mod exit;
+pub mod fixture;
 pub mod output;
+mod run;
 pub mod select;
 
 pub use args::{Cli, Command};
 pub use exit::{CliError, Exit};
+pub use run::{report_startup_failure, run};
