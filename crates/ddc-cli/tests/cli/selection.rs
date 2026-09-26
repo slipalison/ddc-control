@@ -67,6 +67,18 @@ fn monitor_flag_matches_by_exact_id_index_or_unique_substring_and_refuses_ambigu
         );
     }
 
+    let prefixed = backend_of(["RTK-QHD-1", "RTK-QHD-10"].map(monitor));
+    let exact = run_with(&prefixed, &["-m", "RTK-QHD-1", "get", "brightness"]);
+    assert_eq!(exact.exit, Exit::Success, "{}", exact.err);
+    assert_eq!(
+        exact.calls.last(),
+        Some(&BackendCall::ReadVcp(id("RTK-QHD-1"), VcpCode::BRIGHTNESS)),
+        "an exact id wins over the longer id that contains it"
+    );
+    let only_a_part = run_with(&prefixed, &["-m", "rtk-qhd-1", "get", "brightness"]);
+    assert_eq!(only_a_part.exit, Exit::Monitor, "{}", only_a_part.err);
+    assert!(!touched_a_monitor(&only_a_part.calls));
+
     let ambiguous = run_with(&backend, &["-m", "rtk", "get", "brightness"]);
     assert_eq!(ambiguous.exit, Exit::Monitor);
     assert!(ambiguous.err.contains("1  RTK-QHD-1"), "{}", ambiguous.err);
