@@ -18,9 +18,10 @@ use std::time::{Duration, Instant};
 use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
 
-/// Capabilities string of the dev monitor, verbatim — same fixture as the
-/// core's use-case tests.
-const RTK_QHD_HDR_CAPS: &str = "(prot(monitor)type(LCD)model(RTK)cmds(01 02 03 07 0C E3 F3)vcp(02 04 05 06 08 0B 0C 10 12 14(01 02 04 05 06 08 0B) 16 18 1A 52 60(01 03 04 0F 10 11 12) 87 AC AE B2 B6 C6 C8 CA CC(01 02 03 04 06 0A 0D) D6(01 04 05) DF FD FF)mswhql(1)asset_eep(40)mccs_ver(2.2))";
+/// Capabilities string of the dev monitor, verbatim — the fixture the
+/// core's parser and use-case tests read.
+const RTK_QHD_HDR_CAPS: &str =
+    include_str!("../../ddc-core/tests/fixtures/rtk_qhd_hdr_caps.txt").trim_ascii_end();
 /// EDID key of the dev monitor: empty serial descriptor, placeholder
 /// numeric serial.
 const RTK_ID: &str = "RTK-RTK-QHD-HDR-01010101";
