@@ -24,8 +24,10 @@ pub enum BackendCall {
 pub struct FakeMonitor {
     info: MonitorInfo,
     capabilities: Option<String>,
+    transient_capabilities_failures: u32,
     values: BTreeMap<VcpCode, VcpValue>,
     ignored_writes: BTreeSet<VcpCode>,
+    vcp_failures: BTreeMap<VcpCode, DdcError>,
 }
 
 impl FakeMonitor {
@@ -34,14 +36,24 @@ impl FakeMonitor {
         Self {
             info,
             capabilities: None,
+            transient_capabilities_failures: 0,
             values: BTreeMap::new(),
             ignored_writes: BTreeSet::new(),
+            vcp_failures: BTreeMap::new(),
         }
     }
 
     /// Raw capabilities string returned by `read_capabilities`.
     pub fn with_capabilities(mut self, raw: impl Into<String>) -> Self {
         self.capabilities = Some(raw.into());
+        self
+    }
+
+    /// Makes the first `count` capabilities reads fail with
+    /// [`DdcError::Transport`] before the scripted string is served, like a
+    /// scaler that drops the first requests.
+    pub fn with_transient_capabilities_failures(mut self, count: u32) -> Self {
+        self.transient_capabilities_failures = count;
         self
     }
 
@@ -57,13 +69,32 @@ impl FakeMonitor {
         self
     }
 
-    fn capabilities(&self) -> Result<String, DdcError> {
+    /// Makes every read and write of `code` fail with `error`, as a monitor
+    /// that times out or NAKs that one code does. Any scripted value is left
+    /// untouched and other codes keep working.
+    pub fn with_vcp_failure(mut self, code: VcpCode, error: DdcError) -> Self {
+        self.vcp_failures.insert(code, error);
+        self
+    }
+
+    fn capabilities(&mut self) -> Result<String, DdcError> {
+        if self.transient_capabilities_failures > 0 {
+            self.transient_capabilities_failures -= 1;
+            return Err(DdcError::Transport(
+                "capabilities request dropped".to_owned(),
+            ));
+        }
         self.capabilities
             .clone()
             .ok_or_else(|| DdcError::Transport("capabilities string unavailable".to_owned()))
     }
 
+    fn scripted_failure(&self, code: VcpCode) -> Result<(), DdcError> {
+        self.vcp_failures.get(&code).cloned().map_or(Ok(()), Err)
+    }
+
     fn value(&self, code: VcpCode) -> Result<VcpValue, DdcError> {
+        self.scripted_failure(code)?;
         self.values
             .get(&code)
             .copied()
@@ -71,6 +102,7 @@ impl FakeMonitor {
     }
 
     fn store(&mut self, code: VcpCode, value: u16) -> Result<(), DdcError> {
+        self.scripted_failure(code)?;
         let stored = self
             .values
             .get_mut(&code)

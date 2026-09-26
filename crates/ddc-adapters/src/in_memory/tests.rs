@@ -169,3 +169,82 @@ fn clones_share_monitors_and_call_log() {
     assert_eq!(handle.calls(), backend.calls());
     assert_eq!(backend.calls().len(), 2);
 }
+
+#[test]
+fn transient_capabilities_failures_precede_the_scripted_string() {
+    let backend = single_monitor(
+        FakeMonitor::new(info("m"))
+            .with_capabilities("(vcp(10))")
+            .with_transient_capabilities_failures(2),
+    );
+
+    let first = backend.read_capabilities(&id("m"));
+    let second = backend.read_capabilities(&id("m"));
+    let third = backend.read_capabilities(&id("m"));
+
+    assert!(matches!(first, Err(DdcError::Transport(_))));
+    assert!(matches!(second, Err(DdcError::Transport(_))));
+    assert_eq!(third.unwrap(), "(vcp(10))");
+}
+
+#[test]
+fn scripted_vcp_failure_answers_reads_and_writes_of_that_code_only() {
+    let backend = single_monitor(
+        FakeMonitor::new(info("m"))
+            .with_value(VcpCode::BRIGHTNESS, 50, 100)
+            .with_value(VcpCode::CONTRAST, 70, 100)
+            .with_vcp_failure(VcpCode::BRIGHTNESS, DdcError::Timeout),
+    );
+
+    let read = backend.read_vcp(&id("m"), VcpCode::BRIGHTNESS);
+    let write = backend.write_vcp(&id("m"), VcpCode::BRIGHTNESS, 80);
+    backend.write_vcp(&id("m"), VcpCode::CONTRAST, 60).unwrap();
+    let contrast = backend.read_vcp(&id("m"), VcpCode::CONTRAST).unwrap();
+
+    assert_eq!(read, Err(DdcError::Timeout));
+    assert_eq!(write, Err(DdcError::Timeout));
+    assert_eq!(contrast.current, 60);
+    assert_eq!(
+        backend.calls(),
+        [
+            BackendCall::ReadVcp(id("m"), VcpCode::BRIGHTNESS),
+            BackendCall::WriteVcp(id("m"), VcpCode::BRIGHTNESS, 80),
+            BackendCall::WriteVcp(id("m"), VcpCode::CONTRAST, 60),
+            BackendCall::ReadVcp(id("m"), VcpCode::CONTRAST),
+        ]
+    );
+}
+
+#[test]
+fn scripted_vcp_failure_leaves_the_stored_value_intact() {
+    let monitor = FakeMonitor::new(info("m"))
+        .with_value(VcpCode::BRIGHTNESS, 50, 100)
+        .with_vcp_failure(VcpCode::BRIGHTNESS, DdcError::Transport("nak".to_owned()));
+
+    let mut after_write = monitor.clone();
+    let _ = after_write.store(VcpCode::BRIGHTNESS, 80);
+
+    assert_eq!(
+        after_write.values.get(&VcpCode::BRIGHTNESS),
+        Some(&VcpValue {
+            current: 50,
+            max: 100
+        })
+    );
+    assert_eq!(
+        monitor.value(VcpCode::BRIGHTNESS),
+        Err(DdcError::Transport("nak".to_owned()))
+    );
+}
+
+#[test]
+fn scripted_vcp_failure_wins_over_an_unscripted_code() {
+    let backend = single_monitor(
+        FakeMonitor::new(info("m")).with_vcp_failure(VcpCode(0xDF), DdcError::Timeout),
+    );
+
+    assert_eq!(
+        backend.read_vcp(&id("m"), VcpCode(0xDF)),
+        Err(DdcError::Timeout)
+    );
+}
