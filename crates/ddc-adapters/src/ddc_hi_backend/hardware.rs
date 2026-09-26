@@ -4,7 +4,7 @@
 //! Only the worker thread ever calls into this module's shell (D-6).
 
 use ddc_core::domain::{VcpCode, VcpValue};
-use ddc_hi::{Ddc, DisplayInfo, Handle};
+use ddc_hi::{Ddc, DdcHost, DisplayInfo, Handle};
 
 use super::identity::{DisplayIdentity, EdidIdentity};
 use super::worker::{DdcHandle, DisplaySource, HandleError};
@@ -28,19 +28,25 @@ impl DisplaySource for DdcHiDisplays {
 
 impl DdcHandle for Handle {
     fn read_capabilities(&mut self) -> Result<Vec<u8>, HandleError> {
-        self.capabilities_string().map_err(HandleError::new)
+        self.capabilities_string().map_err(transaction_error)
     }
 
     fn read_vcp(&mut self, code: VcpCode) -> Result<VcpValue, HandleError> {
         self.get_vcp_feature(code.0)
             .map(vcp_value)
-            .map_err(HandleError::new)
+            .map_err(transaction_error)
     }
 
     fn write_vcp(&mut self, code: VcpCode, value: u16) -> Result<(), HandleError> {
         self.set_vcp_feature(code.0, value)
-            .map_err(HandleError::new)
+            .map_err(transaction_error)
     }
+}
+
+/// A failed `ddc-hi` transaction as the worker sees it: the whole cause
+/// chain as text, so no `ddc-hi` error type crosses the seam.
+pub(crate) fn transaction_error(error: <Handle as DdcHost>::Error) -> HandleError {
+    HandleError::new(error)
 }
 
 /// A Get VCP Feature reply in core terms: maximum then current, each a

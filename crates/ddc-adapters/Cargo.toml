@@ -13,5 +13,10 @@ ddc-hi = ["dep:ddc-hi"]
 ddc-core = { workspace = true }
 ddc-hi = { version = "0.4.1", default-features = false, features = ["ddc-i2c", "ddc-winapi"], optional = true }
 
+[dev-dependencies]
+# Only to build real `ddc-hi` error chains in tests; the version ddc-hi
+# already pulls in.
+anyhow = "1"
+
 [lints]
 workspace = true

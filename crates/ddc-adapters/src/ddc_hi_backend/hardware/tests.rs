@@ -1,8 +1,16 @@
-use ddc_core::domain::VcpValue;
+use std::error::Error as _;
+use std::io;
+use std::time::Duration;
+
+use ddc_core::domain::{DdcError, MonitorId, VcpCode, VcpValue};
+use ddc_core::ports::MonitorBackend;
 use ddc_hi::{Backend, DisplayInfo};
 
+use super::super::DdcHiBudgets;
 use super::super::identity::{DisplayIdentity, EdidIdentity};
-use super::{capabilities_text, display_identity, vcp_value};
+use super::super::retry::RetryPolicy;
+use super::super::worker::{DdcHandle, DisplaySource, HandleError, WorkerClient};
+use super::{capabilities_text, display_identity, transaction_error, vcp_value};
 
 fn reply(mh: u8, ml: u8, sh: u8, sl: u8) -> ddc_hi::VcpValue {
     ddc_hi::VcpValue {
@@ -81,4 +89,75 @@ fn display_info_without_manufacturer_carries_only_its_description() {
             edid: None,
         }
     );
+}
+
+/// A `ddc-hi` failure with a cause chain. It is the type `ddc-hi` hands
+/// the adapter, or passing it to [`transaction_error`] would not compile.
+fn i2c_failure() -> anyhow::Error {
+    anyhow::Error::new(io::Error::other("remote I/O error"))
+        .context("DDC/CI I2C error")
+        .context("Get VCP Feature")
+}
+
+/// `{:#}` of [`i2c_failure`]: every cause, outermost first.
+const I2C_FAILURE_CHAIN: &str = "Get VCP Feature: DDC/CI I2C error: remote I/O error";
+
+/// One display whose every transaction fails with [`i2c_failure`],
+/// converted by the production [`transaction_error`].
+#[derive(Debug, Clone, Copy)]
+struct BrokenBus;
+
+#[derive(Debug)]
+struct BrokenHandle;
+
+impl DisplaySource for BrokenBus {
+    type Handle = BrokenHandle;
+
+    fn enumerate(&mut self) -> Vec<(DisplayIdentity, BrokenHandle)> {
+        let identity = DisplayIdentity {
+            description: "broken".to_owned(),
+            edid: None,
+        };
+        vec![(identity, BrokenHandle)]
+    }
+}
+
+impl DdcHandle for BrokenHandle {
+    fn read_capabilities(&mut self) -> Result<Vec<u8>, HandleError> {
+        Err(transaction_error(i2c_failure()))
+    }
+
+    fn read_vcp(&mut self, _code: VcpCode) -> Result<VcpValue, HandleError> {
+        Err(transaction_error(i2c_failure()))
+    }
+
+    fn write_vcp(&mut self, _code: VcpCode, _value: u16) -> Result<(), HandleError> {
+        Err(transaction_error(i2c_failure()))
+    }
+}
+
+/// Critic of DoD #14: a real `anyhow::Error` chain, through the same
+/// conversion `impl DdcHandle for Handle` uses, reaches the port as plain
+/// `Transport` text with every cause and no error object behind it.
+#[test]
+fn ddc_hi_error_chain_reaches_the_port_as_transport_text_only() {
+    let no_backoff = RetryPolicy {
+        backoff: Duration::ZERO,
+        ..RetryPolicy::default()
+    };
+    let client = WorkerClient::spawn(BrokenBus, DdcHiBudgets::default(), no_backoff).unwrap();
+    let id = MonitorId::new("broken");
+
+    let failures = [
+        client.read_capabilities(&id).map(drop),
+        client.read_vcp(&id, VcpCode::BRIGHTNESS).map(drop),
+        client.write_vcp(&id, VcpCode::BRIGHTNESS, 10),
+    ];
+
+    let expected = format!("{I2C_FAILURE_CHAIN} (gave up after attempt 3 of 3)");
+    for failure in failures {
+        let error = failure.unwrap_err();
+        assert!(error.source().is_none(), "{error:?}");
+        assert_eq!(error, DdcError::Transport(expected.clone()));
+    }
 }
