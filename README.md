@@ -107,7 +107,7 @@ CODE  NAME                  TYPE  ACCESS  RISK       SOURCE  VALUE              
 0x60  input                 NC    RW      dangerous  caps    15/3 DisplayPort-1             Input Source
 0x87  sharpness             C     RW      safe       caps    4/4                            Sharpness
 0xAC  h-frequency           C     RO      safe       caps    3/41092                        Horizontal Frequency
-0xAE  v-frequency           C     RO      safe       caps    44818/65535 448.18 Hz          Vertical Frequency
+0xAE  v-frequency           C     RO      safe       caps    14400/65535 144.00 Hz          Vertical Frequency
 0xB2  subpixel-layout       NC    RO      safe       caps    1/1                            Flat Panel Sub-Pixel Layout
 0xB6  display-technology    NC    RO      safe       caps    3/5                            Display Technology Type
 0xC6  -                     C     RO      safe       caps    90/255                         -
@@ -150,7 +150,7 @@ CODE  NAME                  TYPE  ACCESS  RISK       SOURCE  VALUE              
 0x7E  trapezoid             C     RW      dangerous  probe   not responding                 Trapezoid
 0x87  sharpness             C     RW      safe       caps    4/4                            Sharpness
 0xAC  h-frequency           C     RO      safe       caps    3/41092                        Horizontal Frequency
-0xAE  v-frequency           C     RO      safe       caps    44818/65535 448.18 Hz          Vertical Frequency
+0xAE  v-frequency           C     RO      safe       caps    14400/65535 144.00 Hz          Vertical Frequency
 0xB2  subpixel-layout       NC    RO      safe       caps    1/1                            Flat Panel Sub-Pixel Layout
 0xB6  display-technology    NC    RO      safe       caps    3/5                            Display Technology Type
 0xC6  -                     C     RO      safe       caps    90/255                         -
@@ -255,7 +255,8 @@ Value names match as described in [Features by name](#features-by-name). A non-c
 - The reset codes are write-only: a reset reports what was sent, never a value read back.
 - On Windows, `dxva2` keeps the monitor's "unsupported VCP code" reply to itself, so `features --probe` shows `not responding` where Linux shows `not supported by this monitor`, and spends three attempts on each such code.
 - Reading `0x7E` on the RTK makes `ddc-i2c` 0.2.2 panic. The backend isolates the panic, so only that read fails (`not responding`, exit 6 for `get`), but Rust still prints the panic message on stderr.
-- The RTK's firmware sometimes answers with a wrong value that passes the checksum: `get input` reads `16` or `17` instead of `15` about one time in ten, where `ddcutil` reads `0x0F`. It also reports `0xAE` as `0xAF12`, shown as `448.18 Hz`, while running at 144 Hz; `ddcutil` reads the same bytes. If a value looks off, run `get` again.
+- The RTK's firmware sometimes answers with a wrong value that passes the checksum: `get input` reads `16` or `17` instead of `15` about one time in ten, where `ddcutil` reads `0x0F`. If a value looks off, run `get` again.
+- The RTK's `0xAE` (vertical frequency) reply depends on the video mode or the firmware's state. On 2026-09-26 it read `14400 (0x3840)`, `144.00 Hz`, at 2560x1600@144, but it once read `44818 (0xAF12)`, `448.18 Hz`, while running at 143.96 Hz. `ddcutil` read the same bytes both times, so check a reading against `ddcutil getvcp AE --verbose` instead of expecting a given number.
 - Read back to back, the RTK now and then fails a VCP read three times in a row when the attempts are 50 ms apart (`Expected DDC/CI length bit`). VCP retries therefore wait 200 ms, with which four back-to-back `features --probe` runs had no failing code. The price is that a display with mute DDC/CI takes about 0.4 s, not 0.1 s, to fail a read.
 - OSD items with no VCP code (HDR, overdrive, adaptive sync and the like, where a menu has them) cannot be reached over DDC/CI.
 

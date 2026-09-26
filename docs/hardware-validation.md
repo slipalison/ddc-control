@@ -63,7 +63,7 @@ Expected:
   - Run the probe four times back to back: no row other than `0x7E` may read `unresponsive`. With VCP retries 200 ms apart (D-2026-09-26-full-osd-control-9), 4 of 4 runs were clean on 2026-09-26; at 50 ms, 3 of 4 had one code (most often `0x70`) failing all three attempts with `Expected DDC/CI length bit`. Record any failing code.
 - `get preset`: `0x14 preset: 1 (0x01) sRGB, max 11 (0x0B)`.
 - `get input`: `0x60 input: 15 (0x0F) DisplayPort-1, max 3 (0x03)`. About one read in ten, the RTK's firmware answers `16` or `17` with a valid checksum, where `ddcutil --bus 5 getvcp 60` reads `0x0F`; repeat the read, and record it if it happens.
-- `get v-frequency`: the same raw value as `ddcutil --bus 5 getvcp AE --verbose`. On 2026-09-26, at 143.96 Hz, both read `44818 (0xAF12)`, shown as `448.18 Hz` — the RTK's own reply, not 144.00 Hz. Record what it reads.
+- `get v-frequency`: the same raw value as `ddcutil --bus 5 getvcp AE --verbose`, run right after it; no particular number is expected. The RTK's reply depends on the video mode or the firmware's state: on 2026-09-26 both tools read `14400 (0x3840)`, `144.00 Hz`, at 2560x1600@144, and once both read `44818 (0xAF12)`, `448.18 Hz`, at 143.96 Hz. Record both readings and the display mode.
 - `get vcp-version`: `0xDF vcp-version: 514 (0x202) 2.2, max 65535 (0xFFFF)`.
 
 ## 3. Safe writes, each undone right away
