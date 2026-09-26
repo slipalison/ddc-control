@@ -91,13 +91,16 @@ only works with `sudo`, the permissions are wrong: fix step 3 instead.
 - **A display with mute DDC/CI is still listed.** Enumeration only reads
   EDID and never probes DDC/CI. So a display with a readable EDID but no
   DDC/CI answer still shows up. Examples: most TVs, some docks and KVMs, and
-  monitors with DDC/CI turned off in their OSD. It fails on its first read
-  or write with a transport error or a timeout, within the budget.
+  monitors with DDC/CI turned off in their OSD. Its reads and writes fail
+  as a transport error once the 3 attempts are spent, in about 100 ms on
+  the dev machine (a TV), without delaying calls to other monitors.
 - **Timings.** On the dev machine, enumeration took about 1.1 s (an EDID
   read on each bus), a capabilities read about 2.5 s, and a VCP read or
   write 40–100 ms. The default budgets are 5 s, 8 s and 1 s. A failed
   transaction is retried up to 3 times, 50 ms apart, within the same
-  budget.
+  budget. A read or write on a monitor the backend has not listed yet
+  first pays one enumeration, under the enumeration budget: about 1.2 s
+  for the first read on a fresh backend.
 
 ## NVIDIA proprietary driver
 
