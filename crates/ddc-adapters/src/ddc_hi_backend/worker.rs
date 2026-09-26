@@ -46,11 +46,39 @@ pub(crate) trait DdcHandle {
     /// Raw capabilities reply.
     fn read_capabilities(&mut self) -> Result<Vec<u8>, HandleError>;
 
-    /// Get VCP Feature.
-    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpValue, HandleError>;
+    /// Get VCP Feature, as the monitor answered it: the worker checks which
+    /// code the reply is for.
+    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpReply, HandleError>;
 
     /// Set VCP Feature.
     fn write_vcp(&mut self, code: VcpCode, value: u16) -> Result<(), HandleError>;
+}
+
+/// A Get VCP Feature reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VcpReply {
+    /// Current value and maximum.
+    pub(crate) value: VcpValue,
+    /// The VCP code the monitor echoes in the reply; `None` where the
+    /// platform backend does not hand it over.
+    pub(crate) echoed: Option<VcpCode>,
+}
+
+impl VcpReply {
+    /// The value, when the reply answers `code`. A reply for another code is
+    /// a late reply to an earlier request, left on the bus when that one
+    /// gave up. Taking it would report, and bound writes by, another
+    /// feature's value; like any garbled reply it is a transient failure, so
+    /// the read is tried again (D-2026-09-26-full-osd-control-10). A reply
+    /// with no echo is taken as it is.
+    pub(crate) fn answering(self, code: VcpCode) -> Result<VcpValue, HandleError> {
+        match self.echoed {
+            Some(other) if other != code => Err(HandleError::new(format_args!(
+                "reply answers VCP code {other}, not {code}"
+            ))),
+            _ => Ok(self.value),
+        }
+    }
 }
 
 /// A failed transaction, reduced to its message so no transport error type
@@ -243,7 +271,7 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         let policy = self.policies.vcp;
         let refused = move |_| DdcError::UnsupportedFeature(code);
         self.transact(id, deadline, policy, refused, |handle| {
-            handle.read_vcp(code)
+            handle.read_vcp(code)?.answering(code)
         })
     }
 

@@ -9,10 +9,8 @@ use ddc_hi::{Backend, DisplayInfo};
 use super::super::DdcHiBudgets;
 use super::super::identity::{DisplayIdentity, EdidIdentity};
 use super::super::retry::RetryPolicies;
-use super::super::worker::{DdcHandle, DisplaySource, HandleError, WorkerClient};
-use super::{
-    capabilities_text, display_identity, ensure_reply_answers, transaction_error, vcp_value,
-};
+use super::super::worker::{DdcHandle, DisplaySource, HandleError, VcpReply, WorkerClient};
+use super::{capabilities_text, display_identity, transaction_error, vcp_reply, vcp_value};
 
 fn reply(mh: u8, ml: u8, sh: u8, sl: u8) -> ddc_hi::VcpValue {
     ddc_hi::VcpValue {
@@ -21,6 +19,15 @@ fn reply(mh: u8, ml: u8, sh: u8, sl: u8) -> ddc_hi::VcpValue {
         ml,
         sh,
         sl,
+    }
+}
+
+/// 0x70 at 80 of 100, as `ddc` 0.2.2 decodes it under `ddc-i2c`: the code
+/// the monitor echoes sits in `ty`.
+fn reply_for_blue_black_level() -> ddc_hi::VcpValue {
+    ddc_hi::VcpValue {
+        ty: 0x70,
+        ..reply(0, 100, 0, 80)
     }
 }
 
@@ -42,25 +49,32 @@ fn maps_ddc_hi_vcp_reply_to_core_current_and_max() {
     );
 }
 
-/// Over `/dev/i2c-*`, a reply left on the bus by an earlier request that
-/// gave up can arrive for the next one: on the dev monitor a probe read
-/// 0x70's value as 0x7E's. Such a reply is refused as transient, so the read
-/// is tried again instead of reporting another feature's value.
+/// On Linux the reply hands the worker the code the monitor echoed, which
+/// `ddc` 0.2.2 never compares with the request
+/// (D-2026-09-26-full-osd-control-10).
+#[cfg(target_os = "linux")]
 #[test]
-fn a_reply_that_answers_another_vcp_code_is_a_transient_failure() {
-    let trapezoid = VcpCode(0x7E);
+fn a_linux_reply_carries_the_code_the_monitor_echoed() {
+    let value = VcpValue {
+        current: 80,
+        max: 100,
+    };
 
-    let stale = ensure_reply_answers(trapezoid, Some(0x70));
-
-    let error = stale.unwrap_err();
-    assert!(!error.is_unsupported());
-    assert!(!error.is_panic());
     assert_eq!(
-        HandleError::new("reply answers VCP code 0x70, not 0x7E"),
-        error
+        vcp_reply(reply_for_blue_black_level()),
+        VcpReply {
+            value,
+            echoed: Some(VcpCode(0x70)),
+        }
     );
-    assert_eq!(ensure_reply_answers(trapezoid, Some(0x7E)), Ok(()));
-    assert_eq!(ensure_reply_answers(trapezoid, None), Ok(()));
+}
+
+/// On Windows `ddc-winapi` puts the value type in `ty`, not an echo, so the
+/// reply carries none and the worker takes the value as it is.
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn a_reply_off_linux_carries_no_echo() {
+    assert_eq!(vcp_reply(reply_for_blue_black_level()).echoed, None);
 }
 
 #[test]
@@ -167,7 +181,7 @@ impl DdcHandle for BrokenHandle {
         Err(transaction_error(self.0()))
     }
 
-    fn read_vcp(&mut self, _code: VcpCode) -> Result<VcpValue, HandleError> {
+    fn read_vcp(&mut self, _code: VcpCode) -> Result<VcpReply, HandleError> {
         Err(transaction_error(self.0()))
     }
 
