@@ -2,8 +2,9 @@
 //! `/dev/i2c-*` on Linux — `ddc-hi` picks the platform backend itself.
 //!
 //! One worker thread owns every display handle (D-6) and retries a failed
-//! transaction up to 3 times, 50 ms apart, within the caller's budget
-//! (D-3); callers wait on a per-operation budget (D-7) and get
+//! transaction up to 3 times within the caller's budget: 50 ms apart for
+//! VCP reads and writes (D-3), 500 ms apart for capabilities reads
+//! (D-2026-09-26-cli-2). Callers wait on a per-operation budget (D-7) and get
 //! [`DdcError::Timeout`] past it. Monitors are identified by EDID when
 //! available (D-2).
 
@@ -18,7 +19,7 @@ use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
 use ddc_core::ports::MonitorBackend;
 
 use hardware::DdcHiDisplays;
-use retry::RetryPolicy;
+use retry::RetryPolicies;
 use worker::WorkerClient;
 
 /// Default wait for a Get or Set VCP Feature (D-7).
@@ -77,7 +78,7 @@ impl DdcHiMonitorBackend {
         WorkerClient::spawn(
             DdcHiDisplays,
             DdcHiBudgets::default(),
-            RetryPolicy::default(),
+            RetryPolicies::default(),
         )
         .map(|client| Self { client })
     }
