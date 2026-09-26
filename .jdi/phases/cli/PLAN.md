@@ -58,7 +58,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Extras: via `SoftwareOsd::new(&caching)`; `enumerate` nunca cacheado (2 chamadas → 2 `Enumerate`). Unit em `caching/tests.rs`, sem fake: encoding de nome (`#`, `/`, `..`, injetivo) e resolução de dir (XDG absoluto/relativo/vazio, fallback `HOME`, nada definido, `LOCALAPPDATA`), comparando com `join`, não com literal. Dir temporário só com std, único por teste, removido no `Drop`.
 - **Dependencies:** none
 - **Test:** `cargo test -p ddc-adapters --locked caching` + verifies #2/#3 do DoD
-- **Status:** pending
+- **Status:** completed
 
 #### T-2: `FakeMonitor::with_vcp_failure(code, error)` no fake
 - **Specialist:** jdi-doer-ddc-control
@@ -68,7 +68,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Unit test cobre leitura, escrita e isolamento. Commit `test`.
 - **Dependencies:** none
 - **Test:** `cargo test -p ddc-adapters --locked in_memory`
-- **Status:** pending
+- **Status:** completed
 
 #### T-3: Crate `ddc-cli` + argumentos clap (D-cli-5a)
 - **Specialist:** jdi-doer-ddc-control
@@ -81,7 +81,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Extras: limites de `<VALUE>` (65535 ok; 65536 e nome → erro), `--yes` só em `set`, globais depois do subcomando.
 - **Dependencies:** none
 - **Test:** verifies #1 e #8 do DoD + `cargo test -p ddc-cli --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2
 
@@ -93,7 +93,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Testes: os 4 comandos nos 2 formatos; JSON relido com `serde_json::Value`, campo a campo; `declared_in_capabilities == false` avisado no texto; código sem nome (`name: null`); `applied: false`. `! grep -rnE 'Risk::|risk_for_code|authorize_write' crates/ddc-cli/src` (D-cli-3).
 - **Dependencies:** T-3
 - **Test:** `cargo test -p ddc-cli --locked output`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3
 
@@ -107,7 +107,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Testes de erro: cada variante de `DdcError` → seu código; cada mensagem traz id, índice ou código.
 - **Dependencies:** T-4
 - **Test:** `cargo test -p ddc-cli --locked -- select exit`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 
@@ -124,7 +124,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Extras: `list`/`caps`/`get` em texto e `--json` via `--fake`; `caps --refresh` chama `refresh` com o id resolvido antes de `ReadCapabilities` (closure que grava); `set brightness 60` → read-back 60; `ignoring_writes_to` → aviso + `applied: false` + 0. Esperado ~550 linhas (o hook avisa acima de 800).
 - **Dependencies:** T-1, T-2, T-5
 - **Test:** verifies #4–#7 do DoD + `cargo test -p ddc-cli --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5 (parallel-eligible)
 
@@ -136,7 +136,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Extras: `get foo` → 2 (clap nativo, não reinterceptado); `get brightness` → 0. Commit `test`.
 - **Dependencies:** T-6
 - **Test:** verify #9 do DoD
-- **Status:** pending
+- **Status:** completed
 
 #### T-8: README + CHANGELOG (DoD manual do PROJECT)
 - **Specialist:** jdi-doer-ddc-control
@@ -146,7 +146,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`). Scope `cli`, D-XX citad
   - Saídas de exemplo reais, capturadas no box só com leitura (`list`/`get`), nunca `set` em hardware. Sem mencionar `--fake` (D-cli-4). CHANGELOG `[Unreleased]`: `ddc-cli`, `CachingMonitorBackend`, `FakeMonitor::with_vcp_failure`. Commit `docs`.
 - **Dependencies:** T-6
 - **Test:** `grep -q 'ddc-cli' README.md && ! grep -q -- '--fake' README.md && grep -q '^## \[Unreleased\]' CHANGELOG.md`
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - Total tasks: 8 | Waves: 5 (W1 e W5 paralelizáveis) | Speedup estimado: 1.6x
