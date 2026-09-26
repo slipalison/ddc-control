@@ -35,7 +35,7 @@ Todas as tasks usam o specialist `jdi-doer-ddc-control`. Cada commit exige `carg
   - Os verifies #1–#3 do DoD da CONTEXT passam. O lock é gerado uma vez sem `--locked` e vai no mesmo commit.
 - **Dependencies:** none
 - **Test:** `cargo build --workspace --locked && cargo test --workspace --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2
 
@@ -48,7 +48,7 @@ Todas as tasks usam o specialist `jdi-doer-ddc-control`. Cada commit exige `carg
   - Testes: todos os códigos da seed; `0xE0..=0xFF` e os códigos do caps RTK fora da seed (0x02 0x0B 0x0C 0x52 0xAC 0xAE 0xB2 0xB6 0xC6 0xC8 0xDF) dão `Dangerous`; `Display` coberto. Todo item `pub` com `///`.
 - **Dependencies:** T-1
 - **Test:** `cargo test -p ddc-core --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3 (parallel-eligible)
 
@@ -62,7 +62,7 @@ Todas as tasks usam o specialist `jdi-doer-ddc-control`. Cada commit exige `carg
   - `tolerates_missing_spaces_and_unknown_tags`, mais testes de desbalanceado → `Transport` e de `feature()` para 0x10/0x14/0x62.
 - **Dependencies:** T-2
 - **Test:** `cargo test -p ddc-core --locked capabilities`
-- **Status:** pending
+- **Status:** completed
 
 #### T-4: Port `MonitorBackend` + fake `InMemoryMonitorBackend`
 - **Specialist:** jdi-doer-ddc-control
@@ -73,7 +73,7 @@ Todas as tasks usam o specialist `jdi-doer-ddc-control`. Cada commit exige `carg
   - Unit tests para cada comportamento acima.
 - **Dependencies:** T-2
 - **Test:** `cargo test -p ddc-adapters --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 
@@ -86,7 +86,7 @@ Todas as tasks usam o specialist `jdi-doer-ddc-control`. Cada commit exige `carg
   - Testes extras: 0x10 declarado/Continuous, `allowed_values` de 0x60, caps lido uma vez só, `MonitorNotFound`, caps desbalanceado → `Transport`, `list_monitors`. Os greps dos gates 5.3/5.4 não retornam nada.
 - **Dependencies:** T-3, T-4
 - **Test:** `cargo test -p ddc-core --locked --test monitor_control`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5
 
@@ -106,7 +106,7 @@ Todas as tasks usam o specialist `jdi-doer-ddc-control`. Cada commit exige `carg
   - Testes extras: código ausente e nunca lido → `UnsupportedFeature`; aceito depois de `get_feature`; NC fora da lista; Dangerous confirmado escreve. `grep -RnE 'Confirm::Yes' crates/*/src | grep -v 'tests\.rs:'` sem saída (gate 5.7). Cobertura ≥ 80%.
 - **Dependencies:** T-5
 - **Test:** `cargo test --workspace --locked` + cobertura (abaixo)
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 6
 
@@ -118,7 +118,7 @@ Todas as tasks usam o specialist `jdi-doer-ddc-control`. Cada commit exige `carg
   - `CHANGELOG.md` (Keep a Changelog) com `## [Unreleased]` listando o que a phase adicionou.
 - **Dependencies:** T-6
 - **Test:** `grep -q '^## \[Unreleased\]' CHANGELOG.md && ! grep -q 'not started' README.md`
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - Total tasks: 7 | Waves: 6 (só a W3 é paralelizável) | Speedup estimado: 1.2x
