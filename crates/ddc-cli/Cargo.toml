@@ -1,0 +1,22 @@
+[package]
+name = "ddc-cli"
+description = "Command-line driving adapter of ddc-control: list monitors, read capabilities, get and set VCP features over DDC/CI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Declared here rather than in [workspace.dependencies] so serde stays out
+# of the hexagon's crates (D-2): only this driving adapter serializes DTOs.
+[dependencies]
+ddc-core = { workspace = true }
+ddc-adapters = { workspace = true }
+clap = { version = "4.6", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+assert_cmd = "2.2"
+predicates = "3"
+
+[lints]
+workspace = true
