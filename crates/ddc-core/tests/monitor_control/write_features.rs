@@ -9,7 +9,7 @@ use crate::support::{
 #[test]
 fn dangerous_write_without_confirm_is_rejected() {
     let (osd, backend) = osd_with([rtk_monitor()]);
-    let unclassified = VcpCode(0x52);
+    let unclassified = VcpCode(0x8D);
 
     let input = osd.set_feature(&rtk_id(), VcpCode::INPUT_SOURCE, 0x11, Confirm::No);
     let unknown = osd.set_feature(&rtk_id(), unclassified, 1, Confirm::No);

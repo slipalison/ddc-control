@@ -117,6 +117,8 @@ fn unbalanced_capabilities_do_not_block_reads() {
     );
 }
 
+/// Without capabilities the preset has no value list, but the catalog
+/// still knows it is non-continuous (D-2026-09-26-full-osd-control-1).
 #[test]
 fn unreadable_capabilities_are_fetched_once_across_reads() {
     let (osd, backend) = osd_with([rtk_monitor_without_capabilities()]);
@@ -124,7 +126,7 @@ fn unreadable_capabilities_are_fetched_once_across_reads() {
     osd.get_feature(&rtk_id(), VcpCode::BRIGHTNESS).unwrap();
     let preset = osd.get_feature(&rtk_id(), VcpCode::COLOR_PRESET).unwrap();
 
-    assert_eq!(preset.feature.kind, FeatureKind::Continuous);
+    assert_eq!(preset.feature.kind, FeatureKind::NonContinuous);
     assert_eq!(preset.feature.allowed_values, None);
     assert_eq!(
         backend.calls(),

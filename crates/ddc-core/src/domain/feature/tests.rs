@@ -35,9 +35,23 @@ fn seed_dangerous_codes_are_dangerous() {
     }
 }
 
+/// Every manufacturer-specific code is dangerous, except 0xFD and 0xFF: the
+/// catalog lists them read-only, and a read-only code is never dangerous.
 #[test]
-fn manufacturer_specific_range_is_dangerous() {
+fn manufacturer_specific_range_is_dangerous_except_its_read_only_codes() {
     for raw in VcpCode::MANUFACTURER_SPECIFIC_START.0..=u8::MAX {
+        let expected = match raw {
+            0xFD | 0xFF => Risk::Safe,
+            _ => Risk::Dangerous,
+        };
+        assert_eq!(risk_for_code(VcpCode(raw)), expected, "{}", VcpCode(raw));
+    }
+}
+
+#[test]
+fn codes_outside_the_catalog_default_to_dangerous() {
+    let uncatalogued = [0x00, 0x01, 0x03, 0x8D, 0xDC, 0xE0, 0xE5];
+    for raw in uncatalogued {
         assert_eq!(
             risk_for_code(VcpCode(raw)),
             Risk::Dangerous,
@@ -47,18 +61,15 @@ fn manufacturer_specific_range_is_dangerous() {
     }
 }
 
+/// These codes of the dev monitor fell back to `Dangerous` before the
+/// catalog classified them (D-2026-09-26-full-osd-control-1).
 #[test]
-fn unclassified_codes_default_to_dangerous() {
+fn rtk_codes_outside_the_seed_are_classified_by_the_catalog() {
     let rtk_codes_outside_seed = [
         0x02, 0x0B, 0x0C, 0x52, 0xAC, 0xAE, 0xB2, 0xB6, 0xC6, 0xC8, 0xDF,
     ];
     for raw in rtk_codes_outside_seed {
-        assert_eq!(
-            risk_for_code(VcpCode(raw)),
-            Risk::Dangerous,
-            "{}",
-            VcpCode(raw)
-        );
+        assert_eq!(risk_for_code(VcpCode(raw)), Risk::Safe, "{}", VcpCode(raw));
     }
 }
 
@@ -85,8 +96,8 @@ fn unconfirmed_write_is_refused_only_for_dangerous_codes() {
         Err(DdcError::DangerousWriteNotConfirmed(VcpCode::POWER_MODE))
     );
     assert_eq!(
-        authorize_write(VcpCode(0x52), Confirm::No),
-        Err(DdcError::DangerousWriteNotConfirmed(VcpCode(0x52)))
+        authorize_write(VcpCode(0x8D), Confirm::No),
+        Err(DdcError::DangerousWriteNotConfirmed(VcpCode(0x8D)))
     );
 }
 

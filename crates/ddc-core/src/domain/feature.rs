@@ -1,3 +1,4 @@
+use super::mccs_catalog::catalog_entry;
 use super::{DdcError, VcpCode, VcpValue};
 
 /// How a feature's value is interpreted (MCCS feature type).
@@ -101,26 +102,13 @@ pub struct FeatureReading {
     pub declared_in_capabilities: bool,
 }
 
-/// Seed risk classification of a VCP code.
+/// Risk of writing `code`, as the [MCCS catalog](super::mccs_catalog) says.
 ///
-/// Safe: brightness, contrast, color preset, RGB gains, volume, sharpness and
-/// OSD language. Everything else — factory resets, input source, OSD lock,
-/// power mode, the manufacturer-specific range `0xE0..=0xFF`, and any code not
-/// yet classified — is `Dangerous`, so an unknown code always needs
+/// Any code outside the catalog — the rest of the manufacturer-specific range
+/// `0xE0..=0xFF` included — is `Dangerous`, so an unknown code always needs
 /// confirmation before it is written.
 pub fn risk_for_code(code: VcpCode) -> Risk {
-    match code {
-        VcpCode::BRIGHTNESS
-        | VcpCode::CONTRAST
-        | VcpCode::COLOR_PRESET
-        | VcpCode::RED_GAIN
-        | VcpCode::GREEN_GAIN
-        | VcpCode::BLUE_GAIN
-        | VcpCode::AUDIO_VOLUME
-        | VcpCode::SHARPNESS
-        | VcpCode::OSD_LANGUAGE => Risk::Safe,
-        _ => Risk::Dangerous,
-    }
+    catalog_entry(code).map_or(Risk::Dangerous, |entry| entry.risk)
 }
 
 /// Refuses a write to a dangerous code that the user did not confirm. Needs

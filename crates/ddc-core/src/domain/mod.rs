@@ -1,9 +1,10 @@
 //! Monitor-control domain model: VCP codes and values, monitors, features and
-//! their write risk, and the domain error type.
+//! their write risk, the MCCS catalog, and the domain error type.
 
 mod capabilities;
 mod error;
 mod feature;
+pub mod mccs_catalog;
 mod monitor;
 mod vcp;
 
