@@ -101,3 +101,40 @@
 - `get volume -m RTK` 1.15 s (30/100, com o aviso de "not declared"); `get brightness --json` 1.14 s (100/100).
 - `caps -m LG` (DDC mudo): exit 6 em 3.24 s. Era ~2.3 s antes do backoff de 500 ms.
 - `DDC_HW_TESTS=1 ... --test real_monitor`: 5/5 ok.
+
+## Fix round (W-4)
+
+**Status:** complete. 2 commits, 0 blocked. Spec travada: D-2026-09-26-cli-4. W-5 não foi tocado (fica para `full-osd-control`).
+
+### Commits
+- `6293e17 fix(cli)`: W-4. A resposta DDC/CI "unsupported VCP code" (result code 0x01) vira `DdcError::UnsupportedFeature(code)` na 1ª tentativa, sem retry e sem checagem de presença. Qualquer outra falha continua transitória (D-2026-09-26-ddc-backends-1 intacta; "job expirado nunca toca o hardware" intacto).
+  - Seam: `HandleError { kind, message }` com `Transient | Unsupported`. `transaction_error` classifica; `RetryPolicy::run` para na 1ª recusa (`Failure::Unsupported`); o worker mapeia por transação (`read_vcp`/`write_vcp` → `UnsupportedFeature(code)`; caps → `Transport`, caso impossível com `ddc-hi` porque a resposta de caps não tem result code).
+  - **Detecção por texto (fallback documentado).** O `ddc_i2c::Error<io::Error>` (tipo real no Linux) só implementa o `cause()` deprecado, então o `source()` é `None` e `chain().find_map(downcast_ref::<ddc::ErrorCode>)` nunca acha o `ErrorCode`. Um teste fixa isso. O casamento é exato: texto `Unsupported VCP code`, puro ou com o prefixo `DDC/CI error: ` do `ddc-i2c`. No Windows, o `dxva2` decodifica sozinho e o `ddc-winapi` só devolve `io::Error::last_os_error()`, então tudo continua transitório lá (documentado).
+  - Nenhuma dependência de produção nova. `ddc = "=0.2.2"` e `ddc-i2c = "=0.2.2"` entram só como **dev-dependencies**, nas versões já travadas, para montar nos testes a cadeia exata do Linux. O `Cargo.lock` ganha só 2 arestas, nenhum pacote novo. (Desvio: a autorização citava só `ddc`; o `ddc-i2c` de dev é o que torna o teste fiel ao tipo real.)
+  - Testes novos:
+    - `transaction_error_classifies_only_the_unsupported_vcp_code_reply_as_final`: cadeia real do Linux e `ErrorCode` puro com context;
+    - `transaction_error_keeps_every_other_ddc_hi_failure_transient`: `InvalidOffset`, `InvalidChecksum`, "Unrecognized VCP error code 0x02", erro I2C cujo texto é "Unsupported VCP code" e io error com context;
+    - `unsupported_vcp_code_reply_reaches_the_port_as_unsupported_feature`: cadeia real → client → port;
+    - `unsupported_reply_is_final_without_retry_or_presence_check`: relógio virtual, orçamento de 8 s, em que a checagem de presença caberia. Custo `(1 tentativa, 1 enumerate, 0 s)` para read, write e caps;
+    - `a_code_the_monitor_refuses_exits_4_for_get_and_set_without_writing`: CLI `--fake`. `get 0x87` e `set 0x87 5` saem com 4, e o log in-process não tem `WriteVcp`. Não foi preciso mudar a fixture;
+    - `hardware_code_the_dev_monitor_refuses_is_unsupported`: `#[ignore]`, somente leitura, 0x8D e 0xDC no RTK.
+  - Prova de mutação: desligar a parada em `retry.rs` derruba o teste do worker e o de ponta a ponta. Desligar a classificação em `hardware.rs` derruba o de classificação e o de ponta a ponta. Os arquivos foram restaurados e a mutação não foi commitada.
+- `705e1e3 docs(cli)`: README (tabela de exit codes, parágrafo "exit 4 vs 6", bullet Retries, "about 1 s longer" → "about 1.6 s longer") e CHANGELOG `[Unreleased]` (bullets do backend e dos exit codes).
+
+### Gates (exit codes)
+- build 0; test 0 (194 passed, 0 failed, 6 ignored de hardware); `fmt --check` 0; clippy `-D warnings` 0 (também `-p ddc-adapters --features ddc-hi --all-targets` 0).
+- Check Linux `--workspace --target x86_64-unknown-linux-gnu` 0.
+- Check Windows `-p ddc-cli -p ddc-adapters --target x86_64-pc-windows-msvc` 0; `-p ddc-adapters --features ddc-hi` para Windows 0 (e `--all-targets` 0).
+- llvm-cov 0: `TOTAL 2111 84 96.02% 266 12 95.49% 1386 45 96.75% 0 0 -`. As linhas não cobertas nos arquivos mexidos são só o shell de hardware (`impl DdcHandle for Handle`, `DdcHiDisplays::enumerate`) e a falha de spawn da thread, todos pré-existentes.
+- `cargo audit` 1, só com RUSTSEC-2018-0005 (serde_yaml 0.7.5) e RUSTSEC-2024-0320 (yaml-rust 0.4.5).
+- DoD da CONTEXT: os 9 Verify imprimem OK.
+
+### Hardware (somente leitura; nenhum `set`/`reset`)
+- `get -m RTK`, antes (3b48fce) → depois (705e1e3):
+  - 0x8D: exit 6 "DDC/CI error: Unsupported VCP code (gave up after attempt 3 of 3)" em 1.35 s → **exit 4** "feature 0x8D is not supported" em 1.18 s;
+  - 0x9B: exit 6 em 1.34 s → **exit 4** em 1.18 s;
+  - 0xDC: exit 6 em 1.35 s → **exit 4** em 1.24 s;
+  - 0xC0: exit 6 em 1.35 s → **exit 4** em 1.20 s;
+  - 0x6C e 0x62: exit 0 antes e depois (respondidos sem estar declarados).
+- `DDC_HW_TESTS=1 ... --test real_monitor`: 6/6 ok. No teste novo, 0xDC → `UnsupportedFeature` em 84 ms (1 tentativa) e o RTK respondeu 0x10 logo depois.
+- **Achado novo, fora do escopo de W-4:** `get 0x7E` faz o `ddc-i2c` 0.2.2 entrar em panic (`index out of bounds: the len is 11 but the index is 11`, `ddc-i2c-0.2.2/src/lib.rs:194`, off-by-one na checagem de tamanho antes do checksum). Isso derruba a thread `ddc-hi-worker`, e o comando sai com 6 "the DDC worker thread is not running" (antes e depois). Numa CLI de um processo só, o estrago fica nesse comando. Num processo longo (tray, `features --probe`), toda chamada seguinte falha. O `--probe` da `full-osd-control` vai varrer 0x7E. Precisa de D-XX: por exemplo, `catch_unwind` em volta de cada transação no worker, mapeando para `Transport`.
