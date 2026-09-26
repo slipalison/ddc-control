@@ -2,7 +2,7 @@
 
 Control everything your monitor's physical OSD offers — brightness, contrast, input source, color preset, volume, power — from software, over DDC/CI, with the same Rust binary on Windows and Linux.
 
-**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`) and 3 (`cli`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, and reads and writes their features on real hardware. The tray app comes next. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
+**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`) and 3 (`cli`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities and reads their features on real hardware. Writes pass the same checks and are tested against the in-memory backend; they have not been validated on real hardware yet. The tray app comes next. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
 
 ## Install
 
@@ -90,11 +90,11 @@ Reading a capabilities string takes about 2.5 s on the dev monitor, and every `d
 - Windows: `%LOCALAPPDATA%\ddc-control\caps\`
 - Elsewhere: `$XDG_CACHE_HOME/ddc-control/caps/` when that variable is an absolute path, else `~/.cache/ddc-control/caps/`
 
-With the cache warm, a `get` on the dev monitor takes about 1.15 s (the enumeration) instead of about 3.7 s. Failed reads are never cached. `caps --refresh` reads the monitor again and overwrites the file. If none of those directories can be determined, `ddc-cli` runs without a cache.
+With the cache warm, a `get` on the dev monitor takes about 1.15 s (the enumeration) instead of about 3.7 s. Failed reads are never cached, and neither are replies the core cannot parse, such as a truncated string; a cached file the core cannot parse is ignored. `caps --refresh` reads the monitor again, and only a successful read replaces the file: a refresh the monitor refuses exits 6 and leaves the previous file for later runs. If none of those directories can be determined, `ddc-cli` runs without a cache.
 
 The cache is keyed by monitor id, and ids built without an EDID serial (the device description on Windows, `index-N`, a `#N` suffix) can move to another monitor after a hotplug, so one monitor's capabilities could be served for another. Risk is decided per code and continuous maxima are read from the monitor, so the worst case is a write checked against the wrong list of allowed values. Run `caps --refresh` after changing monitors.
 
-Some monitors, the dev one included, refuse a capabilities read issued within a few seconds of the previous one. `caps --refresh` then fails with exit 6; wait a few seconds and run it again.
+Some monitors, the dev one included, refuse a capabilities read issued right after the previous one, and keep refusing for a few hundred milliseconds after each failed attempt. Capabilities reads are therefore retried 500 ms apart, where VCP reads and writes wait 50 ms. On the dev monitor, back-to-back `caps --refresh` runs then succeed, taking about 1 s longer when the first attempt is refused. If a refresh still fails, wait a few seconds and run it again; the cached file keeps being used meanwhile.
 
 ### Known limitations
 
@@ -108,10 +108,10 @@ Some monitors, the dev one included, refuse a capabilities read issued within a 
     - **One worker thread** owns every monitor handle and runs every DDC/CI transaction. The Windows handles cannot cross threads, so this is what makes the backend `Send + Sync` without `unsafe`.
     - **Budgets.** Callers wait at most a per-operation budget: 1 s for a VCP read or write, 8 s for a capabilities read, 5 s for an enumeration (`DdcHiBudgets`, overridable with `with_budgets`). Past the budget they get `Timeout`. A job whose caller already gave up never reaches the monitor.
     - **No `enumerate()` needed first.** A monitor id the backend has not seen yet (a fresh backend, a saved id, a monitor plugged in later) costs one enumeration under the enumeration budget; then the call runs under its own budget. An id still missing after that answers `MonitorNotFound`.
-    - **Retries.** A failed transaction is retried up to 3 times, 50 ms apart, within the budget. If it still fails, the answer is `Transport`, which names the attempts. Only when one more enumeration (as long as the last one) still fits the rest of the budget is the monitor looked up again first, so an unplugged one answers `MonitorNotFound`. With the default budgets that happens for capabilities reads (8 s), not for VCP reads and writes (1 s, against a ~1.1 s enumeration): a display with mute DDC/CI answers `Transport` in about 100 ms and does not hold up calls to other monitors.
+    - **Retries.** A failed transaction is retried up to 3 times within the budget: 50 ms apart for VCP reads and writes, 500 ms apart for capabilities reads, which the dev monitor refuses for a few hundred milliseconds after a failed one. If it still fails, the answer is `Transport`, which names the attempts. Only when one more enumeration (as long as the last one) still fits the rest of the budget is the monitor looked up again first, so an unplugged one answers `MonitorNotFound`. With the default budgets that happens for capabilities reads (8 s), not for VCP reads and writes (1 s, against a ~1.1 s enumeration): a display with mute DDC/CI answers `Transport` in about 100 ms and does not hold up calls to other monitors.
     - **`MonitorId` scheme.** With EDID (Linux), the id is `manufacturer-model-serial`, sanitized to ASCII letters, digits and single dashes. The dev monitor is `RTK-RTK-QHD-HDR-01010101`. Without EDID (Windows), the id is the sanitized device description, else `index-N`. A repeated id in one enumeration gets `#2`, `#3`…; that suffix follows enumeration order, so it may change across hotplugs.
     - **Enumeration** only reads EDID and never probes DDC/CI. A display with mute DDC/CI is listed, and fails on its first read.
-  - `CachingMonitorBackend`, a decorator for any backend that keeps capabilities strings on disk, one file per monitor id, in a directory its caller passes in. Only successful reads are stored, cache I/O never fails a call, and `invalidate` forces the next read to reach the monitor. `default_cache_dir()` resolves the per-user directory above.
+  - `CachingMonitorBackend`, a decorator for any backend that keeps capabilities strings on disk, one file per monitor id, in a directory its caller passes in. Only successful reads the core can parse are stored, and cache I/O never fails a call. `invalidate` makes reads reach the monitor until one succeeds and replaces the file; until then the file is kept for later runs. `default_cache_dir()` resolves the per-user directory above.
   - `InMemoryMonitorBackend`, a scripted fake the core's use-case tests run against.
 - `crates/ddc-cli` — the `ddc-cli` binary, a driving adapter: clap arguments, monitor selection, text and JSON output, and the exit-code table. `main.rs` is only the composition root that wires `DdcHiMonitorBackend`, `CachingMonitorBackend` and `SoftwareOsd`.
 
