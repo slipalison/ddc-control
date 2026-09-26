@@ -17,9 +17,9 @@ type CapabilitiesOutcome = Result<Capabilities, DdcError>;
 /// Caches, per monitor, the outcome of fetching its capabilities and the last
 /// maximum read for each feature, so writes can be validated without extra
 /// round-trips. Capabilities that cannot be read or parsed never block a
-/// read: the monitor is then treated as declaring no code, so a write needs
-/// the maximum from an earlier read, and the failure is remembered so it is
-/// not fetched again on every read.
+/// read: the monitor is then treated as declaring no code, and the failure is
+/// remembered so it is not fetched again on every read. A write whose
+/// maximum is not known yet reads the feature once to learn it.
 #[derive(Debug)]
 pub struct SoftwareOsd<B> {
     backend: B,
@@ -71,22 +71,15 @@ impl<B: MonitorBackend> SoftwareOsd<B> {
     }
 
     /// The maximum a write to `feature` is validated against: the last one
-    /// read, else one read now if the capabilities declare the code. `None`
-    /// when the feature needs no maximum or none can be trusted.
-    fn max_for_write(
-        &self,
-        id: &MonitorId,
-        capabilities: &Capabilities,
-        feature: &Feature,
-    ) -> Result<Option<u16>, DdcError> {
+    /// read, else one read now, whether or not the capabilities declare the
+    /// code (D-2026-09-26-cli-1). A failed read is the write's error. `None`
+    /// when the feature lists its allowed values and needs no maximum.
+    fn max_for_write(&self, id: &MonitorId, feature: &Feature) -> Result<Option<u16>, DdcError> {
         if !feature.requires_known_max() {
             return Ok(None);
         }
         if let Some(max) = self.cached_max(id, feature.code) {
             return Ok(Some(max));
-        }
-        if !capabilities.declares(feature.code) {
-            return Ok(None);
         }
         let current = self.backend.read_vcp(id, feature.code)?;
         self.remember_max(id, feature.code, current.max);
@@ -131,7 +124,7 @@ impl<B: MonitorBackend> MonitorControl for SoftwareOsd<B> {
         authorize_write(code, confirm)?;
         let capabilities = self.capabilities_or_empty(id)?;
         let feature = capabilities.feature(code);
-        let known_max = self.max_for_write(id, &capabilities, &feature)?;
+        let known_max = self.max_for_write(id, &feature)?;
         feature.validate_write(value, known_max)?;
         self.backend.write_vcp(id, code, value)?;
         let read_back = self.backend.read_vcp(id, code)?;

@@ -19,10 +19,11 @@ pub trait MonitorControl {
     /// Writes a feature and returns the value read back right after.
     ///
     /// A dangerous feature needs explicit user [`Confirm`]ation, checked
-    /// before the monitor is touched at all. The value is then validated against the feature's
-    /// allowed values or its known maximum; with neither known the write is
-    /// refused. Compare the returned value with `value` to catch monitors that
-    /// acknowledge a write without applying it.
+    /// before the monitor is touched at all. The value is then validated
+    /// against the feature's allowed values or its maximum; a maximum not
+    /// known yet is read from the monitor first, and if that read fails the
+    /// write is refused with its error. Compare the returned value with
+    /// `value` to catch monitors that acknowledge a write without applying it.
     fn set_feature(
         &self,
         id: &MonitorId,
