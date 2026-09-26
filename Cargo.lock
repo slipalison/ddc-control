@@ -33,6 +33,7 @@ dependencies = [
 name = "ddc-adapters"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "ddc-core",
  "ddc-hi",
 ]
