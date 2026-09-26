@@ -14,6 +14,9 @@ use ddc_core::ports::{MonitorBackend, MonitorControl};
 const CAPS: &str = "(prot(monitor)type(LCD)model(FAKE)vcp(10 12 60(0F 11)))";
 const NEW_CAPS: &str = "(prot(monitor)type(LCD)model(FAKE)vcp(10 12 14(01 02)))";
 const OLD_CAPS: &str = "(prot(monitor)type(LCD)model(OLD)vcp(10))";
+/// A capabilities reply cut short, as a flaky scaler may send: its
+/// parentheses never close, so the core cannot parse it.
+const TRUNCATED_CAPS: &str = "(prot(monitor)type(LCD)model(FAKE)vcp(10 12 60(0F";
 const KEY: &str = "FAKE-CACHE-01";
 
 /// A fresh, empty directory under the system temp dir, removed on drop.
@@ -164,7 +167,8 @@ fn software_osd_runs_on_a_borrowed_cache_that_can_still_be_invalidated() {
     assert_eq!(fs::read_to_string(cache_file(&dir)).unwrap(), CAPS);
 
     caching.invalidate(&id());
-    assert!(!cache_file(&dir).exists());
+    assert_eq!(fs::read_to_string(cache_file(&dir)).unwrap(), CAPS);
+    assert_eq!(caching.read_capabilities(&id()).unwrap(), CAPS);
 
     assert_eq!(
         fake.calls(),
@@ -174,8 +178,95 @@ fn software_osd_runs_on_a_borrowed_cache_that_can_still_be_invalidated() {
             BackendCall::ReadVcp(id(), VcpCode::BRIGHTNESS),
             BackendCall::WriteVcp(id(), VcpCode::BRIGHTNESS, 60),
             BackendCall::ReadVcp(id(), VcpCode::BRIGHTNESS),
+            BackendCall::ReadCapabilities(id()),
         ]
     );
+}
+
+/// `caps --refresh` on a monitor that refuses the re-read: the error
+/// reaches the caller, and the file stays for the next run
+/// (D-2026-09-26-cli-3).
+#[test]
+fn failed_refresh_keeps_the_previous_cache_file_for_later_runs() {
+    let dir = TempDir::new("failed-refresh").unwrap();
+    let warm = CachingMonitorBackend::new(backend(monitor(CAPS)), dir.path().to_path_buf());
+    assert_eq!(warm.read_capabilities(&id()).unwrap(), CAPS);
+    drop(warm);
+
+    let flaky = backend(monitor(NEW_CAPS).with_transient_capabilities_failures(1));
+    let refreshing = CachingMonitorBackend::new(flaky.clone(), dir.path().to_path_buf());
+    refreshing.invalidate(&id());
+
+    assert_eq!(fs::read_to_string(cache_file(&dir)).unwrap(), CAPS);
+    let refused = refreshing.read_capabilities(&id());
+    assert!(
+        matches!(refused, Err(DdcError::Transport(_))),
+        "{refused:?}"
+    );
+    assert_eq!(fs::read_to_string(cache_file(&dir)).unwrap(), CAPS);
+    drop(refreshing);
+
+    let next_run_fake = backend(monitor(NEW_CAPS));
+    let next_run = CachingMonitorBackend::new(next_run_fake.clone(), dir.path().to_path_buf());
+    assert_eq!(next_run.read_capabilities(&id()).unwrap(), CAPS);
+    assert!(next_run_fake.calls().is_empty());
+    assert_eq!(capabilities_reads(&flaky), 1);
+}
+
+/// Within one run, an invalidated monitor keeps asking the wrapped backend
+/// until a read succeeds; that read replaces the file.
+#[test]
+fn a_failed_refresh_is_retried_by_the_next_read_of_the_same_run() {
+    let dir = TempDir::new("retried-refresh").unwrap();
+    fs::write(cache_file(&dir), OLD_CAPS).unwrap();
+    let flaky = backend(monitor(NEW_CAPS).with_transient_capabilities_failures(1));
+    let caching = CachingMonitorBackend::new(flaky.clone(), dir.path().to_path_buf());
+
+    caching.invalidate(&id());
+    assert!(caching.read_capabilities(&id()).is_err());
+
+    assert_eq!(caching.read_capabilities(&id()).unwrap(), NEW_CAPS);
+    assert_eq!(fs::read_to_string(cache_file(&dir)).unwrap(), NEW_CAPS);
+    assert_eq!(caching.read_capabilities(&id()).unwrap(), NEW_CAPS);
+    assert_eq!(capabilities_reads(&flaky), 2);
+}
+
+/// A truncated reply reaches the caller, which reports it, but never the
+/// disk: neither a cold cache nor a good file ever holds it
+/// (D-2026-09-26-cli-3, review W-3).
+#[test]
+fn unparseable_capabilities_are_returned_but_never_persisted() {
+    let cold_dir = TempDir::new("truncated-cold").unwrap();
+    let truncated = backend(monitor(TRUNCATED_CAPS));
+    let cold = CachingMonitorBackend::new(truncated.clone(), cold_dir.path().to_path_buf());
+
+    assert_eq!(cold.read_capabilities(&id()).unwrap(), TRUNCATED_CAPS);
+    assert_eq!(cold.read_capabilities(&id()).unwrap(), TRUNCATED_CAPS);
+    assert!(cold_dir.files().unwrap().is_empty());
+    assert_eq!(capabilities_reads(&truncated), 2);
+
+    let warm_dir = TempDir::new("truncated-warm").unwrap();
+    fs::write(cache_file(&warm_dir), CAPS).unwrap();
+    let warm = CachingMonitorBackend::new(truncated.clone(), warm_dir.path().to_path_buf());
+    warm.invalidate(&id());
+
+    assert_eq!(warm.read_capabilities(&id()).unwrap(), TRUNCATED_CAPS);
+    assert_eq!(fs::read_to_string(cache_file(&warm_dir)).unwrap(), CAPS);
+}
+
+/// A file the core cannot parse, whatever wrote it, is a miss and gets
+/// replaced by the next good read.
+#[test]
+fn an_unparseable_cache_file_is_a_miss_and_gets_replaced() {
+    let dir = TempDir::new("unparseable").unwrap();
+    fs::write(cache_file(&dir), TRUNCATED_CAPS).unwrap();
+    let fake = backend(monitor(CAPS));
+    let caching = CachingMonitorBackend::new(fake.clone(), dir.path().to_path_buf());
+
+    assert_eq!(caching.read_capabilities(&id()).unwrap(), CAPS);
+
+    assert_eq!(capabilities_reads(&fake), 1);
+    assert_eq!(fs::read_to_string(cache_file(&dir)).unwrap(), CAPS);
 }
 
 #[test]
@@ -254,11 +345,11 @@ fn a_cache_file_that_cannot_be_replaced_is_bypassed_on_every_read() {
     assert_eq!(dir.files().unwrap(), [file]);
 }
 
-/// Removal fails in a read-only directory while the file stays readable:
-/// the invalidation alone must keep the stale file from being served.
+/// Replacing fails in a read-only directory while the stale file stays
+/// readable: the invalidation alone must keep it from being served.
 #[cfg(unix)]
 #[test]
-fn invalidation_holds_when_the_stale_file_cannot_be_removed() {
+fn invalidation_holds_when_the_stale_file_cannot_be_replaced() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = TempDir::new("read-only").unwrap();
@@ -268,12 +359,12 @@ fn invalidation_holds_when_the_stale_file_cannot_be_removed() {
     let caching = CachingMonitorBackend::new(fake.clone(), dir.path().to_path_buf());
 
     caching.invalidate(&id());
-    let removed = !cache_file(&dir).exists();
     let first = caching.read_capabilities(&id());
+    let replaced = fs::read_to_string(cache_file(&dir)).is_ok_and(|raw| raw == CAPS);
     let second = caching.read_capabilities(&id());
     fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
 
-    if removed {
+    if replaced {
         eprintln!("skipped: running with permission to write a read-only directory");
         return;
     }
