@@ -133,6 +133,20 @@ pub struct FeatureReading {
     pub declared_in_capabilities: bool,
 }
 
+/// The result of reading one code the capabilities do not declare, as part
+/// of a probe: a failure concerns only this code
+/// (D-2026-09-26-full-osd-control-2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbedFeature {
+    /// The code that was read.
+    pub code: VcpCode,
+    /// The reading, or why this code gave none:
+    /// [`DdcError::UnsupportedFeature`] when the monitor said it does not
+    /// support the code, [`DdcError::Transport`] or [`DdcError::Timeout`]
+    /// when it did not answer.
+    pub outcome: Result<FeatureReading, DdcError>,
+}
+
 /// Risk of writing `code`, as the [MCCS catalog](super::mccs_catalog) says.
 ///
 /// Any code outside the catalog — the rest of the manufacturer-specific range

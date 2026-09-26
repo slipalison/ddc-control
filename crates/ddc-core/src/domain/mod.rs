@@ -11,7 +11,8 @@ mod vcp;
 pub use capabilities::Capabilities;
 pub use error::DdcError;
 pub use feature::{
-    Access, Confirm, Feature, FeatureKind, FeatureReading, Risk, authorize_write, risk_for_code,
+    Access, Confirm, Feature, FeatureKind, FeatureReading, ProbedFeature, Risk, authorize_write,
+    risk_for_code,
 };
 pub use monitor::{MonitorId, MonitorInfo};
 pub use vcp::{VcpCode, VcpValue};

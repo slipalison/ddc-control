@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use crate::domain::mccs_catalog::catalog_codes;
 use crate::domain::{
-    Capabilities, Confirm, DdcError, Feature, FeatureReading, MonitorId, MonitorInfo, VcpCode,
-    VcpValue, authorize_write,
+    Capabilities, Confirm, DdcError, Feature, FeatureReading, MonitorId, MonitorInfo,
+    ProbedFeature, VcpCode, VcpValue, authorize_write,
 };
 use crate::ports::{MonitorBackend, MonitorControl};
 
@@ -63,6 +64,23 @@ impl<B: MonitorBackend> SoftwareOsd<B> {
         }
     }
 
+    /// Reads `code` from the monitor, remembering the maximum it reports so
+    /// a later write needs no extra read.
+    fn read_and_track(
+        &self,
+        id: &MonitorId,
+        capabilities: &Capabilities,
+        code: VcpCode,
+    ) -> Result<FeatureReading, DdcError> {
+        let value = self.backend.read_vcp(id, code)?;
+        self.remember_max(id, code, value.max);
+        Ok(FeatureReading {
+            feature: capabilities.feature(code),
+            value,
+            declared_in_capabilities: capabilities.declares(code),
+        })
+    }
+
     fn remember_max(&self, id: &MonitorId, code: VcpCode, max: u16) {
         lock(&self.known_max).insert((id.clone(), code), max);
     }
@@ -108,13 +126,20 @@ impl<B: MonitorBackend> MonitorControl for SoftwareOsd<B> {
 
     fn get_feature(&self, id: &MonitorId, code: VcpCode) -> Result<FeatureReading, DdcError> {
         let capabilities = self.capabilities_or_empty(id)?;
-        let value = self.backend.read_vcp(id, code)?;
-        self.remember_max(id, code, value.max);
-        Ok(FeatureReading {
-            feature: capabilities.feature(code),
-            value,
-            declared_in_capabilities: capabilities.declares(code),
-        })
+        self.read_and_track(id, &capabilities, code)
+    }
+
+    fn probe_undeclared_features(&self, id: &MonitorId) -> Result<Vec<ProbedFeature>, DdcError> {
+        let capabilities = self.capabilities_or_empty(id)?;
+        catalog_codes()
+            .iter()
+            .copied()
+            .filter(|code| !capabilities.declares(*code))
+            .map(|code| match self.read_and_track(id, &capabilities, code) {
+                Err(DdcError::MonitorNotFound(missing)) => Err(DdcError::MonitorNotFound(missing)),
+                outcome => Ok(ProbedFeature { code, outcome }),
+            })
+            .collect()
     }
 
     fn set_feature(
