@@ -1,6 +1,4 @@
-use std::cell::RefCell;
 use std::fmt;
-use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -9,8 +7,8 @@ use ddc_core::ports::MonitorBackend;
 
 use super::super::DdcHiBudgets;
 use super::super::identity::DisplayIdentity;
-use super::super::retry::{Clock, RetryPolicy};
-use super::{DdcHandle, DisplaySource, HandleError, Worker, WorkerClient};
+use super::super::retry::{Clock, RetryPolicy, SystemClock};
+use super::{DdcHandle, DisplaySource, HandleError, TransactError, Worker, WorkerClient};
 
 /// Holds a transaction until the test opens it.
 #[derive(Debug, Clone, Default)]
@@ -134,6 +132,24 @@ impl DisplaySource for FakeDisplays {
     }
 }
 
+/// Fake displays whose enumeration takes `cost` on `clock`, like the
+/// ~1.1 s EDID scan of `ddc-hi` on the dev machine.
+#[derive(Debug)]
+struct SlowDisplays<C> {
+    displays: FakeDisplays,
+    clock: C,
+    cost: Duration,
+}
+
+impl<C: Clock + Send + 'static> DisplaySource for SlowDisplays<C> {
+    type Handle = FakeHandle;
+
+    fn enumerate(&mut self) -> Vec<(DisplayIdentity, FakeHandle)> {
+        self.clock.sleep(self.cost);
+        self.displays.enumerate()
+    }
+}
+
 #[derive(Debug)]
 struct FakeHandle {
     bus: Arc<Mutex<Bus>>,
@@ -210,43 +226,47 @@ fn budgets(vcp: Duration) -> DdcHiBudgets {
     }
 }
 
-/// A worker on its own thread, retrying without pauses so no test sleeps.
-fn spawn(source: &FakeDisplays, budgets: DdcHiBudgets) -> WorkerClient<FakeDisplays> {
-    let no_backoff = RetryPolicy {
+/// Retries without pauses, so no test sleeps between attempts.
+fn no_backoff() -> RetryPolicy {
+    RetryPolicy {
         backoff: Duration::ZERO,
         ..RetryPolicy::default()
-    };
-    WorkerClient::spawn(source.clone(), budgets, no_backoff).unwrap()
+    }
+}
+
+/// A worker on its own thread.
+fn spawn(source: &FakeDisplays, budgets: DdcHiBudgets) -> WorkerClient<FakeDisplays> {
+    WorkerClient::spawn(source.clone(), budgets, no_backoff()).unwrap()
 }
 
 /// Time that only moves when the worker sleeps.
 #[derive(Debug, Clone)]
-struct VirtualClock(Rc<RefCell<(Instant, Vec<Duration>)>>);
+struct VirtualClock(Arc<Mutex<(Instant, Vec<Duration>)>>);
 
 impl VirtualClock {
     fn new() -> Self {
-        Self(Rc::new(RefCell::new((Instant::now(), Vec::new()))))
+        Self(Arc::new(Mutex::new((Instant::now(), Vec::new()))))
     }
 
     fn sleeps(&self) -> Vec<Duration> {
-        self.0.borrow().1.clone()
+        lock(&self.0).1.clone()
     }
 }
 
 impl Clock for VirtualClock {
     fn now(&self) -> Instant {
-        self.0.borrow().0
+        lock(&self.0).0
     }
 
     fn sleep(&self, duration: Duration) {
-        let mut time = self.0.borrow_mut();
+        let mut time = lock(&self.0);
         time.0 += duration;
         time.1.push(duration);
     }
 }
 
-/// What a single read did on a worker run in the test thread, with the
-/// default retry policy and virtual time.
+/// What a single read did on a worker run in the test thread, after one
+/// instant enumeration, with the default retry policy and virtual time.
 #[derive(Debug)]
 struct ReadRun {
     result: Result<VcpValue, DdcError>,
@@ -258,14 +278,66 @@ fn read_on_worker(behaviour: Behaviour, budget: Duration) -> ReadRun {
     let source = FakeDisplays::with([FakeDisplay::new("a", behaviour)]);
     let clock = VirtualClock::new();
     let mut worker = Worker::new(source.clone(), RetryPolicy::default(), clock.clone());
+    worker.enumerate();
 
-    let result = worker.read_vcp(&id("a"), VcpCode::BRIGHTNESS, clock.now() + budget);
+    let result = worker
+        .read_vcp(&id("a"), VcpCode::BRIGHTNESS, clock.now() + budget)
+        .map_err(|error| error.for_caller(&id("a")));
 
     ReadRun {
         result,
         reads: source.calls().len(),
         sleeps: clock.sleeps(),
     }
+}
+
+/// Virtual time one enumeration takes: the ~1.1 s measured on the dev
+/// machine (D-7).
+const ENUMERATION: Duration = Duration::from_millis(1100);
+
+type SlowWorker = Worker<SlowDisplays<VirtualClock>, VirtualClock>;
+
+/// What one transaction on display "a" did on a worker run in the test
+/// thread, after an enumeration that took [`ENUMERATION`].
+#[derive(Debug)]
+struct SlowRun<T> {
+    result: Result<T, DdcError>,
+    enumerations: usize,
+    took: Duration,
+}
+
+fn on_slow_worker<T>(
+    behaviour: Behaviour,
+    budget: Duration,
+    op: impl FnOnce(&mut SlowWorker, &MonitorId, Instant) -> Result<T, TransactError>,
+) -> SlowRun<T> {
+    let source = FakeDisplays::with([FakeDisplay::new("a", behaviour)]);
+    let clock = VirtualClock::new();
+    let displays = SlowDisplays {
+        displays: source.clone(),
+        clock: clock.clone(),
+        cost: ENUMERATION,
+    };
+    let mut worker = Worker::new(displays, RetryPolicy::default(), clock.clone());
+    worker.enumerate();
+    let started = clock.now();
+
+    let result =
+        op(&mut worker, &id("a"), started + budget).map_err(|error| error.for_caller(&id("a")));
+
+    SlowRun {
+        result,
+        enumerations: source.enumerations(),
+        took: clock.now() - started,
+    }
+}
+
+fn read_brightness(
+    worker: &mut SlowWorker,
+    id: &MonitorId,
+    deadline: Instant,
+) -> Result<VcpValue, TransactError> {
+    worker.read_vcp(id, VcpCode::BRIGHTNESS, deadline)
 }
 
 fn assert_transport<T: fmt::Debug>(result: &Result<T, DdcError>, containing: &str) {
@@ -353,6 +425,49 @@ fn first_request_enumerates_on_demand() {
             Call::Write("a", VcpCode::CONTRAST, 7)
         ]
     );
+}
+
+#[test]
+fn unknown_id_is_reported_at_once_without_enumerating() {
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
+    let clock = VirtualClock::new();
+    let mut worker = Worker::new(source.clone(), RetryPolicy::default(), clock.clone());
+
+    let result = worker.read_vcp(
+        &id("a"),
+        VcpCode::BRIGHTNESS,
+        clock.now() + Duration::from_secs(1),
+    );
+
+    assert_eq!(result, Err(TransactError::UnknownMonitor));
+    assert_eq!(source.enumerations(), 0);
+    assert!(source.calls().is_empty());
+}
+
+/// The enumeration outlasts the VCP budget but not its own: the first read
+/// on a fresh backend still answers (D-2026-09-26-ddc-backends-1).
+#[test]
+fn first_request_enumerates_under_the_enumeration_budget() {
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
+    let displays = SlowDisplays {
+        displays: source.clone(),
+        clock: SystemClock,
+        cost: Duration::from_millis(250),
+    };
+    let budgets = DdcHiBudgets {
+        vcp: Duration::from_millis(100),
+        capabilities: Duration::from_millis(100),
+        enumerate: Duration::from_secs(5),
+    };
+    let client = WorkerClient::spawn(displays, budgets, no_backoff()).unwrap();
+
+    let read = client.read_vcp(&id("a"), VcpCode::BRIGHTNESS);
+    let missing = client.write_vcp(&id("ghost"), VcpCode::BRIGHTNESS, 10);
+
+    assert_eq!(read, Ok(FAKE_VALUE));
+    assert_eq!(missing, Err(DdcError::MonitorNotFound(id("ghost"))));
+    assert_eq!(source.enumerations(), 2);
+    assert_eq!(source.calls(), [Call::Read("a", VcpCode::BRIGHTNESS)]);
 }
 
 #[test]
@@ -446,4 +561,46 @@ fn deadline_spent_finding_the_monitor_sends_nothing() {
 
     assert_eq!(run.result, Err(DdcError::Timeout));
     assert_eq!(run.reads, 0);
+}
+
+/// After the retries, a presence check that would end at or past the
+/// deadline is skipped: the failure is a transport one, reported at once.
+#[test]
+fn failed_vcp_answers_transport_at_once_when_a_presence_check_cannot_fit() {
+    let vcp = on_slow_worker(
+        Behaviour::Fail(FLAKY),
+        Duration::from_secs(1),
+        read_brightness,
+    );
+    let tight = on_slow_worker(
+        Behaviour::Fail(FLAKY),
+        Duration::from_millis(100) + ENUMERATION,
+        read_brightness,
+    );
+
+    assert_transport(&vcp.result, "gave up after attempt 3 of 3");
+    assert_eq!(
+        (vcp.enumerations, vcp.took),
+        (1, Duration::from_millis(100))
+    );
+    assert_transport(&tight.result, FLAKY);
+    assert_eq!(tight.enumerations, 1);
+}
+
+/// With the capabilities budget the presence check fits, so a vanished
+/// monitor is told apart from a present one that keeps failing.
+#[test]
+fn failed_capabilities_read_checks_presence_when_it_fits() {
+    let budget = Duration::from_secs(8);
+
+    let vanished = on_slow_worker(Behaviour::Vanish, budget, Worker::read_capabilities);
+    let present = on_slow_worker(Behaviour::Fail(FLAKY), budget, Worker::read_capabilities);
+
+    assert_eq!(vanished.result, Err(DdcError::MonitorNotFound(id("a"))));
+    assert_eq!(vanished.enumerations, 2);
+    assert_transport(&present.result, "gave up after attempt 3 of 3");
+    assert_eq!(
+        (present.enumerations, present.took),
+        (2, Duration::from_millis(100) + ENUMERATION)
+    );
 }

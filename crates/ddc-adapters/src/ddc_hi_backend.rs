@@ -55,11 +55,16 @@ impl Default for DdcHiBudgets {
 /// The real [`MonitorBackend`]: DDC/CI through `ddc-hi`, on a single worker
 /// thread that owns every monitor handle.
 ///
-/// A monitor that stays unknown after a fresh enumeration, or that is gone
-/// after a failed transaction, answers [`DdcError::MonitorNotFound`];
-/// failures that outlast the retries answer [`DdcError::Transport`], and a
-/// caller whose budget runs out answers [`DdcError::Timeout`]. Dropping the backend stops the worker once its
-/// current transaction ends; it never waits for it.
+/// No call needs an [`enumerate`](MonitorBackend::enumerate) first: an id
+/// the worker does not know yet is looked up with one enumeration under the
+/// enumeration budget, then the call runs under its own budget
+/// (D-2026-09-26-ddc-backends-1). A monitor still unknown after that answers
+/// [`DdcError::MonitorNotFound`]. Failures that outlast the retries answer
+/// [`DdcError::Transport`], or `MonitorNotFound` when a fresh enumeration
+/// fits the rest of the budget and no longer lists the monitor. A caller
+/// whose budget runs out answers [`DdcError::Timeout`]. Dropping the
+/// backend stops the worker once its current transaction ends; it never
+/// waits for it.
 #[derive(Debug)]
 pub struct DdcHiMonitorBackend {
     client: WorkerClient<DdcHiDisplays>,
