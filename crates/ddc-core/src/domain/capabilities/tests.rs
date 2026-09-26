@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use super::Capabilities;
 use crate::domain::{Access, DdcError, FeatureKind, Risk, VcpCode};
 
-/// Capabilities string of the dev monitor "RTK QHD HDR" (Linux, /dev/i2c-5,
-/// ddcutil, probed 2026-09-25), verbatim.
+/// Capabilities string of the dev monitor "RTK QHD HDR" (MCCS 2.2, probed
+/// 2026-09-25), verbatim.
 const RTK_QHD_HDR_CAPS: &str = "(prot(monitor)type(LCD)model(RTK)cmds(01 02 03 07 0C E3 F3)vcp(02 04 05 06 08 0B 0C 10 12 14(01 02 04 05 06 08 0B) 16 18 1A 52 60(01 03 04 0F 10 11 12) 87 AC AE B2 B6 C6 C8 CA CC(01 02 03 04 06 0A 0D) D6(01 04 05) DF FD FF)mswhql(1)asset_eep(40)mccs_ver(2.2))";
 
 fn tags(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
