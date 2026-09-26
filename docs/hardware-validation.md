@@ -58,8 +58,8 @@ $B -m RTK get vcp-version
 
 Expected:
 
-- `features`: exit 0, a header line and 28 rows, all with source `caps`; `jq length` prints `28`. `0x14` reads `1/11 sRGB`, `0x60` `15/3 DisplayPort-1`, `0xCC` `2/13 English`, `0xD6` `1/5 On`; `0xFD` and `0xFF` read `not supported by this monitor`. About 3.7 s.
-- `features --probe`: exit 0, 39 rows. The 11 with source `probe`, as the `jq` line prints them: `0x1E`, `0x20`, `0x30`, `0x62`, `0x6C`, `0x6E`, `0x70`, `0xC9`, `0xE6`, `0xF1` `ok`, and `0x7E` (126) `unresponsive`. The Rust panic message for `0x7E` on stderr is expected. About 5 s.
+- `features`: exit 0, a header line and 28 rows, all with source `caps`; `jq length` prints `28`. `0x14` reads `1/11 sRGB`, `0x60` `15/3 DisplayPort-1`, `0xCA` `1/2 OSD disabled` (the RTK's own value; `ddcutil --bus 5 getvcp ca` names it the same), `0xCC` `2/13 English`, `0xD6` `1/5 On`; `0xFD` and `0xFF` read `not supported by this monitor`. About 3.7 s.
+- `features --probe`: exit 0, 39 rows. The 11 with source `probe`, as the `jq` line prints them: `0x1E`, `0x20`, `0x30`, `0x62`, `0x6C`, `0x6E`, `0x70`, `0xC9`, `0xE6`, `0xF1` `ok`, and `0x7E` (126) `unresponsive`. `0x1E` reads `0/1 Off`. The Rust panic message for `0x7E` on stderr is expected. About 5 s.
   - Run the probe four times back to back: no row other than `0x7E` may read `unresponsive`. With VCP retries 200 ms apart (D-2026-09-26-full-osd-control-9), 4 of 4 runs were clean on 2026-09-26; at 50 ms, 3 of 4 had one code (most often `0x70`) failing all three attempts with `Expected DDC/CI length bit`. Record any failing code.
 - `get preset`: `0x14 preset: 1 (0x01) sRGB, max 11 (0x0B)`.
 - `get input`: `0x60 input: 15 (0x0F) DisplayPort-1, max 3 (0x03)`. About one read in ten, the RTK's firmware answers `16` or `17` with a valid checksum, where `ddcutil --bus 5 getvcp 60` reads `0x0F`; repeat the read, and record it if it happens.
@@ -127,9 +127,10 @@ On any monitor, with or without `--yes`, never run a write to:
 
 - the input source (`input`, `0x60`) or the power mode (`power`, `0xD6`);
 - any factory reset (`reset factory`, `reset brightness-contrast`, `reset geometry`, `reset color`, or `0x04`, `0x05`, `0x06`, `0x08` by number);
-- the OSD lock (`osd-lock`, `0xCA`);
-- auto setup, geometry or trapezoid (`auto-setup` `0x1E`, `h-position` `0x20`, `v-position` `0x30`, `trapezoid` `0x7E`);
+- OSD control (`osd-lock`, `0xCA`), with any value: `osd-disabled` can leave the monitor without its own menu or buttons;
+- auto setup (`auto-setup`, `0x1E`), with any value (`off`, `run`, `continuous`): it can move or resize the picture;
+- geometry or trapezoid (`h-position` `0x20`, `v-position` `0x30`, `trapezoid` `0x7E`);
 - the manufacturer-specific codes `0xE6` and `0xF1`, whose meaning is unknown;
 - any code outside the [feature catalog](../README.md#feature-catalog), or any code written by number.
 
-Reading any of them is fine.
+`set` accepts the catalog values of `0x1E` and `0xCA` with `--yes` (D-2026-09-26-full-osd-control-10), and that path is tested only against the in-memory backend; this script never exercises it on hardware. Reading any of these codes is fine.

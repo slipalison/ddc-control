@@ -112,7 +112,7 @@ CODE  NAME                  TYPE  ACCESS  RISK       SOURCE  VALUE              
 0xB6  display-technology    NC    RO      safe       caps    3/5                            Display Technology Type
 0xC6  -                     C     RO      safe       caps    90/255                         -
 0xC8  controller-type       NC    RO      safe       caps    9/0                            Display Controller Type
-0xCA  osd-lock              NC    RW      dangerous  caps    1/2                            OSD/Button Control
+0xCA  osd-lock              NC    RW      dangerous  caps    1/2 OSD disabled               OSD/Button Control
 0xCC  osd-language          NC    RW      safe       caps    2/13 English                   OSD Language
 0xD6  power                 NC    RW      dangerous  caps    1/5 On                         Power Mode
 0xDF  vcp-version           C     RO      safe       caps    514/65535 2.2                  VCP Version
@@ -138,7 +138,7 @@ CODE  NAME                  TYPE  ACCESS  RISK       SOURCE  VALUE              
 0x16  red-gain              C     RW      safe       caps    50/100                         Video Gain (Red)
 0x18  green-gain            C     RW      safe       caps    50/100                         Video Gain (Green)
 0x1A  blue-gain             C     RW      safe       caps    50/100                         Video Gain (Blue)
-0x1E  auto-setup            NC    RW      dangerous  probe   0/1                            Auto Setup
+0x1E  auto-setup            NC    RW      dangerous  probe   0/1 Off                        Auto Setup
 0x20  h-position            C     RW      dangerous  probe   0/100                          Horizontal Position
 0x30  v-position            C     RW      dangerous  probe   0/100                          Vertical Position
 0x52  -                     C     RO      safe       caps    50/100                         -
@@ -156,7 +156,7 @@ CODE  NAME                  TYPE  ACCESS  RISK       SOURCE  VALUE              
 0xC6  -                     C     RO      safe       caps    90/255                         -
 0xC8  controller-type       NC    RO      safe       caps    9/0                            Display Controller Type
 0xC9  firmware-level        C     RO      safe       probe   1/65535 0.1                    Display Firmware Level
-0xCA  osd-lock              NC    RW      dangerous  caps    1/2                            OSD/Button Control
+0xCA  osd-lock              NC    RW      dangerous  caps    1/2 OSD disabled               OSD/Button Control
 0xCC  osd-language          NC    RW      safe       caps    2/13 English                   OSD Language
 0xD6  power                 NC    RW      dangerous  caps    1/5 On                         Power Mode
 0xDF  vcp-version           C     RO      safe       caps    514/65535 2.2                  VCP Version
@@ -270,7 +270,7 @@ Value names match as described in [Features by name](#features-by-name). A non-c
     - **Retries.** A failed transaction is retried up to 3 times within the budget: 200 ms apart for VCP reads and writes, which the dev monitor, read back to back, sometimes fails three times in a row 50 ms apart; 500 ms apart for capabilities reads, which it refuses for a few hundred milliseconds after a failed one. If it still fails, the answer is `Transport`, which names the attempts. A VCP code the monitor answers as unsupported (result code `0x01`) is its final answer: it is not retried and answers `UnsupportedFeature` at once (Linux; on Windows `dxva2` keeps that reply to itself, so it counts as any other failure). Only when one more enumeration (as long as the last one) still fits the rest of the budget is the monitor looked up again first, so an unplugged one answers `MonitorNotFound`. With the default budgets that happens for capabilities reads (8 s), not for VCP reads and writes (1 s, against a ~1.1 s enumeration): a display with mute DDC/CI answers `Transport` in about 0.4 s (three attempts, 200 ms apart) and does not hold up calls to other monitors.
     - **`MonitorId` scheme.** With EDID (Linux), the id is `manufacturer-model-serial`, sanitized to ASCII letters, digits and single dashes. The dev monitor is `RTK-RTK-QHD-HDR-01010101`. Without EDID (Windows), the id is the sanitized device description, else `index-N`. A repeated id in one enumeration gets `#2`, `#3`…; that suffix follows enumeration order, so it may change across hotplugs.
     - **Panics.** Every attempt runs under `catch_unwind`: a panic inside `ddc-hi` (as `ddc-i2c` 0.2.2 does on the RTK's reply to `0x7E`) fails only that call, with `Transport("ddc-hi panicked: …")` and no retry, and the worker keeps serving.
-    - **Replies for another code.** `ddc` 0.2.2 never checks which VCP code a reply answers, so over `/dev/i2c-*` a late reply to an earlier read could pass for the next one. On Linux such a reply is refused as a transient failure and the read is retried.
+    - **Replies for another code.** `ddc` 0.2.2 never checks which VCP code a reply answers, so over `/dev/i2c-*` a late reply to an earlier read could pass for the next one. On Linux the worker compares the code each reply echoes with the one asked for, refuses a mismatch as a transient failure and retries the read. On Windows `ddc-winapi` hands over no echo, and `dxva2` checks replies itself.
     - **Enumeration** only reads EDID and never probes DDC/CI. A display with mute DDC/CI is listed, and fails on its first read.
   - `CachingMonitorBackend`, a decorator for any backend that keeps capabilities strings on disk, one file per monitor id, in a directory its caller passes in. Only successful reads the core can parse are stored, and cache I/O never fails a call. `invalidate` makes reads reach the monitor until one succeeds and replaces the file; until then the file is kept for later runs. `default_cache_dir()` resolves the per-user directory above.
   - `InMemoryMonitorBackend`, a scripted fake the core's use-case tests run against.
