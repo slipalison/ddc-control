@@ -38,10 +38,11 @@ const REFUSED_BY_DEV_MONITOR: [VcpCode; 2] = [VcpCode(0x8D), VcpCode(0xDC)];
 /// 0x7E trapezoid: the dev monitor's reply to it makes `ddc-i2c` 0.2.2
 /// panic (index out of bounds before the checksum).
 const PANICS_DDC_I2C: VcpCode = VcpCode(0x7E);
-/// Well under the default VCP budget of 1 s (D-7): a mute display fails
-/// after its three attempts (~100 ms), with no presence check that cannot
-/// fit the budget (D-2026-09-26-ddc-backends-1).
-const FAST_FAILURE: Duration = Duration::from_millis(500);
+/// Under the default VCP budget of 1 s (D-7) and the ~1.1 s enumeration: a
+/// mute display fails after its three attempts, 200 ms apart (~0.4 s on the
+/// dev TV, D-2026-09-26-full-osd-control-9), with no presence check that
+/// cannot fit the budget (D-2026-09-26-ddc-backends-1).
+const FAST_FAILURE: Duration = Duration::from_millis(800);
 /// A Get VCP on the dev monitor takes ~45 ms; far less than the ~1.1 s
 /// enumeration that used to queue behind a failure on another display.
 const NO_STALL: Duration = Duration::from_millis(250);

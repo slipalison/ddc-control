@@ -635,11 +635,11 @@ fn capabilities_reply_reaches_the_caller_as_text() {
 
 #[test]
 fn retries_transient_errors_up_to_three_times_within_timeout_budget() {
-    let backoff = Duration::from_millis(50);
+    let backoff = Duration::from_millis(200);
 
     let recovers = read_on_worker(Behaviour::Flaky(2), Duration::from_secs(1));
     let persists = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_secs(1));
-    let short = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(80));
+    let short = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(300));
 
     assert_eq!(recovers.result, Ok(FAKE_VALUE));
     assert_eq!(
@@ -656,13 +656,16 @@ fn retries_transient_errors_up_to_three_times_within_timeout_budget() {
 }
 
 /// The dev monitor keeps refusing capabilities reads for a few hundred
-/// milliseconds after one fails, so capabilities retries wait 500 ms where
-/// VCP ones wait 50 ms, and the capabilities budget still bounds them
-/// (D-2026-09-26-cli-2).
+/// milliseconds after one fails, so capabilities retries wait 500 ms
+/// (D-2026-09-26-cli-2); read back to back, it sometimes fails a VCP read
+/// three times 50 ms apart, so VCP retries wait 200 ms
+/// (D-2026-09-26-full-osd-control-9). Each budget still bounds its retries:
+/// three VCP attempts fit the default 1 s, 300 ms cuts them to two, 200 ms
+/// to one.
 #[test]
-fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_50_ms_within_budget() {
+fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_200_ms_within_budget() {
     let caps_backoff = Duration::from_millis(500);
-    let vcp_backoff = Duration::from_millis(50);
+    let vcp_backoff = Duration::from_millis(200);
     let budgets = DdcHiBudgets::default();
 
     let caps = capabilities_on_worker(Behaviour::Flaky(2), budgets.capabilities);
@@ -670,6 +673,9 @@ fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_50_ms_within_budget()
     let caps_fail = capabilities_on_worker(Behaviour::Fail(FLAKY), budgets.capabilities);
     let caps_tight = capabilities_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(700));
     let caps_one_shot = capabilities_on_worker(Behaviour::Fail(FLAKY), caps_backoff);
+    let vcp_fail = read_on_worker(Behaviour::Fail(FLAKY), budgets.vcp);
+    let vcp_tight = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(300));
+    let vcp_one_shot = read_on_worker(Behaviour::Fail(FLAKY), vcp_backoff);
 
     assert_eq!(caps.result.as_deref(), Ok("(prot(monitor)vcp(10 12))"));
     assert_eq!(
@@ -691,6 +697,21 @@ fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_50_ms_within_budget()
     assert_transport(&caps_one_shot.result, "gave up after attempt 1 of 3");
     assert_eq!(
         (caps_one_shot.attempts, caps_one_shot.sleeps),
+        (1, Vec::new())
+    );
+    assert_transport(&vcp_fail.result, "gave up after attempt 3 of 3");
+    assert_eq!(
+        (vcp_fail.attempts, vcp_fail.sleeps),
+        (3, vec![vcp_backoff, vcp_backoff])
+    );
+    assert_transport(&vcp_tight.result, "gave up after attempt 2 of 3");
+    assert_eq!(
+        (vcp_tight.attempts, vcp_tight.sleeps),
+        (2, vec![vcp_backoff])
+    );
+    assert_transport(&vcp_one_shot.result, "gave up after attempt 1 of 3");
+    assert_eq!(
+        (vcp_one_shot.attempts, vcp_one_shot.sleeps),
         (1, Vec::new())
     );
 }
@@ -745,14 +766,14 @@ fn failed_vcp_answers_transport_at_once_when_a_presence_check_cannot_fit() {
     );
     let tight = on_slow_worker(
         Behaviour::Fail(FLAKY),
-        Duration::from_millis(100) + ENUMERATION,
+        Duration::from_millis(400) + ENUMERATION,
         read_brightness,
     );
 
     assert_transport(&vcp.result, "gave up after attempt 3 of 3");
     assert_eq!(
         (vcp.enumerations, vcp.took),
-        (1, Duration::from_millis(100))
+        (1, Duration::from_millis(400))
     );
     assert_transport(&tight.result, FLAKY);
     assert_eq!(tight.enumerations, 1);

@@ -2,9 +2,9 @@
 //! `/dev/i2c-*` on Linux — `ddc-hi` picks the platform backend itself.
 //!
 //! One worker thread owns every display handle (D-6) and retries a failed
-//! transaction up to 3 times within the caller's budget: 50 ms apart for
-//! VCP reads and writes (D-3), 500 ms apart for capabilities reads
-//! (D-2026-09-26-cli-2). A VCP code the monitor answers as unsupported is
+//! transaction up to 3 times within the caller's budget: 200 ms apart for
+//! VCP reads and writes (D-2026-09-26-full-osd-control-9), 500 ms apart for
+//! capabilities reads (D-2026-09-26-cli-2). A VCP code the monitor answers as unsupported is
 //! never retried (D-2026-09-26-cli-4). A panic inside `ddc-hi` fails only the
 //! transaction it happened in, without a retry, and the worker keeps serving
 //! (D-2026-09-26-full-osd-control-6). Callers wait on a per-operation budget

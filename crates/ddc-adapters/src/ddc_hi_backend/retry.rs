@@ -8,11 +8,15 @@ use super::worker::HandleError;
 
 /// Attempts per transaction, the first one included (D-3).
 const MAX_ATTEMPTS: u32 = 3;
-/// Pause between two attempts of a Get or Set VCP Feature (D-3).
-const VCP_BACKOFF: Duration = Duration::from_millis(50);
+/// Pause between two attempts of a Get or Set VCP Feature. Read back to
+/// back, the dev monitor now and then fails a VCP read three times in a
+/// row 50 ms apart, and 200 ms apart it recovers
+/// (D-2026-09-26-full-osd-control-9, amending D-3). Three attempts still fit
+/// the 1 s VCP budget.
+const VCP_BACKOFF: Duration = Duration::from_millis(200);
 /// Pause between two attempts of a capabilities read. The dev monitor keeps
 /// refusing capabilities reads for a few hundred milliseconds after one
-/// fails, so 50 ms apart all three attempts fail (D-2026-09-26-cli-2).
+/// fails, so attempts 50 ms apart all failed (D-2026-09-26-cli-2).
 const CAPABILITIES_BACKOFF: Duration = Duration::from_millis(500);
 
 /// Time as the worker sees it; virtual in tests, so retries are checked
@@ -64,8 +68,9 @@ pub(crate) struct RetryPolicies {
 }
 
 impl Default for RetryPolicies {
-    /// Three attempts each: VCP ones 50 ms apart (D-3), capabilities ones
-    /// 500 ms apart (D-2026-09-26-cli-2).
+    /// Three attempts each: VCP ones 200 ms apart
+    /// (D-2026-09-26-full-osd-control-9), capabilities ones 500 ms apart
+    /// (D-2026-09-26-cli-2).
     fn default() -> Self {
         Self {
             vcp: RetryPolicy {

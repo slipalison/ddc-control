@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - It runs on a single worker thread that owns every monitor handle, so it is `Send + Sync` without `unsafe`; a static assertion checks this on every target.
   - Callers wait per-operation budgets (`DdcHiBudgets`: 1 s VCP read/write, 8 s capabilities, 5 s enumeration) and get `Timeout` past them. A job whose caller gave up never reaches the monitor.
   - No call needs an `enumerate()` first: an unknown monitor id costs one enumeration under the enumeration budget, then the call runs under its own budget; an id still missing answers `MonitorNotFound`.
-  - Failed transactions are retried up to 3 times within the budget, 50 ms apart for VCP reads and writes and 500 ms apart for capabilities reads, then answer `Transport`. A VCP code the monitor answers as unsupported (DDC/CI result code `0x01`) is not retried and answers `UnsupportedFeature` (Linux; `dxva2` on Windows keeps that reply to itself). When one more enumeration still fits the rest of the budget (capabilities reads, with the defaults), the monitor is looked up again first, so an unplugged one answers `MonitorNotFound`. VCP reads and writes skip that check, so a display with mute DDC/CI fails in about 100 ms.
+  - Failed transactions are retried up to 3 times within the budget, 200 ms apart for VCP reads and writes and 500 ms apart for capabilities reads, then answer `Transport`. A VCP code the monitor answers as unsupported (DDC/CI result code `0x01`) is not retried and answers `UnsupportedFeature` (Linux; `dxva2` on Windows keeps that reply to itself). When one more enumeration still fits the rest of the budget (capabilities reads, with the defaults), the monitor is looked up again first, so an unplugged one answers `MonitorNotFound`. VCP reads and writes skip that check, so a display with mute DDC/CI fails in about 0.4 s.
   - `MonitorId`s come from EDID (`manufacturer-model-serial`), else from the device description, else `index-N`, with a `#N` suffix on repeats. Enumeration never probes DDC/CI.
   - VCP replies map to `current`/`max` in VESA MCCS byte order. Capabilities replies lose every NUL byte and are decoded lossily.
 - `FakeMonitor::with_transient_capabilities_failures`, to script capabilities reads that fail before succeeding.
@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `set_feature` refuses read-only and `Table` features before reading anything, reads a maximum only for continuous features, and never reads a write-only feature: no maximum, no read-back, the value sent is returned.
 - `Capabilities::feature` takes kind and access from the catalog, for declared and undeclared codes alike.
 - `ddc-cli` labels every catalogued code by its catalog name in text and in JSON `name` (`0x87 sharpness:`); the six names of earlier versions are unchanged. The `SHORTCUTS` table and `shortcut_name` are gone.
+- VCP reads and writes are retried 200 ms apart instead of 50 ms: read back to back, the RTK sometimes failed a read three times in a row 50 ms apart, which made a random code of `features --probe` read `not responding` in 3 of 4 runs; at 200 ms, 0 of 4. Three attempts still fit the 1 s VCP budget; a display with mute DDC/CI now fails a read in about 0.4 s instead of 0.1 s.
 
 ### Fixed
 

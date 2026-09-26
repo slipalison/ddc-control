@@ -41,7 +41,7 @@ Expected:
 
 - `list`: exit 0, two lines, `GSM-LG-TV-SSCR2-01010101` and `RTK-RTK-QHD-HDR-01010101`.
 - `caps`: exit 0, `mccs version: 2.2`, 28 VCP codes, `0x14 preset: 0x01 0x02 0x04 0x05 0x06 0x08 0x0B`.
-- Hardware tests: `7 passed`, including `hardware_reading_0x7e_never_stops_the_worker`, which prints `read_vcp 0x7E …: Err(Transport("ddc-hi panicked: index out of bounds: the len is 11 but the index is 11"))` and then a successful `read_vcp 0x10`. The panic message from the `ddc-hi-worker` thread on stderr is expected.
+- Hardware tests: `7 passed`. `hardware_other_displays_fail_within_budget_and_worker_recovers` reads the LG in about 0.4 s (three attempts, 200 ms apart) and the RTK right after in about 45 ms. `hardware_reading_0x7e_never_stops_the_worker` prints `read_vcp 0x7E …: Err(Transport("ddc-hi panicked: index out of bounds: the len is 11 but the index is 11"))` and then a successful `read_vcp 0x10`. The panic message from the `ddc-hi-worker` thread on stderr is expected.
 
 ## 2. Features and named values (reads only)
 
@@ -60,9 +60,9 @@ Expected:
 
 - `features`: exit 0, a header line and 28 rows, all with source `caps`; `jq length` prints `28`. `0x14` reads `1/11 sRGB`, `0x60` `15/3 DisplayPort-1`, `0xCC` `2/13 English`, `0xD6` `1/5 On`; `0xFD` and `0xFF` read `not supported by this monitor`. About 3.7 s.
 - `features --probe`: exit 0, 39 rows. The 11 with source `probe`, as the `jq` line prints them: `0x1E`, `0x20`, `0x30`, `0x62`, `0x6C`, `0x6E`, `0x70`, `0xC9`, `0xE6`, `0xF1` `ok`, and `0x7E` (126) `unresponsive`. The Rust panic message for `0x7E` on stderr is expected. About 5 s.
-  - On the RTK, back-to-back reads now and then fail three attempts in a row (`Expected DDC/CI length bit`), so one more row may read `not responding` / `unresponsive` (seen most on `0x70`). Run the probe up to three times: it passes if every one of those 10 codes reads `ok` in at least one run and `0x7E` is `unresponsive` in every run. Record how many runs it took.
+  - Run the probe four times back to back: no row other than `0x7E` may read `unresponsive`. With VCP retries 200 ms apart (D-2026-09-26-full-osd-control-9), 4 of 4 runs were clean on 2026-09-26; at 50 ms, 3 of 4 had one code (most often `0x70`) failing all three attempts with `Expected DDC/CI length bit`. Record any failing code.
 - `get preset`: `0x14 preset: 1 (0x01) sRGB, max 11 (0x0B)`.
-- `get input`: `0x60 input: 15 (0x0F) DisplayPort-1, max 3 (0x03)`. Rarely the RTK answers `16` or `17` with a valid checksum; repeat the read, and record it if it happens.
+- `get input`: `0x60 input: 15 (0x0F) DisplayPort-1, max 3 (0x03)`. About one read in ten, the RTK's firmware answers `16` or `17` with a valid checksum, where `ddcutil --bus 5 getvcp 60` reads `0x0F`; repeat the read, and record it if it happens.
 - `get v-frequency`: the same raw value as `ddcutil --bus 5 getvcp AE --verbose`. On 2026-09-26, at 143.96 Hz, both read `44818 (0xAF12)`, shown as `448.18 Hz` — the RTK's own reply, not 144.00 Hz. Record what it reads.
 - `get vcp-version`: `0xDF vcp-version: 514 (0x202) 2.2, max 65535 (0xFFFF)`.
 
@@ -119,7 +119,7 @@ $B -m RTK get volume --json
 
 Expected: `current` equals `$BRIGHTNESS0`, `$CONTRAST0`, `$PRESET0` and `$VOLUME0`.
 
-Optional, reads only: `$B -m LG features --probe` — exit 0 after about 9 s; with the TV's capabilities unreadable, a warning, then all 39 catalogued codes `not responding`.
+Optional, reads only: `$B -m LG get brightness` — exit 6 in about 3.6 s: the enumeration (~1.1 s), the TV's capabilities read failing three times 500 ms apart plus one presence check (~2.1 s), then the VCP read failing three times 200 ms apart (~0.4 s). `$B -m LG features --probe` — exit 0 after about 21 s; with the TV's capabilities unreadable, a warning, then all 39 catalogued codes `not responding`, about 0.4 s each.
 
 ## Never run
 
