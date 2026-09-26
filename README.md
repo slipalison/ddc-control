@@ -2,7 +2,7 @@
 
 Control everything your monitor's physical OSD offers — brightness, contrast, input source, color preset, volume, power — from software, over DDC/CI, with the same Rust binary on Windows and Linux.
 
-**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`) and 3 (`cli`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities and reads their features on real hardware. Writes pass the same checks and are tested against the in-memory backend; they have not been validated on real hardware yet. The tray app comes next. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
+**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`), 3 (`cli`) and 4 (`full-osd-control`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, lists every feature with its current value, probes the ones the capabilities leave out, and reads and writes features by name, with factory resets behind `--yes`. Reads are validated on real hardware; writes pass the same checks and are tested against the in-memory backend, and have not been validated on real hardware yet. The tray app comes next. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
 
 ## Install
 
@@ -15,10 +15,12 @@ On Linux your user needs access to `/dev/i2c-*` first: see [`docs/linux-ddc-setu
 ## Usage
 
 ```text
-ddc-cli list                     monitors reachable over DDC/CI, numbered from 1
-ddc-cli caps [--refresh]         the monitor's parsed capabilities string
-ddc-cli get <vcp>                read a feature
-ddc-cli set <vcp> <value> [--yes]  write a feature and read it back
+ddc-cli list                          monitors reachable over DDC/CI, numbered from 1
+ddc-cli caps [--refresh]              the monitor's parsed capabilities string
+ddc-cli features [--probe]            every feature with its current value
+ddc-cli get <vcp>                     read a feature
+ddc-cli set <vcp> <value> [--yes]     write a feature and read it back
+ddc-cli reset <target> [--yes]        restore factory defaults
 ```
 
 Global options go before or after the subcommand:
@@ -26,20 +28,27 @@ Global options go before or after the subcommand:
 - `--monitor`/`-m <id|index>` picks the monitor. Without it, the only monitor is used; with none or several attached the command fails and lists them. The value is tried as an exact id, then, when it is all digits, as the index shown by `list` (an index out of range is an error, never a partial id match), then as a case-insensitive part of exactly one id. A part of several ids fails and lists the candidates. `list` ignores it.
 - `--json` prints the result as JSON, numbers in decimal. Errors and warnings always go to stderr as text, so scripts parse stdout and check the exit code.
 
-`<vcp>` is a code in decimal (`16`) or hex (`0x10`), or one of six shortcuts, case-insensitive:
+### Features by name
 
-| Shortcut | Code | Write |
-|---|---|---|
-| `brightness` | `0x10` | safe |
-| `contrast` | `0x12` | safe |
-| `preset` | `0x14` | safe |
-| `volume` | `0x62` | safe |
-| `input` | `0x60` | dangerous, needs `--yes` |
-| `power` | `0xD6` | dangerous, needs `--yes` |
+`<vcp>` is a code in decimal (`16`) or hex (`0x10`), or the name the [feature catalog](#feature-catalog) gives it, case-insensitive: `brightness`, `preset`, `osd-language`, `red-black-level`, `v-frequency`… The six names of earlier versions (`brightness`, `contrast`, `input`, `preset`, `volume`, `power`) keep their codes.
 
-`<value>` is decimal or hex, up to 65535. Every write goes through the core's checks (see [Monitor-write safety](#monitor-write-safety)): a dangerous code, including any code not in the core's safe list, needs `--yes`, and there is never a prompt. The value must be one the monitor allows or within its maximum. The value read back is printed; if it differs from the one written, a warning says the monitor may have ignored the write, JSON reports `"applied": false`, and the exit code is still 0.
+`<value>` is decimal or hex, up to 65535, or the name of a value: `set preset srgb`, `set preset 6500k`, `set osd-language english`, `set input hdmi-1 --yes`. Case and every character that is not a letter or a digit are ignored, so `6500k`, `6500 K` and `6500-k` all name `6500 K`, and `displayport1` names `DisplayPort-1`. A name is turned into its byte for the feature being set; a name that is no value of that feature (`set brightness srgb`, `set preset nonsense`) is a usage error, exit 2, before any monitor is touched. Whether this monitor accepts the value is the core's decision: `set preset 6500k` on a monitor whose capabilities do not list `6500 K` exits 4 and writes nothing.
 
-Example on the dev machine (Linux, the "RTK QHD HDR" monitor plus an LG TV whose DDC/CI is mute), read-only:
+`get` and `set` print what the value means when the catalog knows it: `0x14 preset: 1 (0x01) sRGB`, `0xDF vcp-version: 514 (0x202) 2.2`. With `--json` they add `value_name` (a named value) or `interpreted` (a frequency or a version), and leave both out when there is nothing to add, so the JSON of a plain reading is the same as before.
+
+Every write goes through the core's checks (see [Monitor-write safety](#monitor-write-safety)): a dangerous code, including any code outside the catalog, needs `--yes`, and there is never a prompt. The value read back is printed; if it differs from the one written, a warning says the monitor may have ignored the write, JSON reports `"applied": false`, and the exit code is still 0.
+
+### `features`
+
+`features` reads every code the monitor's capabilities declare, one row per code: code, name, type (`C` continuous, `NC` non-continuous, `T` table), access (`RO`, `WO`, `RW`), write risk, where the code comes from (`caps`), the value as `current/max` with its meaning, and the MCCS name. `--probe` also reads every catalogued code the capabilities leave out (source `probe`). A code the monitor refuses shows `not supported by this monitor`; one that does not answer shows `not responding`. Neither fails the command, which only reads and never takes `--yes`. With `--json` the result is an array with `code`, `name`, `description`, `kind`, `access`, `risk`, `declared_in_capabilities`, `probe_status` (`ok`, `unsupported` or `unresponsive`), `current`, `max`, `value_name` and `interpreted`, every field always present (`null` when empty). Capabilities that cannot be read are a warning: no code counts as declared, and `--probe` reads the whole catalog.
+
+### `reset`
+
+`reset <target>` restores factory defaults: `factory` (everything, `0x04`), `brightness-contrast` (`0x05`), `geometry` (`0x06`) or `color` (`0x08`). Every reset is dangerous and needs `--yes`; without it the command exits 5 before anything is read from or written to the monitor. `reset factory --yes` is exactly `set 0x04 reset --yes`: it writes `0x01` (MCCS ignores zero, and any non-zero value triggers the reset) through the same core checks. The reset codes are write-only, so nothing is read back: the command prints the code and what was sent, followed by `(write-only, not read back)`, and JSON reports `"read_back": false`. Resets are never run on real hardware by this project's tests or validation.
+
+### Examples
+
+On the dev machine (Linux, the "RTK QHD HDR" monitor plus an LG TV whose DDC/CI is mute), read-only:
 
 ```text
 $ ddc-cli list
@@ -54,6 +63,12 @@ e.g. --monitor 1 or --monitor GSM-LG-TV-SSCR2-01010101
 
 $ ddc-cli --monitor rtk get brightness
 0x10 brightness: 100 (0x64), max 100 (0x64)
+
+$ ddc-cli -m rtk get preset
+0x14 preset: 1 (0x01) sRGB, max 11 (0x0B)
+
+$ ddc-cli -m rtk get input
+0x60 input: 15 (0x0F) DisplayPort-1, max 3 (0x03)
 
 $ ddc-cli -m 2 get volume
 warning: 0x62 volume is not declared in capabilities, or they could not be read; showing what the monitor answered
@@ -70,6 +85,87 @@ $ ddc-cli -m rtk get brightness --json
 }
 ```
 
+`features` on the same monitor (about 3.7 s, most of it the enumeration and 28 reads):
+
+```text
+$ ddc-cli -m rtk features
+CODE  NAME                  TYPE  ACCESS  RISK       SOURCE  VALUE                          DESCRIPTION
+0x02  new-control-value     NC    RW      safe       caps    1/2                            New Control Value
+0x04  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Defaults
+0x05  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Luminance/Contrast Defaults
+0x06  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Geometry Defaults
+0x08  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Color Defaults
+0x0B  color-temp-increment  C     RO      safe       caps    100/0                          Color Temperature Increment
+0x0C  color-temp            C     RW      safe       caps    10/63                          Color Temperature Request
+0x10  brightness            C     RW      safe       caps    100/100                        Luminance
+0x12  contrast              C     RW      safe       caps    50/100                         Contrast
+0x14  preset                NC    RW      safe       caps    1/11 sRGB                      Select Color Preset
+0x16  red-gain              C     RW      safe       caps    50/100                         Video Gain (Red)
+0x18  green-gain            C     RW      safe       caps    50/100                         Video Gain (Green)
+0x1A  blue-gain             C     RW      safe       caps    50/100                         Video Gain (Blue)
+0x52  -                     C     RO      safe       caps    50/100                         -
+0x60  input                 NC    RW      dangerous  caps    15/3 DisplayPort-1             Input Source
+0x87  sharpness             C     RW      safe       caps    4/4                            Sharpness
+0xAC  h-frequency           C     RO      safe       caps    3/41092                        Horizontal Frequency
+0xAE  v-frequency           C     RO      safe       caps    44818/65535 448.18 Hz          Vertical Frequency
+0xB2  subpixel-layout       NC    RO      safe       caps    1/1                            Flat Panel Sub-Pixel Layout
+0xB6  display-technology    NC    RO      safe       caps    3/5                            Display Technology Type
+0xC6  -                     C     RO      safe       caps    90/255                         -
+0xC8  controller-type       NC    RO      safe       caps    9/0                            Display Controller Type
+0xCA  osd-lock              NC    RW      dangerous  caps    1/2                            OSD/Button Control
+0xCC  osd-language          NC    RW      safe       caps    2/13 English                   OSD Language
+0xD6  power                 NC    RW      dangerous  caps    1/5 On                         Power Mode
+0xDF  vcp-version           C     RO      safe       caps    514/65535 2.2                  VCP Version
+0xFD  -                     C     RO      safe       caps    not supported by this monitor  -
+0xFF  -                     C     RO      safe       caps    not supported by this monitor  -
+```
+
+`features --probe` adds the 11 catalogued codes the RTK answers without declaring them (about 5 s). `0x7E` makes `ddc-i2c` 0.2.2 panic; the backend turns that into a transport error, so the row reads `not responding` and Rust's panic message goes to stderr:
+
+```text
+$ ddc-cli -m rtk features --probe
+CODE  NAME                  TYPE  ACCESS  RISK       SOURCE  VALUE                          DESCRIPTION
+0x02  new-control-value     NC    RW      safe       caps    1/2                            New Control Value
+0x04  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Defaults
+0x05  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Luminance/Contrast Defaults
+0x06  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Geometry Defaults
+0x08  -                     NC    WO      dangerous  caps    0/1                            Restore Factory Color Defaults
+0x0B  color-temp-increment  C     RO      safe       caps    100/0                          Color Temperature Increment
+0x0C  color-temp            C     RW      safe       caps    10/63                          Color Temperature Request
+0x10  brightness            C     RW      safe       caps    100/100                        Luminance
+0x12  contrast              C     RW      safe       caps    50/100                         Contrast
+0x14  preset                NC    RW      safe       caps    1/11 sRGB                      Select Color Preset
+0x16  red-gain              C     RW      safe       caps    50/100                         Video Gain (Red)
+0x18  green-gain            C     RW      safe       caps    50/100                         Video Gain (Green)
+0x1A  blue-gain             C     RW      safe       caps    50/100                         Video Gain (Blue)
+0x1E  auto-setup            NC    RW      dangerous  probe   0/1                            Auto Setup
+0x20  h-position            C     RW      dangerous  probe   0/100                          Horizontal Position
+0x30  v-position            C     RW      dangerous  probe   0/100                          Vertical Position
+0x52  -                     C     RO      safe       caps    50/100                         -
+0x60  input                 NC    RW      dangerous  caps    15/3 DisplayPort-1             Input Source
+0x62  volume                C     RW      safe       probe   30/100                         Audio Speaker Volume
+0x6C  red-black-level       C     RW      safe       probe   80/100                         Video Black Level (Red)
+0x6E  green-black-level     C     RW      safe       probe   80/100                         Video Black Level (Green)
+0x70  blue-black-level      C     RW      safe       probe   80/100                         Video Black Level (Blue)
+0x7E  trapezoid             C     RW      dangerous  probe   not responding                 Trapezoid
+0x87  sharpness             C     RW      safe       caps    4/4                            Sharpness
+0xAC  h-frequency           C     RO      safe       caps    3/41092                        Horizontal Frequency
+0xAE  v-frequency           C     RO      safe       caps    44818/65535 448.18 Hz          Vertical Frequency
+0xB2  subpixel-layout       NC    RO      safe       caps    1/1                            Flat Panel Sub-Pixel Layout
+0xB6  display-technology    NC    RO      safe       caps    3/5                            Display Technology Type
+0xC6  -                     C     RO      safe       caps    90/255                         -
+0xC8  controller-type       NC    RO      safe       caps    9/0                            Display Controller Type
+0xC9  firmware-level        C     RO      safe       probe   1/65535 0.1                    Display Firmware Level
+0xCA  osd-lock              NC    RW      dangerous  caps    1/2                            OSD/Button Control
+0xCC  osd-language          NC    RW      safe       caps    2/13 English                   OSD Language
+0xD6  power                 NC    RW      dangerous  caps    1/5 On                         Power Mode
+0xDF  vcp-version           C     RO      safe       caps    514/65535 2.2                  VCP Version
+0xE6  -                     C     RW      dangerous  probe   0/0                            Manufacturer specific (0xE6)
+0xF1  -                     C     RW      dangerous  probe   1/65535                        Manufacturer specific (0xF1)
+0xFD  -                     C     RO      safe       caps    not supported by this monitor  -
+0xFF  -                     C     RO      safe       caps    not supported by this monitor  -
+```
+
 The LG TV is listed because enumeration only reads EDID; its DDC/CI is mute, so reading or writing it fails with exit 6.
 
 ### Exit codes
@@ -77,7 +173,7 @@ The LG TV is listed because enumeration only reads EDID; its DDC/CI is mute, so 
 | Code | Meaning |
 |---|---|
 | 0 | Success |
-| 2 | Invalid command line (from `clap`) |
+| 2 | Invalid command line (from `clap`), or a value name that is no value of the feature being set |
 | 3 | No single monitor matches: none attached, several without `--monitor`, no match, or an ambiguous match |
 | 4 | The feature or value is not valid for the monitor, including a code the monitor answers as unsupported |
 | 5 | A dangerous write without `--yes` |
@@ -98,13 +194,71 @@ The cache is keyed by monitor id, and ids built without an EDID serial (the devi
 
 Some monitors, the dev one included, refuse a capabilities read issued right after the previous one, and keep refusing for a few hundred milliseconds after each failed attempt. Capabilities reads are therefore retried 500 ms apart, where VCP reads and writes wait 50 ms. On the dev monitor, back-to-back `caps --refresh` runs then succeed, taking about 1.6 s longer when the first attempt is refused. If a refresh still fails, wait a few seconds and run it again; the cached file keeps being used meanwhile.
 
+### Feature catalog
+
+The core knows the 39 VCP codes observed on the dev monitor "RTK QHD HDR": the 28 its capabilities declare, the 9 it answers without declaring them, and the 2 manufacturer-specific codes a full read-only scan found answering. The table below is the catalog, one row per code; a code outside it has no name, is written only with `--yes`, and is non-continuous only when the capabilities list its values.
+
+| Code | Name (`<vcp>`) | MCCS name | Type | Access | Write | Value names |
+|---|---|---|---|---|---|---|
+| `0x02` | `new-control-value` | New Control Value | NC | RW | refused: no value list |  |
+| `0x04` | — (`reset`) | Restore Factory Defaults | NC | WO | dangerous, `--yes` | `01` Reset |
+| `0x05` | — (`reset`) | Restore Factory Luminance/Contrast Defaults | NC | WO | dangerous, `--yes` | `01` Reset |
+| `0x06` | — (`reset`) | Restore Factory Geometry Defaults | NC | WO | dangerous, `--yes` | `01` Reset |
+| `0x08` | — (`reset`) | Restore Factory Color Defaults | NC | WO | dangerous, `--yes` | `01` Reset |
+| `0x0B` | `color-temp-increment` | Color Temperature Increment | C | RO | never (read-only) |  |
+| `0x0C` | `color-temp` | Color Temperature Request | C | RW | safe |  |
+| `0x10` | `brightness` | Luminance | C | RW | safe |  |
+| `0x12` | `contrast` | Contrast | C | RW | safe |  |
+| `0x14` | `preset` | Select Color Preset | NC | RW | safe | `01` sRGB, `02` Display Native, `04` 5000 K, `05` 6500 K, `06` 7500 K, `08` 9300 K, `0B` User 1 |
+| `0x16` | `red-gain` | Video Gain (Red) | C | RW | safe |  |
+| `0x18` | `green-gain` | Video Gain (Green) | C | RW | safe |  |
+| `0x1A` | `blue-gain` | Video Gain (Blue) | C | RW | safe |  |
+| `0x1E` | `auto-setup` | Auto Setup | NC | RW | refused: no value list |  |
+| `0x20` | `h-position` | Horizontal Position | C | RW | dangerous, `--yes` |  |
+| `0x30` | `v-position` | Vertical Position | C | RW | dangerous, `--yes` |  |
+| `0x52` | — | — | C | RO | never (read-only) |  |
+| `0x60` | `input` | Input Source | NC | RW | dangerous, `--yes` | `01` VGA-1, `03` DVI-1, `04` DVI-2, `0F` DisplayPort-1, `10` DisplayPort-2, `11` HDMI-1, `12` HDMI-2 |
+| `0x62` | `volume` | Audio Speaker Volume | C | RW | safe |  |
+| `0x6C` | `red-black-level` | Video Black Level (Red) | C | RW | safe |  |
+| `0x6E` | `green-black-level` | Video Black Level (Green) | C | RW | safe |  |
+| `0x70` | `blue-black-level` | Video Black Level (Blue) | C | RW | safe |  |
+| `0x7E` | `trapezoid` | Trapezoid | C | RW | dangerous, `--yes` |  |
+| `0x87` | `sharpness` | Sharpness | C | RW | safe |  |
+| `0xAC` | `h-frequency` | Horizontal Frequency | C | RO | never (read-only) |  |
+| `0xAE` | `v-frequency` | Vertical Frequency | C | RO | never (read-only) |  |
+| `0xB2` | `subpixel-layout` | Flat Panel Sub-Pixel Layout | NC | RO | never (read-only) |  |
+| `0xB6` | `display-technology` | Display Technology Type | NC | RO | never (read-only) |  |
+| `0xC6` | — | — | C | RO | never (read-only) |  |
+| `0xC8` | `controller-type` | Display Controller Type | NC | RO | never (read-only) |  |
+| `0xC9` | `firmware-level` | Display Firmware Level | C | RO | never (read-only) |  |
+| `0xCA` | `osd-lock` | OSD/Button Control | NC | RW | dangerous, `--yes` |  |
+| `0xCC` | `osd-language` | OSD Language | NC | RW | safe | `01` Chinese (traditional), `02` English, `03` French, `04` German, `06` Japanese, `0A` Spanish, `0D` Chinese (simplified) |
+| `0xD6` | `power` | Power Mode | NC | RW | dangerous, `--yes` | `01` On, `04` Off (DPM), `05` Off (write-only) |
+| `0xDF` | `vcp-version` | VCP Version | C | RO | never (read-only) |  |
+| `0xE6` | — | Manufacturer specific (0xE6) | C | RW | dangerous, `--yes` |  |
+| `0xF1` | — | Manufacturer specific (0xF1) | C | RW | dangerous, `--yes` |  |
+| `0xFD` | — | — | C | RO | never (read-only) |  |
+| `0xFF` | — | — | C | RO | never (read-only) |  |
+
+Value names match as described in [Features by name](#features-by-name). "Refused" codes are non-continuous with no value list in the capabilities or the catalog: the core never writes them blind, with or without `--yes`.
+
 ### Known limitations
 
-- Until the MCCS feature catalog exists (phase `full-osd-control`), a code whose capabilities entry lists no values, or that the capabilities do not declare at all, counts as continuous: a write is checked against the maximum the monitor reports. For a discrete feature outside the capabilities, such as an input source on a monitor that does not list its inputs, that maximum says little about which values are valid. Dangerous codes still need `--yes`.
+- The catalog holds only the 39 codes observed on the dev monitor. Other monitors' codes outside it are readable, and writable only with `--yes`.
+- `0x0C` (color temperature) and `0x0B` (its increment) are shown raw: the Kelvin formula has not been checked against a real reading. The named presets of `0x14` (`5000 K`, `6500 K`, `7500 K`, `9300 K`) cover the common case.
+- `0xAC` (horizontal frequency) is shown raw; MCCS does not fix its unit the way it does for `0xAE`. `0xAE` is shown in hundredths of a hertz, as MCCS defines it, but the RTK answers `44818` (`448.18 Hz`) while running at 144 Hz; `ddcutil` reads the same bytes.
+- `0xFD` and `0xFF` are declared by the RTK, which then answers them as unsupported.
+- `0xE6` and `0xF1` answer but their meaning is unknown: they are dangerous and should never be written.
+- `0x02` (new control value) and `0x1E` (auto setup) have no value list anywhere, so writes to them are refused.
+- The reset codes are write-only: a reset reports what was sent, never a value read back.
+- On Windows, `dxva2` keeps the monitor's "unsupported VCP code" reply to itself, so `features --probe` shows `not responding` where Linux shows `not supported by this monitor`, and spends three attempts on each such code.
+- Reading `0x7E` on the RTK makes `ddc-i2c` 0.2.2 panic. The backend isolates the panic, so only that read fails (`not responding`, exit 6 for `get`), but Rust still prints the panic message on stderr.
+- On the RTK, back-to-back reads now and then fail three attempts in a row (`Expected DDC/CI length bit`), so a long `features --probe` may show one more code as `not responding` than the run before; running it again reads it. Rarely, a read returns a wrong value that passes the checksum (`0x60` read as `16` or `17` instead of `15`); `ddcutil` did not show it in the same session.
+- OSD items with no VCP code (HDR, overdrive, adaptive sync and the like, where a menu has them) cannot be reached over DDC/CI.
 
 ## Layout
 
-- `crates/ddc-core` — the hexagon. Domain types (`VcpCode`, `VcpValue`, `MonitorId`, `Feature`, `Risk`, `Confirm`, `DdcError`), `Capabilities` with its own MCCS capabilities-string parser, the ports `MonitorBackend` (driven) and `MonitorControl` (driving), and `SoftwareOsd`, which implements `MonitorControl` on top of any `MonitorBackend`. Depends on `thiserror` only.
+- `crates/ddc-core` — the hexagon. Domain types (`VcpCode`, `VcpValue`, `MonitorId`, `Feature`, `Risk`, `Confirm`, `ProbedFeature`, `DdcError`), `Capabilities` with its own MCCS capabilities-string parser, the MCCS feature catalog (`domain::mccs_catalog`: one static table of names, kinds, access, risk and value names, and the lookups built on it), the ports `MonitorBackend` (driven) and `MonitorControl` (driving, including the read-only `probe_undeclared_features`), and `SoftwareOsd`, which implements `MonitorControl` on top of any `MonitorBackend`. Depends on `thiserror` only.
 - `crates/ddc-adapters` — driven adapters:
   - `DdcHiMonitorBackend`, the real backend over [`ddc-hi`](https://docs.rs/ddc-hi) 0.4 (Windows `dxva2`, Linux `/dev/i2c-*`). It sits behind the crate feature `ddc-hi`, which is on by default; `--no-default-features` builds only the fake.
     - **One worker thread** owns every monitor handle and runs every DDC/CI transaction. The Windows handles cannot cross threads, so this is what makes the backend `Send + Sync` without `unsafe`.
@@ -112,6 +266,8 @@ Some monitors, the dev one included, refuse a capabilities read issued right aft
     - **No `enumerate()` needed first.** A monitor id the backend has not seen yet (a fresh backend, a saved id, a monitor plugged in later) costs one enumeration under the enumeration budget; then the call runs under its own budget. An id still missing after that answers `MonitorNotFound`.
     - **Retries.** A failed transaction is retried up to 3 times within the budget: 50 ms apart for VCP reads and writes, 500 ms apart for capabilities reads, which the dev monitor refuses for a few hundred milliseconds after a failed one. If it still fails, the answer is `Transport`, which names the attempts. A VCP code the monitor answers as unsupported (result code `0x01`) is its final answer: it is not retried and answers `UnsupportedFeature` at once (Linux; on Windows `dxva2` keeps that reply to itself, so it counts as any other failure). Only when one more enumeration (as long as the last one) still fits the rest of the budget is the monitor looked up again first, so an unplugged one answers `MonitorNotFound`. With the default budgets that happens for capabilities reads (8 s), not for VCP reads and writes (1 s, against a ~1.1 s enumeration): a display with mute DDC/CI answers `Transport` in about 100 ms and does not hold up calls to other monitors.
     - **`MonitorId` scheme.** With EDID (Linux), the id is `manufacturer-model-serial`, sanitized to ASCII letters, digits and single dashes. The dev monitor is `RTK-RTK-QHD-HDR-01010101`. Without EDID (Windows), the id is the sanitized device description, else `index-N`. A repeated id in one enumeration gets `#2`, `#3`…; that suffix follows enumeration order, so it may change across hotplugs.
+    - **Panics.** Every attempt runs under `catch_unwind`: a panic inside `ddc-hi` (as `ddc-i2c` 0.2.2 does on the RTK's reply to `0x7E`) fails only that call, with `Transport("ddc-hi panicked: …")` and no retry, and the worker keeps serving.
+    - **Replies for another code.** `ddc` 0.2.2 never checks which VCP code a reply answers, so over `/dev/i2c-*` a late reply to an earlier read could pass for the next one. On Linux such a reply is refused as a transient failure and the read is retried.
     - **Enumeration** only reads EDID and never probes DDC/CI. A display with mute DDC/CI is listed, and fails on its first read.
   - `CachingMonitorBackend`, a decorator for any backend that keeps capabilities strings on disk, one file per monitor id, in a directory its caller passes in. Only successful reads the core can parse are stored, and cache I/O never fails a call. `invalidate` makes reads reach the monitor until one succeeds and replaces the file; until then the file is kept for later runs. `default_cache_dir()` resolves the per-user directory above.
   - `InMemoryMonitorBackend`, a scripted fake the core's use-case tests run against.
@@ -127,11 +283,14 @@ Architecture is locked to Hexagonal (Ports & Adapters) — see `.jdi/PROJECT.md`
 
 Every write goes through `MonitorControl::set_feature`, and the core — never an adapter — enforces, in order:
 
-1. **Risk.** Each VCP code has a `Risk`. Brightness, contrast, color preset, RGB gains, volume, sharpness and OSD language are `Safe`. Everything else — factory resets, input source, OSD lock, power mode, the manufacturer-specific range `0xE0`–`0xFF`, and any code not yet classified — is `Dangerous` and needs `Confirm::Yes`, checked before the monitor is touched at all.
-2. **No blind writes.** A feature whose capabilities list discrete values accepts only those values. Any other feature is checked against its maximum: the one from an earlier read, else one read from the monitor right before the write, whether the capabilities declare the code or not (the dev monitor answers `0x62` volume without declaring it). If that read fails, the write is refused with the read's error and nothing is written.
-3. **Read-back.** After the write the value is read back once, and that reading is what `set_feature` returns — some monitors acknowledge writes they silently drop.
+1. **Risk.** Each VCP code's `Risk` comes from the [feature catalog](#feature-catalog). A dangerous code — factory resets, input source, auto setup, geometry, OSD lock, power mode, the manufacturer-specific codes — and any code outside the catalog needs `Confirm::Yes`, checked before the monitor is touched at all. A read-only code is never dangerous, so a write to one says "not writable" rather than "confirm it".
+2. **Writable.** A read-only feature, and any `Table` feature (a write carries a single value), is refused as unsupported before anything is read.
+3. **No blind writes.** A non-continuous feature accepts only the values its capabilities list, else the values the catalog names; with neither, the write is refused. A continuous feature is checked against its maximum: the one from an earlier read, else one read from the monitor right before the write, whether the capabilities declare the code or not (the dev monitor answers `0x62` volume without declaring it). If that read fails, the write is refused with the read's error and nothing is written.
+4. **Read-back.** After the write the value is read back once, and that reading is what `set_feature` returns — some monitors acknowledge writes they silently drop. A write-only feature (the factory resets) is never read, neither for a maximum nor back: the value returned is the one sent.
 
-Reads are never filtered by the capabilities string: monitors answer codes they do not declare (the dev monitor answers `0x62` volume), so `get_feature` always reads and reports `declared_in_capabilities` instead. A capabilities string that cannot be read or parsed does not block reads or writes either: the monitor is treated as declaring no code, so a write reads the feature's maximum first. The failure is remembered per monitor, and only an explicit `capabilities` request asks the monitor again.
+`reset <target> --yes` is `set <code> reset --yes`, the same path with the catalog's only value for the code, `0x01`.
+
+Reads are never filtered by the capabilities string: monitors answer codes they do not declare (the dev monitor answers `0x62` volume), so `get_feature` always reads and reports `declared_in_capabilities` instead. A capabilities string that cannot be read or parsed does not block reads or writes either: the monitor is treated as declaring no code, the catalog still gives each code its kind and access, and a continuous write reads the feature's maximum first. The failure is remembered per monitor, and only an explicit `capabilities` request asks the monitor again. `probe_undeclared_features` reads each catalogued code the capabilities leave out once and never writes.
 
 ## Dev setup
 

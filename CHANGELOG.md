@@ -31,6 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exit codes: 0 success, 2 usage, 3 monitor selection, 4 invalid feature or value, 5 unconfirmed dangerous write, 6 transport or timeout. A code the monitor refuses as unsupported exits 4, not 6, for `get` and `set`.
 - `CachingMonitorBackend` and `default_cache_dir()` in `ddc-adapters`: capabilities strings kept on disk per monitor id (`%LOCALAPPDATA%\ddc-control\caps`, `$XDG_CACHE_HOME/ddc-control/caps` or `~/.cache/ddc-control/caps`), so a warm `ddc-cli get` skips the ~2.5 s capabilities read. Only successful reads the core can parse are stored. `invalidate` backs `caps --refresh`: the file is replaced only by a successful re-read, so a refused refresh keeps it.
 - `FakeMonitor::with_vcp_failure`, to script a VCP code whose reads and writes fail with a given error.
+- MCCS feature catalog in `ddc-core` (`domain::mccs_catalog`): one static table of the 39 VCP codes observed on the "RTK QHD HDR" (28 declared, 9 answered without being declared, `0xE6`/`0xF1` found by a full read-only scan), each with its MCCS name, CLI name, kind, access, risk and value names, plus the lookups built on it (`catalog_entry`, `catalog_codes`, `value_name`, `value_for_name`, `code_for_alias`, `hertz`, `version_from_u16`, `interpret`).
+- `MonitorControl::probe_undeclared_features` and `ProbedFeature`: reads, once each, every catalogued code the capabilities do not declare, telling a code the monitor refuses (`UnsupportedFeature`) from one it does not answer (`Transport`/`Timeout`); one failure never stops the probe, and nothing is written.
+- `ddc-cli features [--probe] [--json]`: every declared feature with its current value, kind, access, risk and meaning; `--probe` adds the catalogued codes the capabilities leave out, marked `not supported by this monitor` or `not responding` (`probe_status` in JSON).
+- `ddc-cli` names: `<vcp>` takes any catalog name (`sharpness`, `osd-language`, `red-black-level`, `v-frequency`…), and `<value>` takes value names, ignoring case and punctuation (`set preset srgb`, `set preset 6500k`, `set input hdmi-1 --yes`). A name that is no value of the feature being set exits 2 before any monitor is touched.
+- `get` and `set` show what a value means (`1 (0x01) sRGB`, `514 (0x202) 2.2`); JSON gains `value_name`/`interpreted` only when there is one.
+- `ddc-cli reset <factory|brightness-contrast|geometry|color> [--yes]`, the same write as `set <code> reset --yes`: `0x01` to `0x04`/`0x05`/`0x06`/`0x08`, refused without `--yes` (exit 5), reported as sent since the reset codes are write-only.
+
+### Changed
+
+- Write risk comes from the catalog, and any code outside it stays dangerous. `0x0C` (color temperature) and `0x6C`/`0x6E`/`0x70` (black levels) can now be written without `--yes`. Read-only codes (`0x0B`, `0x52`, `0xAC`, `0xAE`, `0xB2`, `0xB6`, `0xC6`, `0xC8`, `0xC9`, `0xDF`, `0xFD`, `0xFF`) are refused as not writable (exit 4) instead of asking for `--yes` (exit 5).
+- A non-continuous feature whose capabilities list no values (a preset or OSD language with unreadable capabilities, an input source a monitor does not list) no longer accepts any value up to the maximum it reports: it is checked against the catalog's value names, and refused when there are none (`0x02`, `0x1E`).
+- `set_feature` refuses read-only and `Table` features before reading anything, reads a maximum only for continuous features, and never reads a write-only feature: no maximum, no read-back, the value sent is returned.
+- `Capabilities::feature` takes kind and access from the catalog, for declared and undeclared codes alike.
+- `ddc-cli` labels every catalogued code by its catalog name in text and in JSON `name` (`0x87 sharpness:`); the six names of earlier versions are unchanged. The `SHORTCUTS` table and `shortcut_name` are gone.
+
+### Fixed
+
+- A panic inside `ddc-hi` (`ddc-i2c` 0.2.2 indexes out of bounds on the RTK's reply to `0x7E`) ended the backend's worker thread, and every later call in the process failed. Now only that call fails, as a transport error, and the worker keeps serving.
+- On Linux a late reply to an earlier read could pass for the answer to the next code (`features --probe` showed `0x7E` with `0x70`'s value); a reply for another code is now refused and the read retried.
 
 ### Removed
 
