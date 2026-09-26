@@ -2,10 +2,10 @@
 //! (D-2026-09-25-cli-4).
 
 use clap::Parser;
-use ddc_adapters::BackendCall;
+use ddc_adapters::{BackendCall, FakeMonitor};
 use ddc_cli::fixture::FIXTURE_ID;
 use ddc_cli::{Cli, Exit, report_startup_failure};
-use ddc_core::domain::{DdcError, VcpCode};
+use ddc_core::domain::{DdcError, MonitorInfo, VcpCode};
 use predicates::prelude::{PredicateBooleanExt, predicate};
 use serde_json::{Value, json};
 
@@ -85,6 +85,23 @@ fn get_warns_about_a_code_the_capabilities_do_not_declare() {
         "{}",
         read.err
     );
+}
+
+#[test]
+fn get_still_reads_when_the_capabilities_cannot_be_read() {
+    let unreadable = FakeMonitor::new(MonitorInfo {
+        id: id("M-1"),
+        manufacturer: None,
+        model: None,
+        serial: None,
+    })
+    .with_value(VcpCode::BRIGHTNESS, 80, 100);
+
+    let read = run_with(&backend_of([unreadable]), &["get", "brightness"]);
+
+    assert_eq!(read.exit, Exit::Success);
+    assert_eq!(read.out, "0x10 brightness: 80 (0x50), max 100 (0x64)\n");
+    assert!(read.err.contains("could not be read"), "{}", read.err);
 }
 
 #[test]
