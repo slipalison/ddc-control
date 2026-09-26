@@ -57,3 +57,69 @@
 - **`hardware_mute_displays_fail_fast_and_worker_recovers` aceita `Ok` em outros displays.** O PLAN diz "com erro só Transport/Timeout". O teste reprova `MonitorNotFound`, outros erros e estouro de budget+250ms, mas aceita `Ok`, para não quebrar numa máquina com um segundo monitor DDC funcional. No box a TV deu `Timeout`.
 - **Hook: WARN de tamanho na T-3** (9 arquivos / 1060 linhas; cerca de 55% são testes). Não bloqueou. O PLAN estimava ~600.
 - Validação funcional no Windows real continua diferida (CONTEXT § Deferred). Aqui só rodaram o cross-check e a asserção estática.
+
+## Fix round (W-1, W-2, W-3, W-5, critic #14)
+
+**Modo:** fix_blockers (warnings como lista de trabalho), orquestrado pelo `/jdi-issue` Step 6. Spec travada: D-2026-09-26-ddc-backends-1. Nenhuma task do PLAN foi reimplementada; os nomes dos testes do DoD não mudaram.
+
+### Itens
+- **1. W-1 + W-2** (`28a304f` fix): implementa D-2026-09-26-ddc-backends-1 em `worker.rs`.
+  - O worker não enumera mais dentro do orçamento de uma transação. Um id desconhecido volta na hora como sinal interno `TransactError::UnknownMonitor` (não é `DdcError`).
+  - O `WorkerClient::transact` então roda `enumerate` com `budgets.enumerate` e repete a operação com o orçamento dela. Se o id continua ausente, `MonitorNotFound`.
+  - Checagem de presença pós-falha: o worker mede a duração de cada enumerate e só re-enumera se `agora + último custo < deadline`. Senão devolve `Transport` na hora, com a mensagem citando as tentativas.
+  - A garantia "job vencido não toca o hardware" (`serve`) continua.
+  - Testes novos:
+    - `unknown_id_is_reported_at_once_without_enumerating`;
+    - `first_request_enumerates_under_the_enumeration_budget`: enumerate de 250ms real, contra VCP 100ms e enumerate 5s → `Ok`; um id fantasma → `MonitorNotFound`;
+    - `failed_vcp_answers_transport_at_once_when_a_presence_check_cannot_fit`: clock virtual, enumerate de 1.1s, VCP 1s → `Transport` em 100ms, sem enumerate extra. Inclui o caso de borda `agora + custo == deadline`;
+    - `failed_capabilities_read_checks_presence_when_it_fits`: caps 8s → `MonitorNotFound` para monitor sumido, `Transport` para monitor presente, 2 enumerates.
+  - O `VirtualClock` passou de `Rc<RefCell>` para `Arc<Mutex>`, para a fonte lenta de teste avançar o tempo virtual.
+- **2. W-3** (`0e1d90f` test), em `real_monitor.rs`:
+  - O teste do display mudo virou `hardware_other_displays_fail_within_budget_and_worker_recovers`.
+    - Sem outro display, imprime "no other display on this machine — nothing to check (D-4 not exercised)".
+    - Exige `Ok` ou `Transport` em menos de 500ms, e depois o RTK em menos de 250ms.
+  - Novo `hardware_first_read_on_a_fresh_backend_needs_no_enumerate`: backend novo, `read_vcp(0x10)` em `RTK-RTK-QHD-HDR-01010101`, sem `enumerate()` antes.
+  - O arquivo continua sem `write_vcp`.
+- **3. W-5** (`c7a18f1` test):
+  - O fixture agora vive só em `crates/ddc-core/tests/fixtures/rtk_qhd_hdr_caps.txt` (259 bytes, sem newline final).
+  - Byte-idêntico à string da CONTEXT da `core-domain`: `cmp` = OK, depois de tirar a crase e a indentação do markdown.
+  - É lido por `include_str!(…).trim_ascii_end()` nos três pontos: o teste do parser do core, o `support.rs` dos use cases e o `real_monitor.rs`.
+  - O teste do parser continua afirmando todos os tokens: prot, type, model, cmds, os 28 códigos vcp, as listas de 14/60/CC/D6, mccs_ver e as tags desconhecidas.
+- **4. Critic DoD #14** (`8342338` test):
+  - A conversão real virou `pub(crate) fn transaction_error(error: <ddc_hi::Handle as DdcHost>::Error) -> HandleError`, usada pelos 3 métodos de `impl DdcHandle for Handle`.
+  - Novo teste sem hardware, `ddc_hi_error_chain_reaches_the_port_as_transport_text_only`:
+    - monta um `anyhow::Error` real com cadeia de contexto;
+    - passa por `transaction_error` num display fake;
+    - afirma que caps, read e write chegam ao port como `DdcError::Transport("Get VCP Feature: DDC/CI I2C error: remote I/O error (gave up after attempt 3 of 3)")`, com `source()` = `None`.
+    - Só compila porque o tipo de erro do `ddc-hi` é `anyhow::Error`.
+  - `anyhow = "1"` entrou só em `[dev-dependencies]` do `ddc-adapters`. O `Cargo.lock` ganhou apenas a aresta; a versão continua 1.0.104.
+- **5. Docs** (`3051a61` docs):
+  - `README.md`: novo bullet "No `enumerate()` needed first", e o bullet Retries reescrito.
+  - `CHANGELOG.md` `[Unreleased]`: mesmos dois pontos.
+  - `docs/linux-ddc-setup.md`: display mudo → `Transport` em ~100ms sem atrasar outros monitores; o 1º read num backend novo leva ~1.2s.
+
+### Gates na árvore final (exit codes)
+- `cargo build --workspace --locked` = 0
+- `cargo test --workspace --locked` = 0: 91 passed, 0 failed, 5 ignored de hardware. Antes da rodada: 86 + 4.
+- `cargo fmt --all --check` = 0
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` = 0. Também = 0 com `--target x86_64-pc-windows-msvc` e com `--no-default-features`.
+- `cargo check -p ddc-core -p ddc-adapters --locked --target x86_64-unknown-linux-gnu` = 0
+- `cargo check -p ddc-adapters --locked --features ddc-hi --target x86_64-pc-windows-msvc` = 0
+- `cargo check -p ddc-adapters --locked --no-default-features` = 0
+- `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` = 0. Linha TOTAL:
+  `TOTAL 1165 69 94.08% 161 11 93.17% 790 37 95.32% 0 0 -`
+- `cargo audit` = 1. Os mesmos 2 advisories transitivos de antes (W-4, previsto na CONTEXT): RUSTSEC-2018-0005 `serde_yaml 0.7.5` e RUSTSEC-2024-0320 `yaml-rust 0.4.5`. `anyhow` não trouxe advisory.
+- DoD da CONTEXT #1–#10 = OK. TODO/FIXME sem issue: nenhum. Greps de higiene sem saída.
+
+### Hardware (read-only, `DDC_HW_TESTS=1 … --ignored --test-threads=1 --nocapture`)
+- 5/5 passed em 8.38s. Nenhuma escrita.
+- enumerate: 1.11 / 1.11 / 1.10 / 1.10s.
+- read_capabilities: 2.53s, igual ao fixture único.
+- **1º `read_vcp 0x10` num backend novo, sem `enumerate()`:** `Ok(current 100, max 100)` em 1.149s. Antes da rodada: `Timeout` determinístico.
+- **LG TV (DDC mudo):** `Err(Transport("DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)"))` em 103.4ms. Antes: `Timeout` em 1.000s.
+- **RTK logo em seguida:** 43.8ms. Antes: 287ms, parado atrás do re-enumerate.
+- read_vcp 0x10: 43.8ms. read_vcp 0xDF: 93.8ms → 0x0202 (MCCS 2.2).
+
+### Notas
+- Um monitor que some com os budgets VCP default dá `Transport`, não `MonitorNotFound`, porque a checagem de presença não cabe em 1s (D-2026-09-26-ddc-backends-1). A próxima chamada ao mesmo id encontra o handle velho e falha de novo como `Transport`, até alguém chamar `enumerate()` ou um id desconhecido forçar re-enumeração. Isso está dentro da decisão; a `cli` (D-cli-5: `Transport` → exit 6) deve saber disso.
+- Se o próprio enumerate implícito estourar `budgets.enumerate` (5s), o caller recebe `Timeout`, porque o orçamento esgotado é o do enumerate (D-7).
