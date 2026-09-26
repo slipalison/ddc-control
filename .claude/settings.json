@@ -108,25 +108,6 @@
       "Bash(kubectl get:*)",
       "Bash(kubectl describe:*)",
       "Bash(kubectl logs:*)"
-    ],
-    "ask": [
-      "Bash(git push:*)",
-      "Bash(git reset --hard:*)",
-      "Bash(git rebase:*)",
-      "Bash(git revert:*)",
-      "Bash(git merge:*)",
-      "Bash(git clean:*)",
-      "Bash(rm:*)",
-      "Bash(rmdir:*)",
-      "Bash(chmod:*)",
-      "Bash(chown:*)",
-      "Bash(sudo:*)",
-      "Bash(curl:*)",
-      "Bash(wget:*)",
-      "Bash(docker run:*)",
-      "Bash(docker rm:*)",
-      "Bash(kubectl delete:*)",
-      "Bash(kubectl apply:*)"
     ]
   }
 }
