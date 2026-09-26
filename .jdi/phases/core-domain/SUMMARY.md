@@ -47,3 +47,34 @@
 ## Pendências (não bloqueiam)
 - Validação no monitor físico (Deferred to PR review da CONTEXT): depende da phase `ddc-backends`.
 - Itens manuais do DoD do PROJECT (CHANGELOG/README): no modo autônomo do `/jdi-issue` não há humano para `/jdi-confirm-dod` — ficam para a revisão do PR.
+
+## Fix round (warnings W-2, W-3)
+
+Origem: `REVIEW.md` (APPROVED_PENDING_MANUAL, 0 blockers). W-1 resolvido pelo ambiente (`cargo audit` instalado, sem advisories). Nenhuma task do PLAN reimplementada.
+
+- W-2: `c15f6e8` `fix(core-domain): keep reading monitors with unreadable caps` (D-2026-09-25-core-domain-4)
+  - `SoftwareOsd` guarda por monitor o *resultado* da busca de caps (`Result<Capabilities, DdcError>`). `get_feature`/`set_feature` usam `capabilities_or_empty`: caps ilegível/desbalanceado vira `Capabilities::default()` (`declared_in_capabilities = false`, `Feature` pelos defaults A-3 + tabela de risco) e a falha não é buscada de novo na mesma instância. `MonitorNotFound` continua propagando e não é memorizado (monitor ausente não diz nada sobre caps; evita cache envenenado em hotplug).
+  - `capabilities(id)` explícito: serve só caps parseado do cache; depois de uma falha memorizada **sempre pergunta de novo ao monitor**, devolve o erro se persistir e substitui a falha no cache quando der certo (caminho de recuperação de falha transitória). Documentado em `///` no impl e no port.
+  - `set_feature`: ordem de guarda intacta (`authorize_write` antes de qualquer chamada); sem max conhecido (sem leitura prévia e caps indisponível/sem o código) → `UnsupportedFeature`; após `get_feature`, escrita validada contra o max cacheado; lista NC só vale quando há lista conhecida.
+  - Testes: `read_features::unbalanced_capabilities_are_a_transport_error` substituído por `unbalanced_capabilities_do_not_block_reads`; novos `unreadable_capabilities_are_fetched_once_across_reads`, `explicit_capabilities_request_reports_and_retries_the_failure`, `missing_monitor_is_not_remembered_as_unreadable_capabilities`, `write_features::write_without_read_or_capabilities_is_unsupported`, `write_after_read_uses_cached_max_without_capabilities`, `without_capabilities_a_listed_feature_is_bounded_by_its_max`, `dangerous_write_is_rejected_before_capabilities_are_fetched`. Helper `rtk_monitor_without_capabilities()` em `support.rs`.
+  - Docs: port `MonitorControl` (`capabilities`, `get_feature`), README (§ Monitor-write safety) e CHANGELOG (`[Unreleased]`) alinhados.
+  - Não coberto por teste: a recuperação (falha → retry explícito com sucesso substitui o cache), porque o fake não tem script "falha N vezes e depois responde"; o caminho de inserção de `Ok` no cache é exercitado por `capabilities_are_read_once_per_monitor`.
+- W-3: `6022aa1` `fix(core-domain): ignore capability tokens that are not hex bytes` (D-2026-09-25-core-domain-5)
+  - `hex_bytes` passa a separar tokens por whitespace: token só de dígitos hex com comprimento par → pares de bytes (`0102` = `01 02`); um único dígito → um byte; qualquer outro (ímpar ≥ 3 ou com caractere não-hex) é ignorado inteiro. Doc de `hex_bytes` e de `Capabilities::parse` refletem a regra.
+  - Testes novos: `hex_tokens_are_even_digit_runs_or_single_digits` (`"10 1 12"` → `[0x10,0x01,0x12]`, `"10 bad 12"` → `[0x10,0x12]`, `"0102 zz 0F"` → `[0x01,0x02,0x0F]`) e `words_of_hex_letters_declare_no_code` (via `parse`, `0xBA` não declarado). `parses_real_rtk_caps_string` verde sem alteração.
+  - Efeito colateral aceito: separadores não-whitespace colados (ex.: `10,12`) agora descartam o token inteiro, conforme a regra pedida.
+
+### Files modified (fix round)
+- `crates/ddc-core/src/app/software_osd.rs`, `crates/ddc-core/src/ports/monitor_control.rs`
+- `crates/ddc-core/src/domain/capabilities.rs`, `crates/ddc-core/src/domain/capabilities/tests.rs`
+- `crates/ddc-core/tests/monitor_control/{support,read_features,write_features}.rs`
+- `README.md`, `CHANGELOG.md`
+
+### Gates no tree final (6022aa1)
+- `cargo build --workspace --locked`: exit 0
+- `cargo test --workspace --locked`: exit 0 — 61 passed (ddc-adapters unit 10, ddc-core unit 26, integração `monitor_control` 25; doctests 0)
+- `cargo fmt --all --check`: exit 0; `cargo clippy --workspace --all-targets --locked -- -D warnings`: exit 0
+- cross-check `cargo check -p ddc-core -p ddc-adapters --locked --target x86_64-unknown-linux-gnu`: exit 0; `cargo doc -D warnings`: OK
+- `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`: exit 0
+  `TOTAL                                       617                10    98.38%          69                 0   100.00%         387                 0   100.00%           0                 0         -`
+- `cargo audit`: exit 0 (1271 advisories carregados, 8 crates no `Cargo.lock`, nenhuma vulnerabilidade)
