@@ -1,0 +1,80 @@
+name: CI
+
+# ddc-control's CI is this one caller: every build, lint and test step lives
+# in the reusable workflows of slipalison/github-workflows, which this repo
+# extends there and never copies here (D-2026-09-27-ci-crossbuild-1).
+#
+# PINNED TO A COMMIT, NOT A BRANCH. While the github-workflows PR that adds
+# Windows runners, apt packages, `cargo audit` and the release build is under
+# review, every `uses:` below points at that PR's head commit, so a run here
+# is tied to the exact template code being reviewed. Once that PR is merged,
+# the final commit of this phase swaps each `@<sha>` for `@main`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer commit on the same ref cancels the older run: the Windows job takes
+# tens of minutes without cache, and three pushes would queue three of them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Only computes the next version from the Conventional Commits and rejects a
+  # commit outside them; it never creates a tag or a release (that is the
+  # `release-packaging` phase, hung after the gates, on `main` only).
+  # `versao_inicial` matches `[workspace.package] version` in Cargo.toml.
+  versao:
+    permissions:
+      contents: read
+    uses: slipalison/github-workflows/.github/workflows/versao.yml@2335b52fb2e3f3bfdf553573521e5923e5831996
+    with:
+      versao_inicial: "0.1.0"
+
+  qualidade:
+    permissions:
+      contents: read
+    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@2335b52fb2e3f3bfdf553573521e5923e5831996
+    with:
+      # Tauri compiles three times on Windows (clippy, llvm-cov, release) and
+      # a first run has no cache: the template's 20 minutes are not enough.
+      timeout: 60
+      # One job per component, in parallel. The names are a contract: the
+      # phase's evidence queries the run's jobs by them.
+      #
+      # rust-linux: fmt, `cargo audit` (exceptions in .cargo/audit.toml),
+      #   clippy -D warnings, the tests under cargo llvm-cov with the project's
+      #   80% line floor, and the ddc-tray release binary. Rust 1.98 is the
+      #   toolchain the code is linted with locally, so a lint new in a later
+      #   stable cannot fail a PR out of the blue. apt packages, and why:
+      #     libwebkit2gtk-4.1-dev  Tauri's webview on Linux (webkit2gtk-sys,
+      #                            soup3-sys, javascriptcore-rs-sys); it also
+      #                            brings the GTK 3, GLib and D-Bus (-dev)
+      #                            libraries tao and wry link.
+      #     libudev-dev            libudev-sys, under ddc-hi's i2c backend.
+      #   Not listed, because no crate in the Linux build uses them: the
+      #   appindicator libraries (the Linux tray is ksni over D-Bus; Tauri's
+      #   tray-icon is Windows-only here), librsvg2, libxdo and OpenSSL.
+      # rust-windows: the same steps on windows-latest except the audit (the
+      #   Cargo.lock is the same file; auditing it twice proves nothing new).
+      #   Coverage 0: the panel still reports it, but the floor is measured on
+      #   Linux. This job is the only place the Windows code ever compiles.
+      # node-ui: `npm test` in apps/ddc-tray, which runs the node --test suites
+      #   and the Playwright suite (Chromium installed with its system
+      #   libraries only on a GitHub-hosted runner). Node 24: the node --test
+      #   glob needs Node >= 21.
+      componentes: |
+        [
+          {"nome":"rust-linux","linguagem":"rust","versao":"1.98","cobertura":80,
+           "pacotes_sistema":"libwebkit2gtk-4.1-dev libudev-dev",
+           "auditoria":true,"build_release":"ddc-tray"},
+          {"nome":"rust-windows","linguagem":"rust","versao":"1.98","so":"windows-latest",
+           "cobertura":0,"build_release":"ddc-tray"},
+          {"nome":"node-ui","linguagem":"node","versao":"24","caminho":"apps/ddc-tray"}
+        ]
