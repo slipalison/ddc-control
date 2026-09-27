@@ -1,0 +1,11 @@
+D-2026-09-27-ci-crossbuild-1 (2026-09-27): O CI do ddc-control é UM caller, `.github/workflows/ci.yml`, sem passo de build próprio: tudo roda pelos workflows reutilizáveis do `slipalison/github-workflows`.
+- Gatilhos: `push` na `main`, `pull_request` e `workflow_dispatch`. `concurrency` por workflow+ref com `cancel-in-progress: true`. `permissions: contents: read` no topo e mínimo por job.
+- Jobs nesta phase: `versao` (`versao.yml`) e `qualidade` (`qualidade.yml`).
+- A estrutura deixa lugar para a `release-packaging` pendurar `pacotes` e `lancar` depois dos portões, só na `main`.
+- Durante a phase, cada `uses: slipalison/github-workflows/...` aponta para o SHA do commit do PR do github-workflows (`@<WORKFLOWS_SHA>`), e não para uma branch: o que rodou fica amarrado ao código exato que está em revisão lá. As composites internas continuam `@main`, e a mudança fica só em arquivo de workflow (D-2).
+- O run real vira evidência em `.jdi/phases/ci-crossbuild/ci-evidence.env` (`KEY=VALUE` por linha), reescrito pelo doer a cada push relevante:
+  - `REPO=slipalison/ddc-control`, `RUN_ID`, `HEAD_SHA`;
+  - `WORKFLOWS_SHA`, `WORKFLOWS_PR` (número do PR no github-workflows);
+  - `NEG_RUN_ID`, `NEG_SHA` (o run negativo da D-7).
+- Para haver run de `pull_request`, o doer abre cedo um PR em RASCUNHO da `phase/ci-crossbuild`. O ship depois o marca como pronto e completa o corpo.
+- A troca `@<WORKFLOWS_SHA>` → `@main` é o commit final, feito depois do merge do PR do github-workflows (Deferred to PR review).

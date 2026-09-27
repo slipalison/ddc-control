@@ -1,0 +1,15 @@
+D-2026-09-27-ci-crossbuild-3 (2026-09-27): Os componentes do job `qualidade` no `ci.yml` do ddc-control têm `nome` explícito, e é por esse nome (`qualidade / <nome>` na API) que o run real é consultado.
+- `rust-linux`:
+  - runner padrão `ubuntu-latest`, `cobertura: 80` (o piso do projeto);
+  - `pacotes_sistema` com o mínimo real para compilar o Tauri 2.12 no Ubuntu (`libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libudev-dev build-essential file`, ajustado ao que o run medir);
+  - `auditoria: true` e build de release do `ddc-tray`.
+- `rust-windows`:
+  - `so: windows-latest`, `cobertura: 0`. Os testes rodam de verdade e o painel relata, mas o piso de 80% do projeto é medido no Linux;
+  - build de release do `ddc-tray`;
+  - sem `auditoria`, porque auditar o mesmo `Cargo.lock` de novo não prova nada novo.
+- `node-ui`:
+  - `linguagem: node`, `caminho: apps/ddc-tray`;
+  - o `npm test` passa a rodar `node --test --test-reporter=tap tests/ui/` e depois `playwright test`.
+- Onde instalar os browsers do Playwright:
+  - no runner do CI, com dependências de sistema. O runner efêmero pode usar o sudo dele;
+  - `npm test` na máquina do usuário NUNCA chama sudo nem instala pacote do sistema. Instalar o browser no cache do usuário (sem `--with-deps`) é aceitável.

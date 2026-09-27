@@ -1,0 +1,8 @@
+D-2026-09-27-ci-crossbuild-2 (2026-09-27): O `qualidade.yml` do github-workflows ganha campos OPCIONAIS e retrocompatíveis por componente. Sem eles, o comportamento é exatamente o de hoje.
+- `so`: o runner (`runs-on: ${{ matrix.c.so || 'ubuntu-latest' }}`). Aceita `ubuntu-*` e `windows-*`, e qualquer outro valor reprova cedo com `::error::`.
+- `pacotes_sistema`: pacotes apt, só em runner Linux. A lista é validada por regex (`^[a-z0-9][a-z0-9.+-]*( [a-z0-9][a-z0-9.+-]*)*$`) e chega ao `apt-get install` por `env`, nunca interpolada no script.
+- O `cargo-llvm-cov` continua em versão fixa (0.9.1), baixado para o SO do runner (`x86_64-unknown-linux-gnu.tar.gz` ou `x86_64-pc-windows-msvc.zip`) e conferido por sha256 quando o projeto publica o hash.
+- `auditoria: true` (rust): passo chamado exatamente `cargo audit`, com binário pronto de versão fixa. Não usa `cargo install`, nem `latest`, nem `|| true`. Lê o `.cargo/audit.toml` do chamador e reprova em vulnerabilidade não ignorada.
+- Build de release opcional: um campo por componente que nomeia o pacote, com passo chamado exatamente `Build <pacote> (release)`, rodando `cargo build -p <pacote> --release --locked`.
+- Tudo em arquivo de WORKFLOW. Nenhuma composite nem `bin/` muda nesta phase, para que um caller apontando para o SHA do PR exercite de verdade o código novo. Se o `preparar` precisar mudar no Windows, a mudança e o motivo medido entram no PR, e a prova passa a depender do merge.
+- Convenções do repositório: comentários em pt-BR sem acento, o porquê medido no comentário, SHA de terceiro no `actions.lock.json` e `pinar_actions.py --verificar` verde.
