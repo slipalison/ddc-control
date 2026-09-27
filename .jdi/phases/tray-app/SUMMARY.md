@@ -1,7 +1,7 @@
 # Phase 5: Tray app — Summary  (slug: tray-app)
 
 **Status:** partial
-**Tasks:** 5/8 complete, 0 blocked
+**Tasks:** 6/8 complete, 0 blocked
 
 ## Executed tasks
 - T-1: scaffold do crate `ddc-tray` (lib `ddc_tray` + bin `ddc-tray`) no workspace, com a config Tauri, a capability mínima, o `icon.svg` próprio, o conjunto de ícones gerado e o `tray.png`. Commits `e91a453` (build) e `4c93104` (docs).
@@ -9,6 +9,7 @@
 - T-3: os 7 comandos Tauri (`async fn` + `spawn_blocking`), o composition root (`compose_osd()`/`run()` com single-instance, blur/close escondem, `popup-shown`), o gate puro `popup.rs`, as permissões `allow-*` por comando e o teste de hardware `rtk_qhd_hdr`, rodado no RTK (brilho 100 → 90 → 100, conferido com `ddcutil`). Commit `e033137` (feat).
 - T-4: módulos ES puros e sem dependências (`bridge.js` Tauri/demo, `demo-data.js`, `debounce.js`, `view-model.js`, `i18n/` en + pt-BR) e 63 testes `node --test` fora de `src/`, incluindo o RTK da demo `deepStrictEqual` ao golden. Commit `35c5ffd` (feat).
 - T-5: bandeja com `tray.png`, tooltip e menu nativo bilíngue (`i18n.rs` + `menu.rs` puros), clique esquerdo no Windows alternando o popup ancorado pelo positioner com o gate de `popup.rs`, atalhos de brilho Safe em thread bloqueante com `panel-changed`, "Sair" → `app.exit(0)`, e `scripts/smoke-sni.sh`, que passa no KDE Wayland e falha nos 7 casos provocados. 26 testes novos. Commit `380a691` (feat).
+- T-6: UI do popup em cartões Fluent com o gradiente do ícone: sliders, predefinição, entrada em chips, energia no cabeçalho, "Todos os ajustes" sob demanda com sondagem, diálogo `<dialog>` para todo `dangerous`, estados carregando/vazio/erro, claro/escuro, e o fallback de monitor pedido pelo orquestrador (lembra o último que respondeu e pula os mudos). 83 testes JS (+20). Commit `6e1273c` (feat).
 
 ## Blocked tasks
 - nenhuma
@@ -431,8 +432,140 @@ Falhas provocadas (script final, todas com exit 1 e o app encerrado; os wrappers
 | `cargo build -p ddc-tray --release --locked` | OK |
 | `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` | **TOTAL lines 88.70%** (2726 linhas, 308 sem cobertura); `i18n.rs` 100%, `menu.rs` 98.63% (só o ramo `Windows` de `Platform::current`), `tray.rs` 62.65% (o glue do Tauri), `popup.rs`/`dto.rs` 100%, `panel.rs` 99.04%, `commands.rs` 52.14%, `lib.rs` 0% |
 
+## T-6 — UI do popup: HTML, CSS Fluent-like, `app.js` e diálogo de confirmação
+
+### O que foi feito
+- **`index.html`** (D-2026-09-26-tray-app-6, -7):
+  - nenhum texto literal: textos e atributos legíveis (`aria-label`, `title`) entram por `data-i18n`/`data-i18n-attr`, e o `<title>` também;
+  - só `<link rel="stylesheet" href="styles.css">` e `<script type="module" src="app.js">`, sem `style`, `on*` ou script inline;
+  - `<meta name="color-scheme" content="light dark">`, para os controles nativos seguirem o tema; o `lang` é ajustado no runtime.
+- **Layout** (D-2026-09-26-tray-app-5). A janela é 360×560, e o RTK cabe sem rolar (506/506 px, contra 614/500 na 1ª versão).
+  - **Cabeçalho fixo:**
+    - o `icon.svg` do app em miniatura, o nome do monitor e uma linha secundária (`RTK · DDC/CI`);
+    - o botão atualizar, que gira enquanto carrega, e o botão de energia, só ícone, em "perigo suave", na extrema direita;
+    - com mais de um monitor, o título vira seletor: o `select` nativo fica transparente sobre o nome e o chevron, o que o deixa do tamanho do nome e com foco visível no conjunto.
+  - **Cartão rápido:**
+    - brilho, contraste e volume, cada um com ícone num tile, rótulo e pílula de valor `tabular-nums`;
+    - o `input[type=range]` é nativo: trilha de 6 px com o gradiente ciano→azul→violeta revelado por `--fill` e polegar branco de 18 px com miolo de acento que cresce no hover, como no Windows 11, com anel de foco;
+    - abaixo de um filete, a predefinição de cor num `select` estilizado.
+  - **Entrada:** `radiogroup` de chips em 2 colunas. O ativo é preenchido com o gradiente profundo (branco ≥ 5,36:1 em toda a faixa) e leva um check.
+    - Setas, Home e End só movem o foco (roving tabindex); Espaço ou Enter escolhe, e isso abre o diálogo.
+  - **"Todos os ajustes":** `<details>` com chevron animado, carregado sob demanda.
+    - Cada ajuste tem o controle do seu tipo (slider para contínuo, `select` em linha própria para NC), o código `0xNN` e a tag "Cuidado" nos `dangerous`. Uma leitura que falhou aparece como texto de status.
+    - "Sondar ajustes ocultos" mostra spinner, o rótulo "Sondando…" e o aviso de que leva alguns segundos. Os códigos que respondem viram controles, e os mudos só são contados ("Códigos sem resposta: 7").
+  - **Estados:**
+    - skeleton com shimmer só na 1ª carga, sem animação com `prefers-reduced-motion`;
+    - vazio com ilustração SVG própria, a dica de ativar o DDC/CI no menu do monitor e, só no Linux, a do `/dev/i2c`, com o caminho `docs/linux-ddc-setup.md` em `<code>`;
+    - erro com ícone, o texto do `error.<kind>`, o detalhe e "Tentar de novo";
+    - erro de escrita num aviso no rodapé, com "Tentar de novo".
+  - **Teclado e eventos:**
+    - Esc → `hide_popup`, exceto com o diálogo aberto;
+    - `popup-shown` e `panel-changed` revalidam sem skeleton e sem mexer num slider em uso (lane ocupada ou ponteiro pressionado);
+    - no Tauri, o menu de contexto do webview fica desligado.
+  - **Read-back:** a UI mostra sempre o valor lido de volta. Se ele difere do pedido, a pílula recebe um anel âmbar de 1,2 s e o texto é anunciado via `aria-live=polite` ("Brilho: o monitor aplicou 70%.").
+- **Diálogo de confirmação:**
+  - `<dialog>` modal com foco inicial em Cancelar; Esc e clique no backdrop cancelam;
+  - mostra o efeito (`confirmView`) e, na entrada, como voltar pelo botão do monitor; na energia, os modos diferentes do atual viram radios, e o texto acompanha a escolha;
+  - o tom é de acento para a entrada e de perigo para energia e ajustes genéricos;
+  - nada chega à fila de escrita antes de "Aplicar".
+- **Escritas:**
+  - a fila de `debounce.js` usa a chave `` `${monitorId}:${code}` `` com o `monitorId` no valor (nota da T-4);
+  - cada widget guarda o monitor do painel a que pertence, então uma troca de monitor em andamento não desvia escritas para o monitor novo;
+  - o slider Safe grava durante o arraste (80 ms, coalescendo) e faz `flush` no `change`; um contínuo `dangerous` só pré-visualiza e pergunta ao soltar.
+- **`styles.css`:**
+  - tokens em `:root`: cores, raios 12/8/6 px, espaços, sombras, durações 120/150/180 ms e easing;
+  - escuro por `prefers-color-scheme` e `prefers-reduced-motion`;
+  - fonte `"Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Noto Sans", Cantarell, sans-serif`;
+  - rolagem interna fina e foco visível em tudo;
+  - todo par texto/fundo foi conferido acima de 4,5:1 nos 2 temas;
+  - num navegador largo (demo), o popup aparece numa moldura de 360×560.
+- **`icons.js`:** 12 ícones de linha próprios na grade de 24, mais `brand` (o ícone do app) e `empty` (a ilustração).
+  - São montados com `createElementNS`, sem parse de markup, com `aria-hidden` e ids de gradiente únicos por instância.
+- **Fallback de monitor** (pedido do orquestrador depois da T-5):
+  - **`view-model.js`** ganhou:
+    - `monitorOrder` (o lembrado primeiro, depois a ordem do sistema);
+    - `firstAnswering(ids, load, { stop })`, que tenta um de cada vez;
+    - `storageOf`, `recallMonitor` e `rememberMonitor`, com `try/catch` e a chave `ddc-tray.last-monitor`;
+    - `silent` no `monitorPicker`.
+  - **`app.js`:**
+    - ao carregar, tenta o lembrado e depois os demais, e só mostra erro se nenhum responder; o que falha continua no seletor como "LG TV SSCR2 (sem DDC/CI)";
+    - escolhido à mão, um monitor que falha mostra o erro ("Sem resposta via DDC/CI" e a dica de ativar o DDC/CI), e "Tentar de novo" tenta aquele monitor; o seletor continua lá;
+    - `select_monitor` só roda depois de um `load_panel` bem-sucedido, automático ou manual, e o botão de energia só aparece com o painel a que pertence.
+  - **Demo:** o `two-monitors` lista a "LG TV SSCR2", com DDC/CI mudo (`timeout` em painel, features, sondagem e escrita), antes do RTK e da DELL. O golden do RTK não mudou.
+- **i18n:** 23 chaves novas nos 2 locales, que passam de 64 para 87 chaves cada: `app.title`, `header.{monitor,meta,tagline,silent,noAnswer}`, `panel.quick`, `power.changeLabel`, `tag.dangerous`, `announce.readBack`, `more.{title,loading,empty,probe,probing,probeHint,probed,probeEmpty,probeSilent}`, `action.refresh`, `hint.ddc`, `confirm.recover.input` e `confirm.choose`.
+
+### Testes (83 no total, +20; todos por igualdade)
+- **`i18n-html.test.mjs` (11, novo):**
+  - o `index.html` não tem texto literal nem atributo legível literal (`aria-label`, `title`, `alt`, `placeholder`, `aria-valuetext` etc.);
+  - toda chave de `data-i18n`/`data-i18n-attr` e todo `t('…')` literal de `app.js`/`view-model.js` existe em en e pt-BR; `data-i18n-attr` só nomeia atributos legíveis, no formato `atributo:chave`;
+  - `app.js` nunca atribui string literal a `textContent`;
+  - o único script é o módulo `app.js`, sem `<style>`, `style=`, `on*=` ou `javascript:`;
+  - nenhum `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `setAttribute('style')`, `cssText`, `eval` ou `new Function`;
+  - o único estilo tocado pelo script é `style.setProperty('--fill')`;
+  - todo ícone pedido (`data-icon`, `CONTROL_ICONS`, `createIcon`/`tile`) existe em `ICONS`.
+- **`view-model.test.mjs` (+8, total 25):**
+  - `silent` no seletor;
+  - a ordem de tentativa (lembrado, ausente, `null`, lista vazia);
+  - `firstAnswering`: pula a TV e para no RTK, sem ler a DELL; o lembrado responde 1º e nada mais é lido; nenhum responde → `null` com as 2 falhas em ordem; `stop` interrompe;
+  - memória em storage;
+  - storage que recusa (getter de `localStorage` que lança, `getItem`/`setItem` que lançam, `null`).
+  - O teste do `pickMonitor` saiu com a função.
+- **`bridge-demo.test.mjs` (+1, total 18):** a TV é listada, mas `load_panel`, `load_features`, `probe_features` e `set_feature` dão `timeout`, sem escrita, e `select_monitor` responde `null`. A listagem do `two-monitors` agora tem os 3 monitores.
+- **`contract.test.mjs`:** no `two-monitors`, o RTK e a DELL são localizados por id; o RTK continua igual ao golden, e todo monitor tem as chaves do contrato.
+
+### Mutações (provadas e revertidas a partir de cópias, nada commitado)
+| Mutação | Teste que falhou |
+|---|---|
+| `<h2 …>Entrada</h2>` literal no HTML | `the page has no literal text` |
+| `aria-label="Atualizar"` literal | `the page has no literal readable attribute` |
+| `data-i18n="more.titel"` | `every data-i18n and data-i18n-attr key exists in both locales` |
+| `t('tag.danger')` no `app.js` | `every literal t('…') key … exists in both locales` |
+| `node.innerHTML = ''` | `scripts never parse markup…` |
+| `input.setAttribute('style', …)` no lugar do `setProperty` | `scripts never parse markup…` + `a slider fill is set as a custom property…` |
+| `data-icon="gear"` | `every icon the page and the app ask for exists` |
+| `break` depois da 1ª falha em `firstAnswering` | `the first monitor that answers is shown…` + `only when no monitor answers…` |
+
+Depois de reverter: `cmp` idêntico às cópias e `# pass 83`, `# fail 0`.
+
+### Validação no navegador (scripts descartáveis no scratchpad, fora do repo)
+- **Chromium do Playwright 1.63.0**, 360×560, `deviceScaleFactor` 2, claro e escuro, pt-BR, com a CSP exata do `tauri.conf.json` injetada por header:
+  - os 5 caminhos (`/`, `?demo=rtk`, `two-monitors`, `empty`, `error`) com 0 console error/warning e 0 `pageerror`, inclusive com os diálogos abertos, "Todos os ajustes" aberto e a sondagem.
+- **Roteiro de comportamento** (todos `assert` verdes, 0 erro de console):
+  - **Teclado:** Tab → atualizar → energia → brilho; `ArrowRight` gera exatamente 1 escrita `{0x10, 76, confirmed:false}`, e o `aria-valuetext` vira `76%`.
+  - **Coalescência:** 5 `input` seguidos geram 1 escrita `{0x12, 50}`.
+  - **Entrada:** o clique abre o diálogo com o foco em Cancelar; Esc e Cancelar deixam 0 escritas e a entrada inalterada; Aplicar grava `{0x60, 0x11, confirmed:true}` e marca HDMI-1 pelo read-back. No radiogroup, a seta só move o foco, e Espaço abre o diálogo.
+  - **Energia:** radios `[0x04 ✓, 0x05]`; escolher 0x05 atualiza o texto; Aplicar grava `{0xD6, 5, confirmed:true}`.
+  - **"Todos os ajustes":** mudar 0xCA abre o diálogo, e Cancelar volta o `select` para "Ativado"; mudar 0xCC (Safe) grava `{0xCC, 3, confirmed:false}`.
+  - **Eventos:** Esc fora do diálogo não dá erro; `popup-shown` e `panel-changed` revalidam sem skeleton e com "Todos os ajustes" ainda aberto.
+  - **Read-back divergente** (bridge da demo alterado só no teste para limitar a 70): `End` no brilho → pílula e slider em 70%, anúncio `Brilho: o monitor aplicou 70%.` e o destaque na pílula.
+  - **Skeleton e movimento:** skeleton na 1ª carga (demo com latência de 1,5 s); com `reducedMotion: 'reduce'`, o shimmer fica `display: none`.
+  - **Fallback:** o `two-monitors` abre o RTK, e o seletor mostra `["LG TV SSCR2 (sem DDC/CI)","RTK QHD HDR","DELL U2723QE"]`. Escolher a TV mostra erro, com o seletor e sem o botão de energia. Escolher a DELL grava `localStorage` e `__ddcDemo.selected` = DELL, e depois de recarregar a página a DELL abre direto.
+- **axe-core 4.10.3** (`wcag2a`, `wcag2aa`, `wcag21aa` e `best-practice`) em 9 estados × 2 temas (padrão, RTK, "Todos os ajustes" + sondagem, diálogo de entrada, diálogo de energia, `two-monitors`, TV em erro, vazio e erro): 0 violações. Os "incomplete" de contraste são o chip com gradiente, conferido à mão (≥ 5,36:1).
+- **WebKitGTK 2.54 do sistema** (o motor do Tauri no Linux), via PyGObject `OffscreenWindow` com `WEBKIT_DISABLE_DMABUF_RENDERER=1`: RTK, diálogo e "Todos os ajustes", claro e escuro, renderizam igual ao Chromium (backdrop com desfoque, trilha, polegar, rolagem fina), sem mensagens de console. O WebKit do Playwright não sobe nesta máquina: ele pede libs de host com nomes do Ubuntu, e instalar exigiria sudo.
+- **Screenshots de trabalho** (não commitadas; os oficiais são da T-7), em `/tmp/claude-1000/-home-slipalison-repos-ddc-control/0d3f145e-b932-4d13-9d1c-2a0d820f1d21/scratchpad/t6/shots/`: `{light,dark}-{root,rtk,rtk-more,rtk-probing,rtk-probed,rtk-dialog-input,rtk-dialog-power,rtk-en,two,two-tv,two-tv-focus,two-dell,empty,error,skeleton}.png`, `light-{focus-slider,focus-chip,readback}.png` e `gtk-{light,dark}-rtk-{0,1,2}.png`.
+
+### Desvios do plano
+- **Energia no cabeçalho** (botão de ícone "perigo suave", sempre com o diálogo) e **predefinição dentro do cartão rápido**, em vez de uma linha própria para cada um. Com as 7 entradas do RTK, o conteúdo passava 114 px dos 560. Assim tudo cabe sem rolar, e a rolagem só aparece com "Todos os ajustes" aberto. O estado atual da energia ("Ligado") deixou de aparecer, e a chave `power.change` saiu.
+- **Fallback de monitor** (pedido do orquestrador): tocou `demo-data.js`, fora do `files_modified`, e o `two-monitors` agora lista 3 monitores (a TV muda + RTK + DELL). O nome do cenário foi mantido porque é `critical_path` do Gate 7 (T-7/T-8). O `pickMonitor` do view-model saiu, substituído por `monitorOrder`, e o teste foi ajustado.
+- **Radiogroup:** as setas movem só o foco, sem selecionar, ao contrário do padrão APG, porque cada seleção é uma troca `dangerous` confirmada. O axe não aponta nada.
+- **`select` NC em "Todos os ajustes" em linha própria**, com largura total, para não truncar rótulos como "Ajuste automático" com a tag "Cuidado".
+- **A dica do `/dev/i2c`** também aparece no erro de um monitor mudo (`timeout`), pela regra do `statusView` da T-4 (kinds `backend_unavailable|transport|timeout`). Junto dela vem a dica de ativar o DDC/CI, que é a mais provável nesse caso.
+- **O detalhe do erro** (`error.message`, em inglês, vindo do core) aparece em mono pequeno abaixo do texto traduzido, como diagnóstico.
+- **Nenhum `cargo` foi rodado e nenhum arquivo Rust foi tocado** (pedido do orquestrador: a T-5 rodava em paralelo). O binário atual embute o `index.html` antigo; a UI nova entra no próximo `cargo build`, porque o `frontendDist` é embutido na compilação.
+
+### Verificação
+| Comando | Resultado |
+|---|---|
+| Verify `node --test` da CONTEXT (`--test-reporter=tap`, `# pass ≥ 20`, `# fail 0`, nada de `*.test.*` em `src/`) | OK: `# tests 83`, `# pass 83`, `# fail 0` |
+| Verify i18n da CONTEXT (`tests/ui/i18n*.test.mjs`) | OK: `# tests 24`, `# pass 24`, `# fail 0` |
+| 5 `critical_paths` no Chromium com a CSP do Tauri, claro e escuro | 0 erro de console, 0 `pageerror` |
+| axe-core, 9 estados × 2 temas | 0 violações |
+| WebKitGTK 2.54 (RTK, diálogo, "Todos os ajustes"), claro e escuro | renderiza igual, 0 mensagens de console |
+| `node --check apps/ddc-tray/src/app.js` | OK |
+| Golden `contract-rtk.json` | intocado |
+
 ## Tests
 - Total: 339
 - Passing: 339
-- Coverage: 88.70% (`cargo llvm-cov --summary-only`, TOTAL lines)
-- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 63 passing, 0 failing (medido na T-4; a T-5 não toca JS)
+- Coverage: 88.70% (`cargo llvm-cov --summary-only`, TOTAL lines; medido na T-5, a T-6 não toca Rust)
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 83 passing, 0 failing (medido na T-6)

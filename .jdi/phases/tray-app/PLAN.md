@@ -129,7 +129,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
   - **`i18n-html.test.mjs`:** o `index.html` não tem texto nem atributo acessível literal, e toda chave de `data-i18n*` e de `t('…')` em `app.js` existe nos 2 locales.
 - **Dependencies:** T-4
 - **Test:** Verify da CONTEXT de `node --test` e i18n + os 5 `critical_paths` abertos à mão via `python3 -m http.server`, sem erro de console
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5
 
