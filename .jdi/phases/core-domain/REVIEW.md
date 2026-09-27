@@ -1,6 +1,6 @@
 # Phase 1: Review  (slug: core-domain)
 
-**Verdict:** APPROVED_PENDING_MANUAL
+**Verdict:** APPROVED_WITH_WARNINGS
 
 Re-verify (iter 2) depois da rodada de correção de warnings do `/jdi-issue` (Step 6): `c15f6e8` (W-2), `6022aa1` (W-3), `6fb5d9e` (SUMMARY). Review anterior: `git show ad4632d:.jdi/phases/core-domain/REVIEW.md`.
 
@@ -56,8 +56,8 @@ Re-verify (iter 2) depois da rodada de correção de warnings do `/jdi-issue` (S
 | 1 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | reaproveitado do Gate 2: exit 0, 61 passed, 0 failed |
 | 2 | Coverage >= 80% of lines | PROJECT | Auto | PASS | reaproveitado do Gate 3: TOTAL Lines 100.00% (387 linhas, 0 perdidas) |
 | 3 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | grep sem hits (exit 0) |
-| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: único heading de versão é `## [Unreleased]` (CHANGELOG.md:8), atualizado em `c15f6e8` com o comportamento de caps ilegível; ainda sem `## [x.y.z]` (nenhuma release cortada) |
-| 5 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: status "Phase 1 (`core-domain`) is implemented" (README.md:5); § Monitor-write safety atualizado em `c15f6e8` (caps ilegível = nada declarado, falha memorizada, só `capabilities` explícito refaz), coerente com `software_osd.rs:56-63,106-111` |
+| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | CONFIRMED | suggested: único heading de versão é `## [Unreleased]` (CHANGELOG.md:8), atualizado em `c15f6e8` com o comportamento de caps ilegível; ainda sem `## [x.y.z]` (nenhuma release cortada) |
+| 5 | README accurately describes current behavior | PROJECT | Manual | CONFIRMED | suggested: status "Phase 1 (`core-domain`) is implemented" (README.md:5); § Monitor-write safety atualizado em `c15f6e8` (caps ilegível = nada declarado, falha memorizada, só `capabilities` explícito refaz), coerente com `software_osd.rs:56-63,106-111` |
 | 6 | Workspace root é `[workspace]` puro com members exatamente `crates/ddc-core` e `crates/ddc-adapters`; `src/main.rs` removido | CONTEXT | Auto | PASS | OK (exit 0); `members = ["crates/ddc-core", "crates/ddc-adapters"]`; diretório `src/` ausente |
 | 7 | `crates/ddc-core/Cargo.toml` `[dependencies]` = somente `thiserror` (D-2) | CONTEXT | Auto | PASS | OK (exit 0) |
 | 8 | Workspace compila (incluindo dev-dependency cíclica do fake) | CONTEXT | Auto | PASS | `cargo build --workspace --locked` → OK |
@@ -88,3 +88,14 @@ Observações para phases futuras (não são findings desta phase):
 Forçado pelo `/jdi-issue` na re-verificação pós fix round: 0 linhas hollow entre as Auto PASS (critic retornou `[]`).
 
 **Verdict:** APPROVED
+
+## DoD Manual Confirmations
+
+- [x] CHANGELOG.md updated with entry per release
+      **Confirmed at:** 2026-09-27T15:34:08Z
+      **By:** alison amorim
+      **Evidence:** PR #1 (477d58c) revisado e mergeado pelo mantenedor; a entrada da phase está em `## [Unreleased]` do CHANGELOG.md. Nenhuma versão foi lançada ainda: o heading `## [versão]` passa a ser cortado pelo fluxo de release (phase `release-packaging`). Confirmado pelo usuário em 2026-09-27.
+- [x] README accurately describes current behavior
+      **Confirmed at:** 2026-09-27T15:34:08Z
+      **By:** alison amorim
+      **Evidence:** diff do README revisado no PR #1 (477d58c) e mergeado na `main`. Confirmado pelo usuário em 2026-09-27.
