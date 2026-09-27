@@ -9,6 +9,7 @@
 
 pub mod commands;
 pub mod dto;
+pub mod fixture;
 pub mod i18n;
 pub mod menu;
 pub mod panel;

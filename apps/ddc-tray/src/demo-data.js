@@ -1,8 +1,9 @@
 // The demo's monitors (D-2026-09-26-tray-app-8), written out as the Rust
-// side would read them. `rtk` mirrors the fake of `panel/tests.rs` (plan
-// A-2) — the contract test pins it to the golden — and its probe mirrors the
-// probe test there; the mute TV's error is pinned the same way, to the mute
-// golden. Every name is the core's catalog name, verbatim.
+// side would read them. `rtk` mirrors the simulated monitor of
+// `src-tauri/src/fixture.rs` (plan A-2) — the contract test pins it to the
+// golden — and its probe mirrors the probe test of `panel/tests.rs`; the
+// mute TV's error is pinned the same way, to the mute golden. Every name is
+// the core's catalog name, verbatim.
 
 export const SCENARIOS = Object.freeze(['rtk', 'two-monitors', 'empty', 'error']);
 

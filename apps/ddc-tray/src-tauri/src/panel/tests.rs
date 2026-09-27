@@ -15,14 +15,7 @@ use crate::dto::{
     ControlDto, ControlValueDto, ErrorKind, FeatureDto, FeatureStatus, MonitorDto, OptionDto,
     Origin, PanelDto, ReadBackDto, UiError,
 };
-
-/// Id the real backend derives for the dev monitor "RTK QHD HDR".
-pub(crate) const RTK_ID: &str = "RTK-RTK-QHD-HDR-01010101";
-
-/// Capabilities of the dev monitor, from the fixture the core's tests share.
-pub(crate) const RTK_CAPS: &str =
-    include_str!("../../../../../crates/ddc-core/tests/fixtures/rtk_qhd_hdr_caps.txt")
-        .trim_ascii_end();
+use crate::fixture::{COLOR_TEMP, RTK_CAPS, RTK_ID, rtk_id, rtk_info, rtk_monitor};
 
 /// Id the real backend derives for the dev machine's LG TV.
 const TV_ID: &str = "GSM-LG-TV-SSCR2-01010101";
@@ -32,50 +25,12 @@ const TV_ID: &str = "GSM-LG-TV-SSCR2-01010101";
 const TV_FAILURE: &str =
     "DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)";
 
-/// 0x0C — colour temperature request, declared by the dev monitor.
-const COLOR_TEMP: VcpCode = VcpCode(0x0C);
-
 /// Set to regenerate the goldens on purpose, after a deliberate contract
 /// change: `DDC_TRAY_UPDATE_GOLDEN=1 cargo test -p ddc-tray --locked golden`
 /// (or name one test, such as `mute_contract`, to rewrite only its file).
 const UPDATE_GOLDEN: &str = "DDC_TRAY_UPDATE_GOLDEN";
 
 pub(crate) type Osd = SoftwareOsd<InMemoryMonitorBackend>;
-
-pub(crate) fn rtk_id() -> MonitorId {
-    MonitorId::new(RTK_ID)
-}
-
-fn rtk_info() -> MonitorInfo {
-    MonitorInfo {
-        id: rtk_id(),
-        manufacturer: Some("RTK".to_owned()),
-        model: Some("RTK QHD HDR".to_owned()),
-        serial: Some("01010101".to_owned()),
-    }
-}
-
-/// The contract's RTK scenario (plan A-2): the dev monitor's real
-/// capabilities and identity, the six quick controls at fixed values —
-/// volume answering although the capabilities omit it — and the seven "all
-/// settings" codes. The demo bridge mirrors exactly these values.
-pub(crate) fn rtk_monitor() -> FakeMonitor {
-    FakeMonitor::new(rtk_info())
-        .with_capabilities(RTK_CAPS)
-        .with_value(VcpCode::BRIGHTNESS, 75, 100)
-        .with_value(VcpCode::CONTRAST, 50, 100)
-        .with_value(VcpCode::AUDIO_VOLUME, 30, 100)
-        .with_value(VcpCode::INPUT_SOURCE, 0x0F, 0x03)
-        .with_value(VcpCode::COLOR_PRESET, 0x01, 0x0B)
-        .with_value(VcpCode::POWER_MODE, 0x01, 0x05)
-        .with_value(COLOR_TEMP, 70, 100)
-        .with_value(VcpCode::RED_GAIN, 50, 100)
-        .with_value(VcpCode::GREEN_GAIN, 48, 100)
-        .with_value(VcpCode::BLUE_GAIN, 46, 100)
-        .with_value(VcpCode::SHARPNESS, 5, 10)
-        .with_value(VcpCode::OSD_LOCK, 0x02, 0x02)
-        .with_value(VcpCode::OSD_LANGUAGE, 0x02, 0x0D)
-}
 
 fn tv_id() -> MonitorId {
     MonitorId::new(TV_ID)

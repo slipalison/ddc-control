@@ -9,8 +9,9 @@ use super::{
     write_feature,
 };
 use crate::dto::{ErrorKind, MonitorDto, ReadBackDto, UiError};
+use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
 use crate::panel;
-use crate::panel::tests::{Osd, RTK_ID, osd_with, rtk_id, rtk_monitor};
+use crate::panel::tests::{Osd, osd_with};
 
 /// HDMI-1: an input the dev monitor's capabilities declare.
 const HDMI_1: u16 = 0x11;

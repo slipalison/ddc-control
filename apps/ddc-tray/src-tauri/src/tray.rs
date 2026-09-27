@@ -178,7 +178,8 @@ mod tests {
 
     use super::{APP_NAME, TRAY_ID, brightness_shortcut};
     use crate::dto::{ErrorKind, PanelChangedDto, UiError};
-    use crate::panel::tests::{RTK_ID, osd_with, rtk_id, rtk_monitor};
+    use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
+    use crate::panel::tests::osd_with;
 
     const DELL_ID: &str = "DEL-U2720Q-7";
 
