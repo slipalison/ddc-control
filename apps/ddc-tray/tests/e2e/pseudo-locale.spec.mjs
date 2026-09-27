@@ -7,8 +7,11 @@
 // from no key — a literal, whatever const, helper or template carried it,
 // alone or glued to a translation — and a text under `translate="no"` that
 // carries the marks is a translation passed off as data. Readable
-// attributes follow the same rule.
+// attributes follow the same rule. The states include the failures the
+// demo's `&fail=` brings about (a write, "all settings", the probe timing
+// out) and the waits a user sees, because their texts show nowhere else.
 
+import { readFileSync } from 'node:fs';
 import {
   CSP,
   expect,
@@ -16,6 +19,7 @@ import {
   loadEnds,
   open,
   pick,
+  serve,
   t,
   test,
 } from './support.mjs';
@@ -49,8 +53,34 @@ const TWO_MONITORS = '/?demo=two-monitors';
 const TV = 'LG TV SSCR2';
 const DELL = 'DELL U2723QE';
 
+/** The RTK, with the demo timing out the commands `what` names (`write`, `features`, `probe`). */
+const rtkFailing = (what) => `${RTK}&fail=${what}`;
+
 function withPseudo(path) {
   return `${path}${path.includes('?') ? '&' : '?'}pseudo=1`;
+}
+
+// Test-only variants of the demo's bridge.js, as slider.spec.mjs serves
+// them: the line each replaces must still be there, or the state would
+// check a popup that never reached it.
+const BRIDGE = readFileSync(new URL('../../src/bridge.js', import.meta.url), 'utf8');
+const WAIT_LINE = "await wait(command === 'probe_features' ? latencyMs * PROBE_LATENCY_FACTOR : latencyMs);";
+const FEATURES_LINE = 'return features.map(featureDto);';
+
+/**
+ * A demo in which `command` never answers, so the popup stays waiting on it
+ * with the page's clock running: axe needs its timers.
+ */
+function holding(command) {
+  return { line: WAIT_LINE, by: `if (command === '${command}') await new Promise(() => {}); ${WAIT_LINE}` };
+}
+
+/** A demo whose monitor declares nothing besides the quick controls. */
+const NOTHING_ELSE_DECLARED = { line: FEATURES_LINE, by: 'return [];' };
+
+async function serveBridge(page, { line, by }) {
+  expect(BRIDGE, 'the demo line this state patches').toContain(line);
+  await page.route('**/bridge.js', (route) => serve(route, { patch: (source) => source.replace(line, by) }));
 }
 
 function combobox(page, key) {
@@ -62,19 +92,36 @@ async function openAllSettings(page, features) {
   await expect(page.locator('#feature-list > li')).toHaveCount(features);
 }
 
+/** Opens "all settings" and waits for its status line to show `kind`. */
+async function openAllSettingsTo(page, kind) {
+  await page.getByText(pseudo('more.title'), { exact: true }).click();
+  await expect(page.locator('#more-status')).toHaveAttribute('data-kind', kind);
+  await expect(page.locator('#more-status')).toBeVisible();
+}
+
+function probeButton(page) {
+  return page.getByRole('button', { name: pseudo('more.probe'), exact: true });
+}
+
 async function probe(page) {
-  await page.getByRole('button', { name: pseudo('more.probe'), exact: true }).click();
+  await probeButton(page).click();
   await expect(page.locator('#probe-results')).toBeVisible();
   await expect(page.locator('#probe')).toHaveAttribute('aria-disabled', 'false');
 }
 
+async function toastShows(page) {
+  await expect(page.locator('#toast')).toBeVisible();
+}
+
 /**
  * The states checked, in pseudo-locale: `path` settles in `state`, then
- * `reach` takes the popup where the check runs. `reach` finds elements and
- * waits for them but never asserts a text: telling a translated text from
- * a literal is the check's job alone. The backend-unavailable state of the
- * app itself is `/?demo=error`'s (same kind, same nodes): outside the demo
- * the pseudo-locale is off, as the last test shows.
+ * `reach` takes the popup where the check runs; `bridge`, when there, is
+ * the test-only variant of the demo the state needs. `reach` finds
+ * elements and waits for them but never asserts a text: telling a
+ * translated text from a literal is the check's job alone. The
+ * backend-unavailable state of the app itself is `/?demo=error`'s (same
+ * kind, same nodes): outside the demo the pseudo-locale is off, as the
+ * last test shows.
  */
 const STATES = [
   { name: '/ ready', path: '/', state: 'ready' },
@@ -155,6 +202,72 @@ const STATES = [
       await probe(page);
       await expect(page.locator('#probe-list')).toBeHidden();
       await expect(page.locator('#probe-note')).toBeVisible();
+    },
+  },
+  {
+    name: 'rtk after a brightness write that timed out',
+    path: rtkFailing('write'),
+    state: 'ready',
+    reach: async (page) => {
+      await page.getByRole('slider', { name: pseudo('feature.brightness'), exact: true }).press('ArrowRight');
+      await toastShows(page);
+    },
+  },
+  {
+    name: 'rtk after a color preset change that timed out',
+    path: rtkFailing('write'),
+    state: 'ready',
+    reach: async (page) => {
+      await pick(combobox(page, 'feature.preset'), pseudo('value.display-native'));
+      await toastShows(page);
+    },
+  },
+  {
+    name: 'rtk with all settings still loading',
+    path: RTK,
+    state: 'ready',
+    bridge: holding('load_features'),
+    reach: (page) => openAllSettingsTo(page, 'loading'),
+  },
+  {
+    name: 'rtk with all settings failing to load',
+    path: rtkFailing('features'),
+    state: 'ready',
+    reach: async (page) => {
+      await openAllSettingsTo(page, 'error');
+      await expect(page.locator('#more-retry')).toBeVisible();
+    },
+  },
+  {
+    name: 'rtk with all settings declaring nothing else',
+    path: RTK,
+    state: 'ready',
+    bridge: NOTHING_ELSE_DECLARED,
+    reach: async (page) => {
+      await openAllSettingsTo(page, 'empty');
+      await expect(page.locator('#feature-list > li')).toHaveCount(0);
+    },
+  },
+  {
+    name: 'rtk while probing',
+    path: RTK,
+    state: 'ready',
+    bridge: holding('probe_features'),
+    reach: async (page) => {
+      await openAllSettings(page, 7);
+      await probeButton(page).click();
+      await expect(page.locator('#probe')).toHaveAttribute('aria-disabled', 'true');
+    },
+  },
+  {
+    name: 'rtk after a probe that timed out',
+    path: rtkFailing('probe'),
+    state: 'ready',
+    reach: async (page) => {
+      await openAllSettings(page, 7);
+      await probeButton(page).click();
+      await toastShows(page);
+      await expect(page.locator('#probe')).toHaveAttribute('aria-disabled', 'false');
     },
   },
 ];
@@ -240,8 +353,9 @@ async function expectEveryTextTranslatedOrData(page) {
   expect(report.marked, 'translated texts read').toBeGreaterThanOrEqual(3);
 }
 
-for (const { name, path, state, reach } of STATES) {
+for (const { name, path, state, bridge, reach } of STATES) {
   test(`every visible text is translated or marked as data: ${name}`, async ({ page }) => {
+    if (bridge) await serveBridge(page, bridge);
     await open(page, withPseudo(path), state);
     await reach?.(page);
     await expectEveryTextTranslatedOrData(page);
