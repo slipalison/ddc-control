@@ -109,3 +109,9 @@ Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Witho
 ## Nota do orquestrador (pós-review, antes do critic)
 
 W-2 era do `Verify:` do C8 (escrito pelo orquestrador): o grep do corpo do teste casava com uma linha comentada. Agora o módulo `build_tests` inteiro de `lib.rs` é congelado por SHA-256 (`645f5f1c…2673`), o `run()` precisa usar `.build(context())` em linha não comentada e só pode haver um `generate_context!`. HEAD imprime OK; o mutante (asserção comentada + `tauri.linux.conf.json` com `"csp": null`) reprova numa cópia descartável. Nenhum arquivo do harness congelado mudou.
+
+## DoD Critic (enhanced)
+
+- DoD row «8 (CSP)»: `tauri.windows.conf.json` com `{"app":{"security":{"csp":null}}}` apaga a CSP no Windows (`read_from(Target::Windows, …)` → `csp=None`) e passa em todos os Verify: o laço `jq` só reprova CSP vazia na config base, e o teste de CSP efetiva só mescla o arquivo de plataforma do alvo do build (Linux).
+
+**Verdict:** BLOCKED

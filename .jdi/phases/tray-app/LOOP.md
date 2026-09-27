@@ -37,3 +37,4 @@ created_at: 2026-09-26T21:35:52-03:00
 - iter 13 (round 3, 3): APPROVED_PENDING_MANUAL (2 warns: W-1 audit; W-2 C8 verify gaps → fixed by orchestrator in CONTEXT), hash=75c3b2c57362, commit=03a768a, ts=2026-09-27T08:48:13-03:00
 - iter 13 aggregate after DoD critic: BLOCKED (critic: 2 rows — platform csp:null erases the CSP; untranslated one-word announce via ternary), ts=2026-09-27T09:05:25-03:00
 - iter 14 (round 3, 4): APPROVED_PENDING_MANUAL (2 warns: W-1 audit; W-2 C8 verify comment bypass → fixed by orchestrator), hash=7e386f0b11ac, commit=3c1bb2d, ts=2026-09-27T09:35:19-03:00
+- iter 14 aggregate after DoD critic: BLOCKED (critic: 1 row — Windows platform file csp:null outside the Linux-merged effective check), ts=2026-09-27T09:49:31-03:00
