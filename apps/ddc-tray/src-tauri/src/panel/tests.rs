@@ -24,6 +24,14 @@ pub(crate) const RTK_CAPS: &str =
     include_str!("../../../../../crates/ddc-core/tests/fixtures/rtk_qhd_hdr_caps.txt")
         .trim_ascii_end();
 
+/// Id the real backend derives for the dev machine's LG TV.
+const TV_ID: &str = "GSM-LG-TV-SSCR2-01010101";
+
+/// What the real backend answers for any VCP code of the dev machine's LG
+/// TV, whose DDC/CI is mute (hardware run of phase `ddc-backends`).
+const TV_FAILURE: &str =
+    "DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)";
+
 /// 0x0C — colour temperature request, declared by the dev monitor.
 const COLOR_TEMP: VcpCode = VcpCode(0x0C);
 
@@ -66,6 +74,25 @@ pub(crate) fn rtk_monitor() -> FakeMonitor {
         .with_value(VcpCode::SHARPNESS, 5, 10)
         .with_value(VcpCode::OSD_LOCK, 0x02, 0x02)
         .with_value(VcpCode::OSD_LANGUAGE, 0x02, 0x0D)
+}
+
+fn tv_id() -> MonitorId {
+    MonitorId::new(TV_ID)
+}
+
+/// The contract's mute scenario: the dev machine's LG TV, listed from its
+/// EDID, whose every VCP read and write fails as the real backend reports
+/// it. The demo bridge's mute TV answers exactly the same.
+fn mute_tv() -> FakeMonitor {
+    let info = MonitorInfo {
+        id: tv_id(),
+        manufacturer: Some("GSM".to_owned()),
+        model: Some("LG TV SSCR2".to_owned()),
+        serial: Some("01010101".to_owned()),
+    };
+    (0..=u8::MAX).fold(FakeMonitor::new(info), |monitor, code| {
+        monitor.with_vcp_failure(VcpCode(code), DdcError::Transport(TV_FAILURE.to_owned()))
+    })
 }
 
 /// A core wired to `monitors`, plus a handle on the same fake to inspect it.
@@ -321,6 +348,41 @@ fn a_control_whose_read_times_out_is_left_out_and_the_rest_still_load() {
     let mut expected = rtk_controls();
     expected.remove(1);
     assert_eq!(panel.controls, expected);
+}
+
+#[test]
+fn a_mute_monitor_fails_its_panel_instead_of_loading_it_empty() {
+    let (osd, backend) = osd_with([mute_tv(), rtk_monitor()]);
+
+    let panel = load_panel(&osd, &tv_id());
+
+    assert_eq!(
+        panel,
+        Err(UiError {
+            kind: ErrorKind::Transport,
+            message: format!("transport error: {TV_FAILURE}"),
+        })
+    );
+    assert_eq!(writes(&backend), []);
+}
+
+#[test]
+fn a_panel_with_no_control_fails_with_its_first_reading_error() {
+    let monitor = FakeMonitor::new(rtk_info())
+        .with_capabilities(RTK_CAPS)
+        .with_vcp_failure(VcpCode::BRIGHTNESS, DdcError::Transport("nak".to_owned()))
+        .with_vcp_failure(VcpCode::CONTRAST, DdcError::Timeout);
+    let (osd, _) = osd_with([monitor]);
+
+    let panel = load_panel(&osd, &rtk_id());
+
+    assert_eq!(
+        panel,
+        Err(UiError {
+            kind: ErrorKind::Transport,
+            message: "transport error: nak".to_owned(),
+        })
+    );
 }
 
 #[test]

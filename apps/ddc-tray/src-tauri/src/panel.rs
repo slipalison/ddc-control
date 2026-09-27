@@ -41,23 +41,32 @@ pub fn monitors<M: MonitorControl + ?Sized>(osd: &M) -> Result<Vec<MonitorDto>, 
 ///
 /// # Errors
 ///
-/// `not_found` when the monitor is not reachable.
+/// `not_found` when the monitor is not reachable. When no quick control
+/// can be read, the error of the first reading that failed: a monitor
+/// listed from its EDID whose DDC/CI is mute fails its panel instead of
+/// loading it empty, so the popup moves on to the next monitor.
 pub fn load_panel<M: MonitorControl + ?Sized>(
     osd: &M,
     id: &MonitorId,
 ) -> Result<PanelDto, UiError> {
     let mut controls = Vec::with_capacity(QUICK_CONTROLS.len());
+    let mut first_failure = None;
     for code in QUICK_CONTROLS {
         match osd.get_feature(id, code) {
             Ok(reading) => controls.push(ControlDto::new(&reading)),
             Err(error @ DdcError::MonitorNotFound(_)) => return Err(ui_error(error)),
-            Err(_) => {}
+            Err(error) => {
+                first_failure.get_or_insert(error);
+            }
         }
     }
-    Ok(PanelDto {
-        monitor_id: id.to_string(),
-        controls,
-    })
+    match first_failure {
+        Some(error) if controls.is_empty() => Err(ui_error(error)),
+        _ => Ok(PanelDto {
+            monitor_id: id.to_string(),
+            controls,
+        }),
+    }
 }
 
 /// The "all settings" entries of monitor `id`: every code its capabilities
