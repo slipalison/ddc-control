@@ -2238,3 +2238,92 @@ Extraídos por script do `.md` e rodados com `bash` a partir da raiz, sem `DDC_H
 - **README/CHANGELOG (`d3edb87`)** não estavam na lista. Entraram porque o DoD manual #24 pede o README fiel ao comportamento atual (a trava nova, 27 estados, o erro de indisponível só traduzido).
 - **Limite residual conhecido:** um literal de uma palavra só, fora dos sinks, num caminho que nenhum estado renderiza, ainda passaria. A varredura desta iteração não achou nenhum caminho de texto sem estado em `app.js`, `view-model.js` ou `dropdown.js`. A trava de frase é por literal. Montar uma frase em runtime com palavras soltas (`['Some', 'words'].join(' ')`) não é pego estaticamente, só pelo pseudo-locale nos estados que ele visita.
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
+
+## Iteração 12 (rodada 3) — isenção da trava de frases
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 12 (rodada 3, rodada de warnings). O trabalho é o W-2 da iter 11: a isenção da trava de frase (D-2026-09-27-tray-app-9) cobria `i18n/**` inteiro, e nada impedia outro módulo de importar `demo-data.js`. O reviewer mostrou uma frase exportada de `demo-data.js`, importada em `app.js` e usada em `app.js:703`, passando pela camada estática. O W-1 (`cargo audit`) continua com a `ci-crossbuild`. Não editei o CONTEXT: o C15 ainda tem o hash da iter 11, e quem refixa é o orquestrador. As 8 tasks do PLAN continuam `completed`, e nenhum arquivo do produto mudou.
+
+### Commit
+| Commit | Tipo | O quê |
+|---|---|---|
+| `c14bb5e` | test | Isenção da trava de frase reduzida a exatamente 3 arquivos; trava nova "só o `bridge.js` importa o `demo-data.js`", com autoteste. |
+
+Depois do `c14bb5e`, `playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs` e `scripts/smoke-sni.sh` não mudaram mais.
+
+### O que mudou em `tests/ui/i18n-html.test.mjs`
+- **Isenção exata:** `LANGUAGE_FILES` é um `Set` com `i18n/en.js`, `i18n/pt-BR.js` e `demo-data.js`, comparado por caminho inteiro (antes era `path.startsWith('i18n/') || …`).
+  - A lista travada de `files left out` passou a ser `demo-data.js`, `i18n/en.js`, `i18n/pt-BR.js`.
+  - `i18n/index.js` entrou na lista dos arquivos que precisam ser lidos. A trava agora lê 624 literais (eram 602).
+  - A varredura do `i18n/index.js` não achou nenhuma frase, então o produto não precisou de correção.
+  - O comentário da D-9 no teste diz que `i18n/index.js` é código e é lido.
+- **Trava nova, `only bridge.js imports demo-data.js`:**
+  - um módulo só chega ao `demo-data.js` nomeando-o num literal (`import … from`, `import '…'`, `export … from`, `import(…)`);
+  - por isso, conta como leitor todo script de `src/**` com um literal que contém `demo-data`, lido como a trava de frase lê: literais somados com `+` viram um só, escapes são decodificados e os literais dentro das expressões de um template também são lidos. Comentário e regex ficam de fora;
+  - a varredura cobre todo `src/**`, inclusive `i18n/**` e o próprio `demo-data.js`, com `bridge.js` como única exceção (`DEMO_DATA_READER`);
+  - a trava exige que o `bridge.js` seja visto importando, para não passar à toa. Qualquer outro leitor reprova com `path:linha "literal"`.
+- **Autoteste, `the demo-data scan finds each way to name the module, and only literals`:**
+  - acha 9 formas: `from './demo-data.js'`, `from "demo-data.js"` (sem `./`), `import '../demo-data.js'`, `export … from`, `await import('./demo-data.js')`, `` import(`./demo-data.js`) ``, `'./demo-' + 'data.js'`, `'./demo\x2ddata.js'` e `` `./${'demo-data'}.js` ``;
+  - ignora 4: comentário de linha, comentário de bloco, `./i18n/index.js` e `./demo.js`.
+- `i18n-html` passou de 19 para 21 testes.
+
+### Provas negativas (mutações não commitadas)
+- **Onde rodaram:** numa cópia descartável de `src/` e `tests/ui/` no scratchpad, já apagada. O repo não foi tocado (`git status` limpo, só `.idea/`).
+- **Controle:** o `i18n-html.test.mjs` de HEAD (`b62c57e`, antes desta iteração), rodado sobre a mesma cópia mutada.
+
+| Mutação | Teste novo | Teste de HEAD |
+|---|---|---|
+| **M1, a do reviewer:** `demo-data.js` ganha `export const GENERIC_NOTE = "Some monitors only undo this from their own buttons.";`, `app.js` importa `GENERIC_NOTE` de `./demo-data.js` e `app.js:703` passa a `: GENERIC_NOTE;` | **reprova** (20 pass, 1 fail): `only bridge.js imports demo-data.js` com `app.js:15 "./demo-data.js"` | 19/19 passam |
+| **M1b:** `app.js:703` com `(await import('demo-data.js')).DEMO_MESSAGES.timeout()` (dinâmico, sem `./`), e `i18n/index.js` com `export { DEMO_MESSAGES } from '../demo-data.js';` | **reprova**: `app.js:703 "demo-data.js"` e `i18n/index.js:130 "../demo-data.js"` | não rodado |
+| **M2:** o fallback do `t()` em `i18n/index.js:59` passa a `text === undefined ? "Missing translation" : …` | **reprova** (20 pass, 1 fail): `no natural-language literal outside the locale files` com `i18n/index.js:59 "Missing translation"` | 19/19 passam |
+
+### Harness
+- **Mudou:** só `tests/ui/i18n-html.test.mjs`. Ganhou 2 testes, e nenhum foi removido. Os asserts existentes mudaram só na lista de `files left out` e na lista de leitura obrigatória.
+- **Hash novo do harness:** `fd6985f9460f639ae88ff94f229c1624cbd46706e978defb108b092e39d08560`, sobre 21 arquivos, com a última mudança em `c14bb5e`. Calculado com `cd apps/ddc-tray && sha256sum playwright.config.mjs tests/e2e/*.mjs tests/ui/*.mjs scripts/smoke-sni.sh | sha256sum | cut -c1-64`.
+
+### Verify do CONTEXT.md e do PROJECT.md
+Extraídos por script do `.md` e rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`.
+
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (153 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n paridade/HTML + scanner + trava de frase | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` na 2ª execução. Ver desvios sobre a 1ª. PID 1998406, `org.kde.StatusNotifierItem-1998406-1`, `popup shown` e ainda mostrado 1,5 s depois. Backend real só com leituras |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK`: 134 passed, 6 skipped (= screenshots), 0 failed/flaky; `n = 10`, `dr = 2`, `ps = 54`, `dd = dl = 16`, `sk = sl = 6` |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | `OK` |
+| C15 | hash do harness | **não rodado, como pedido.** O CONTEXT tem o hash da iter 11 (`9816fd4c…49cc`); o novo está acima |
+| C16 | nenhum `<select>` em `src/` | `OK` |
+| C17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | `OK` (PID 1998931, `75 -> 80` na vertical, nada na horizontal em 1,5 s, `80 -> 75`) |
+| C18 | TODO/FIXME/`todo!` em todo arquivo versionado do produto (`git grep`) | `OK` |
+| C19 | screenshots regenerados, nada pulado, byte a byte iguais | `OK` (`git diff --quiet -- docs/screenshots`) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines **82.78 %**, exit 0 |
+| P3 | TODO/FIXME/`todo!` em `*.rs` | `OK` |
+
+- **Protocolo dos smokes (C11, C17):** um de cada vez.
+  - Antes de cada execução, `pgrep -xa ddc-tray` mostrava a instância do usuário. Ela foi encerrada com `pkill -x ddc-tray` (nunca `-f`), esperando o processo sair.
+  - Logo depois de cada execução, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu.
+  - PIDs do usuário: 1920424 → 1997992 → 1998634 → 1999215, que é a única instância viva no fim. Nada em `~/.local` foi tocado.
+- **Porta 1420:** livre antes e depois do C13/C19.
+
+### Desvios e observações
+- **C11 falhou na 1ª execução (rc 1), e passou na 2ª:**
+  - na 1ª, o app registrou `tray activated` duas vezes. O primeiro `Activate` mostrou o popup, e o segundo o escondeu, com `popup hidden` dentro dos 1,5 s;
+  - o script chama `Activate` uma vez só (`smoke-sni.sh:182`), e não havia outra instância viva (`pgrep` vazio). O segundo `Activate` veio de fora do smoke, provavelmente o host de tray do Plasma ou um clique na sessão;
+  - desde a revisão da iter 11 nenhum `.rs` mudou, só um `.mjs` de teste que não entra no binário;
+  - repeti uma vez com o mesmo protocolo, e passou. Registro como flake de ambiente, não como defeito.
+- **Nenhuma mudança de produto:** o `i18n/index.js` não tinha frase. README e CHANGELOG não mudaram, e continuam corretos: eles falam em frase "outside the locale files and the demo's data".
+- **Limite residual conhecido:** o `bridge.js` é o leitor permitido, então a trava nova não vê o que ele mesmo reexporta.
+  - Um `export { DEMO_MESSAGES } from './demo-data.js'` ou um `export const X = DEMO_MESSAGES…` no `bridge.js` passaria, e daí um módulo que importasse do `bridge.js` também.
+  - Hoje o `bridge.js` exporta só `DEMO_LATENCY_MS`, `createBridge`, `isLocalDevServer` e `normalizeError`.
+  - Também não é pego um especificador montado só com variáveis em runtime (`import(base + name)`).
+  - Nos dois casos, o pseudo-locale continua julgando os estados que visita.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
