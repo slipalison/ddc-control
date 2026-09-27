@@ -284,6 +284,45 @@ fn nothing_is_selected_at_start_and_the_last_selection_wins() {
 }
 
 #[test]
+fn the_selected_label_is_the_name_the_popup_was_given_for_it() {
+    let (osd, _) = osd_with([rtk_monitor(), second_monitor()]);
+    let listed = panel::monitors(&osd).unwrap();
+    let state = state_over(osd);
+    assert_eq!(state.selected_label(), None);
+
+    state.remember_listed(&listed);
+    assert_eq!(state.selected_label(), None, "nothing is selected yet");
+    state.select(rtk_id());
+    assert_eq!(state.selected_label().as_deref(), Some("RTK QHD HDR"));
+    state.select(MonitorId::new("DEL-U2720Q-7"));
+    assert_eq!(state.selected_label().as_deref(), Some("U2720Q"));
+    state.select(MonitorId::new("GONE"));
+    assert_eq!(
+        state.selected_label(),
+        None,
+        "a monitor the popup never listed"
+    );
+}
+
+#[test]
+fn a_new_listing_replaces_the_names_remembered() {
+    let (osd, _) = osd_with([rtk_monitor()]);
+    let state = state_over(osd);
+    state.select(rtk_id());
+    state.remember_listed(&[MonitorDto::new(&MonitorInfo {
+        id: rtk_id(),
+        manufacturer: Some("RTK".to_owned()),
+        model: None,
+        serial: None,
+    })]);
+    assert_eq!(state.selected_label().as_deref(), Some("RTK"));
+
+    state.remember_listed(&[]);
+
+    assert_eq!(state.selected_label(), None);
+}
+
+#[test]
 fn the_shortcut_targets_the_selected_monitor() {
     let (osd, backend) = osd_with([rtk_monitor(), second_monitor()]);
     let selected = MonitorId::new("DEL-U2720Q-7");

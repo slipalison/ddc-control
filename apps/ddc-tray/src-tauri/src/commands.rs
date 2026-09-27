@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ddc_core::domain::{Confirm, DdcError, MonitorId, VcpCode};
 use ddc_core::ports::MonitorControl;
-use tauri::{State, WebviewWindow};
+use tauri::{AppHandle, State, WebviewWindow};
 
 use crate::dto::{ErrorKind, FeatureDto, MonitorDto, PanelDto, ReadBackDto, UiError};
 use crate::panel::{self, ui_error};
@@ -18,11 +18,12 @@ use crate::panel::{self, ui_error};
 /// The core as the commands share it, whatever backend it was built on.
 pub type SharedOsd = Arc<dyn MonitorControl + Send + Sync>;
 
-/// What every command shares: the core — or why it could not be built —
-/// and the monitor the popup last selected.
+/// What every command shares: the core — or why it could not be built —,
+/// the monitor the popup last selected and the monitors it last listed.
 pub struct AppState {
     osd: Result<SharedOsd, UiError>,
     selected: Mutex<Option<MonitorId>>,
+    listed: Mutex<Vec<MonitorDto>>,
 }
 
 impl AppState {
@@ -33,6 +34,7 @@ impl AppState {
         Self {
             osd: osd.map_err(backend_unavailable),
             selected: Mutex::new(None),
+            listed: Mutex::new(Vec::new()),
         }
     }
 
@@ -55,10 +57,30 @@ impl AppState {
         self.selection().clone()
     }
 
+    /// Remembers the monitors the popup was last given, for their names.
+    pub fn remember_listed(&self, monitors: &[MonitorDto]) {
+        *self.listing() = monitors.to_vec();
+    }
+
+    /// The name the picker shows for the selected monitor — the tray's
+    /// tooltip names it —, once the popup selected one it listed.
+    pub fn selected_label(&self) -> Option<String> {
+        let selected = self.selected()?;
+        self.listing()
+            .iter()
+            .find(|monitor| monitor.id == selected.as_str())
+            .map(|monitor| monitor.label.clone())
+    }
+
     /// A poisoned lock only means a command panicked mid-update; the id it
     /// guards is still meaningful.
     fn selection(&self) -> MutexGuard<'_, Option<MonitorId>> {
         self.selected.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Same as [`Self::selection`], for the monitors listed.
+    fn listing(&self) -> MutexGuard<'_, Vec<MonitorDto>> {
+        self.listed.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -165,13 +187,21 @@ where
 /// The reachable monitors.
 #[tauri::command]
 pub async fn list_monitors(state: State<'_, AppState>) -> Result<Vec<MonitorDto>, UiError> {
-    on_blocking_thread(&state, |osd| panel::monitors(osd)).await
+    let monitors = on_blocking_thread(&state, |osd| panel::monitors(osd)).await?;
+    state.remember_listed(&monitors);
+    Ok(monitors)
 }
 
-/// Remembers the monitor the popup shows, the target of tray shortcuts.
+/// Remembers the monitor the popup shows, the target of tray shortcuts and
+/// of the wheel over the icon, which the tray's tooltip names.
 #[tauri::command]
-pub async fn select_monitor(state: State<'_, AppState>, monitor_id: String) -> Result<(), UiError> {
+pub async fn select_monitor(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    monitor_id: String,
+) -> Result<(), UiError> {
     state.select(MonitorId::new(monitor_id));
+    crate::tray::selection_changed(&app);
     Ok(())
 }
 
@@ -226,8 +256,9 @@ pub async fn set_feature(
 /// Hides the popup (Esc).
 #[tauri::command]
 pub async fn hide_popup(window: WebviewWindow) {
-    if let Err(error) = window.hide() {
-        crate::report("hide the popup", &error);
+    match window.hide() {
+        Ok(()) => crate::diagnose("popup hidden"),
+        Err(error) => crate::report("hide the popup", &error),
     }
 }
 

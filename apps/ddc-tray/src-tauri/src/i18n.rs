@@ -23,6 +23,9 @@ pub struct Labels {
     pub brightness: &'static str,
     /// Menu item that ends the app.
     pub quit: &'static str,
+    /// What the wheel over the icon does, in the tooltip of the
+    /// StatusNotifierItem.
+    pub scroll_hint: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -30,6 +33,7 @@ const EN: Labels = Labels {
     open_panel: "Open panel",
     brightness: "Brightness",
     quit: "Quit",
+    scroll_hint: "Scroll to change the brightness",
 };
 
 const PT_BR: Labels = Labels {
@@ -37,6 +41,7 @@ const PT_BR: Labels = Labels {
     open_panel: "Abrir painel",
     brightness: "Brilho",
     quit: "Sair",
+    scroll_hint: "Role para mudar o brilho",
 };
 
 impl Locale {
@@ -62,6 +67,16 @@ impl Locale {
     /// The label of the shortcut that sets the brightness to `percent`.
     pub fn brightness_label(self, percent: u8) -> String {
         format!("{} {percent}%", self.labels().brightness)
+    }
+
+    /// The text under the tooltip's title: the monitor the tray acts on,
+    /// when the popup selected one, and what the wheel does.
+    pub fn tooltip_description(self, monitor: Option<&str>) -> String {
+        let hint = self.labels().scroll_hint;
+        match monitor {
+            Some(monitor) => format!("{monitor} · {hint}"),
+            None => hint.to_owned(),
+        }
     }
 }
 
@@ -92,6 +107,7 @@ mod tests {
                 open_panel: "Open panel",
                 brightness: "Brightness",
                 quit: "Quit",
+                scroll_hint: "Scroll to change the brightness",
             }
         );
     }
@@ -105,6 +121,7 @@ mod tests {
                 open_panel: "Abrir painel",
                 brightness: "Brilho",
                 quit: "Sair",
+                scroll_hint: "Role para mudar o brilho",
             }
         );
     }
@@ -117,6 +134,22 @@ mod tests {
     }
 
     #[test]
+    fn the_tooltip_names_the_selected_monitor_and_the_wheel() {
+        assert_eq!(
+            Locale::En.tooltip_description(Some("RTK QHD HDR")),
+            "RTK QHD HDR · Scroll to change the brightness"
+        );
+        assert_eq!(
+            Locale::PtBr.tooltip_description(Some("RTK QHD HDR")),
+            "RTK QHD HDR · Role para mudar o brilho"
+        );
+        assert_eq!(
+            Locale::PtBr.tooltip_description(None),
+            "Role para mudar o brilho"
+        );
+    }
+
+    #[test]
     fn no_label_is_empty_in_any_locale() {
         for locale in [Locale::En, Locale::PtBr] {
             let Labels {
@@ -124,8 +157,9 @@ mod tests {
                 open_panel,
                 brightness,
                 quit,
+                scroll_hint,
             } = *locale.labels();
-            for label in [tooltip, open_panel, brightness, quit] {
+            for label in [tooltip, open_panel, brightness, quit, scroll_hint] {
                 assert!(!label.trim().is_empty(), "{locale:?}");
             }
         }

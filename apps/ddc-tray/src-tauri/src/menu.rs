@@ -3,10 +3,10 @@
 //! [`menu_entries`] and maps a clicked item back with
 //! [`MenuAction::from_id`].
 //!
-//! On Windows a left click on the icon opens the popup, so the menu only
-//! offers "Open panel" and "Quit". A StatusNotifierItem host on Linux sends
-//! the app no click at all, so the menu there also carries the brightness
-//! shortcuts.
+//! On Windows the menu only offers "Open panel" and "Quit". On Linux the
+//! StatusNotifierItem's menu also carries the brightness shortcuts
+//! (D-2026-09-27-tray-app-2): there the icon is a status item whose menu
+//! the desktop draws, next to its click and wheel.
 
 use crate::i18n::Locale;
 
@@ -20,9 +20,10 @@ const BRIGHTNESS_ID_PREFIX: &str = "brightness-";
 /// The desktop the tray runs on, as far as the menu cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
-    /// The notification area delivers clicks on the icon.
+    /// The notification area, through Tauri's tray icon.
     Windows,
-    /// A StatusNotifierItem host: the icon only opens its menu.
+    /// A StatusNotifierItem host (KDE Plasma, GNOME with the AppIndicator
+    /// extension), through the app's own item.
     Linux,
 }
 

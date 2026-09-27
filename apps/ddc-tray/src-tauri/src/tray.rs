@@ -1,47 +1,64 @@
-//! The tray icon and its menu (D-2026-09-26-tray-app-5, -6): the icon, its
-//! tooltip and the menu of [`crate::menu`] in the system's language; a left
-//! click toggles the popup anchored to the icon where the desktop reports
-//! clicks (Windows); a brightness shortcut sets the brightness of the
-//! monitor the popup last selected, off the main thread.
+//! The tray icon (D-2026-09-26-tray-app-5, -6, D-2026-09-27-tray-app-2):
+//! the icon, its tooltip and the menu of [`crate::menu`] in the system's
+//! language.
+//!
+//! - On Windows it is Tauri's tray icon (`notification_area`): a left click
+//!   toggles the popup anchored above the icon, a right click opens the
+//!   menu.
+//! - On Linux it is a StatusNotifierItem of the app's own (`status_item`):
+//!   a left click toggles the popup, the wheel steps the brightness
+//!   ([`crate::scroll`]), a right click opens the menu.
+//!
+//! What both share lives here: the popup toggle and the menu's actions. A
+//! brightness shortcut sets the monitor the popup last selected, off the
+//! main thread.
+
+#[cfg(not(target_os = "linux"))]
+mod notification_area;
+#[cfg(target_os = "linux")]
+mod status_item;
+
+#[cfg(not(target_os = "linux"))]
+use notification_area as platform;
+#[cfg(target_os = "linux")]
+use status_item as platform;
 
 use std::time::Instant;
 
 use ddc_core::domain::MonitorId;
 use ddc_core::ports::MonitorControl;
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
-use tauri_plugin_positioner::{Position, WindowExt};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::commands::{AppState, on_blocking_thread, shortcut_target};
 use crate::dto::{PANEL_CHANGED, PanelChangedDto, UiError};
 use crate::i18n::Locale;
-use crate::menu::{MenuAction, MenuEntry, Platform, menu_entries};
+use crate::menu::MenuAction;
 use crate::panel;
 use crate::popup::{ClickAction, PopupGate, Visibility};
-use crate::{POPUP, report, show_popup};
+use crate::{POPUP, diagnose, report, show_popup};
 
-/// Id of the app's only tray icon.
+/// Id of the app's only tray icon, stable across runs.
 pub const TRAY_ID: &str = "ddc-control";
+
+/// The app's name, as the tray shows it.
+pub const APP_NAME: &str = "DDC Control";
 
 /// Puts the icon in the tray, with the menu of this platform in the
 /// system's language.
 ///
 /// # Errors
 ///
-/// The Tauri error when the menu or the icon cannot be created.
+/// The Tauri error when the menu or the icon cannot be created. On Linux
+/// the item registers in the background, and a failure is only reported.
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let locale = Locale::from_tag(&sys_locale::get_locale().unwrap_or_default());
-    let menu = native_menu(app, &menu_entries(locale, Platform::current()))?;
-    TrayIconBuilder::with_id(TRAY_ID)
-        .icon(tauri::include_image!("icons/tray.png"))
-        .tooltip(locale.labels().tooltip)
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(on_menu_event)
-        .on_tray_icon_event(on_tray_icon_event)
-        .build(app)?;
-    Ok(())
+    platform::install(app, locale)
+}
+
+/// Tells the icon the popup selected another monitor, which its tooltip
+/// names on Linux.
+pub(crate) fn selection_changed<R: Runtime>(app: &AppHandle<R>) {
+    platform::selection_changed(app);
 }
 
 /// Sets the brightness of the shortcut target — the monitor the popup last
@@ -65,57 +82,26 @@ pub fn brightness_shortcut<M: MonitorControl + ?Sized>(
     })
 }
 
-/// Whether `event` is the end of a left click on the icon — the gesture
-/// that toggles the popup.
-fn is_left_click(event: &TrayIconEvent) -> bool {
-    matches!(
-        event,
-        TrayIconEvent::Click {
-            button: MouseButton::Left,
-            button_state: MouseButtonState::Up,
-            ..
-        }
-    )
-}
-
-fn native_menu<R: Runtime>(app: &AppHandle<R>, entries: &[MenuEntry]) -> tauri::Result<Menu<R>> {
-    let menu = Menu::new(app)?;
-    for entry in entries {
-        match entry {
-            MenuEntry::Item { action, label } => {
-                menu.append(&MenuItem::with_id(
-                    app,
-                    action.id(),
-                    label,
-                    true,
-                    None::<&str>,
-                )?)?;
-            }
-            MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
-        }
-    }
-    Ok(menu)
-}
-
-fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
-    match MenuAction::from_id(event.id().as_ref()) {
-        Some(MenuAction::OpenPanel) => open_panel(app),
-        Some(MenuAction::Brightness(percent)) => apply_brightness(app, percent),
-        Some(MenuAction::Quit) => app.exit(0),
-        None => {}
+/// What a menu item does, on either platform.
+fn run_menu_action<R: Runtime>(app: &AppHandle<R>, action: MenuAction) {
+    match action {
+        MenuAction::OpenPanel => on_main_thread(app, open_panel),
+        MenuAction::Brightness(percent) => apply_brightness(app, percent),
+        MenuAction::Quit => app.exit(0),
     }
 }
 
-fn on_tray_icon_event<R: Runtime>(tray: &TrayIcon<R>, event: TrayIconEvent) {
-    let app = tray.app_handle();
-    tauri_plugin_positioner::on_tray_event(app, &event);
-    if is_left_click(&event) {
-        toggle_popup(app);
+/// Runs `task` on the main thread, where the popup's window lives and its
+/// blur is handled.
+fn on_main_thread<R: Runtime>(app: &AppHandle<R>, task: fn(&AppHandle<R>)) {
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || task(&handle)) {
+        report("reach the main thread", &error);
     }
 }
 
-/// A left click hides an open popup and shows a hidden one — unless that
-/// same click already hid it through the blur (see [`PopupGate`]).
+/// A click on the icon hides an open popup and shows a hidden one — unless
+/// that same click already hid it through the blur (see [`PopupGate`]).
 fn toggle_popup<R: Runtime>(app: &AppHandle<R>) {
     let (Some(popup), Some(gate)) = (app.get_webview_window(POPUP), app.try_state::<PopupGate>())
     else {
@@ -128,33 +114,19 @@ fn toggle_popup<R: Runtime>(app: &AppHandle<R>) {
     };
     match gate.tray_clicked(visibility, Instant::now()) {
         ClickAction::Show => open_panel(app),
-        ClickAction::Hide => {
-            if let Err(error) = popup.hide() {
-                report("hide the popup", &error);
-            }
-        }
+        ClickAction::Hide => match popup.hide() {
+            Ok(()) => diagnose("popup hidden"),
+            Err(error) => report("hide the popup", &error),
+        },
         ClickAction::Nothing => {}
     }
 }
 
 fn open_panel<R: Runtime>(app: &AppHandle<R>) {
     if let Some(popup) = app.get_webview_window(POPUP) {
-        anchor_to_tray(&popup);
+        platform::place_popup(&popup);
     }
     show_popup(app);
-}
-
-/// Places the popup above the icon, kept on the icon's screen. A
-/// StatusNotifierItem host never reports the icon, and Wayland lets no app
-/// place its window: there the popup opens where the compositor puts it,
-/// and the failed anchoring is expected, not worth a line in the log.
-fn anchor_to_tray<R: Runtime>(popup: &WebviewWindow<R>) {
-    let anchored = popup.move_window_constrained(Position::TrayCenter);
-    if let Err(error) = anchored
-        && Platform::current() == Platform::Windows
-    {
-        report("anchor the popup to the tray icon", &error);
-    }
 }
 
 /// Runs a brightness shortcut on a blocking thread — a DDC/CI round-trip
@@ -172,17 +144,18 @@ fn apply_brightness<R: Runtime>(app: &AppHandle<R>, percent: u8) {
             brightness_shortcut(osd, selected, percent)
         })
         .await;
-        let emitted = match changed {
-            Ok(changed) => app.emit(PANEL_CHANGED, changed),
-            Err(error) => {
-                report_ui("apply the brightness shortcut", &error);
-                return;
-            }
-        };
-        if let Err(error) = emitted {
-            report("tell the popup the brightness changed", &error);
+        match changed {
+            Ok(changed) => panel_changed(&app, changed),
+            Err(error) => report_ui("apply the brightness shortcut", &error),
         }
     });
+}
+
+/// Tells the popup the tray changed a monitor, so it reloads it.
+fn panel_changed<R: Runtime>(app: &AppHandle<R>, changed: PanelChangedDto) {
+    if let Err(error) = app.emit(PANEL_CHANGED, changed) {
+        report("tell the popup the brightness changed", &error);
+    }
 }
 
 fn report_ui(action: &str, error: &UiError) {
@@ -193,10 +166,8 @@ fn report_ui(action: &str, error: &UiError) {
 mod tests {
     use ddc_adapters::{BackendCall, FakeMonitor, InMemoryMonitorBackend};
     use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode};
-    use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent, TrayIconId};
-    use tauri::{PhysicalPosition, Rect};
 
-    use super::{TRAY_ID, brightness_shortcut, is_left_click};
+    use super::{APP_NAME, TRAY_ID, brightness_shortcut};
     use crate::dto::{ErrorKind, PanelChangedDto, UiError};
     use crate::panel::tests::{RTK_ID, osd_with, rtk_id, rtk_monitor};
 
@@ -226,19 +197,10 @@ mod tests {
         })
     }
 
-    fn click(button: MouseButton, button_state: MouseButtonState) -> TrayIconEvent {
-        TrayIconEvent::Click {
-            id: TrayIconId::new(TRAY_ID),
-            position: PhysicalPosition::new(10.0, 10.0),
-            rect: Rect::default(),
-            button,
-            button_state,
-        }
-    }
-
     #[test]
-    fn the_tray_icon_id_is_stable() {
+    fn the_tray_icon_id_and_name_are_stable() {
         assert_eq!(TRAY_ID, "ddc-control");
+        assert_eq!(APP_NAME, "DDC Control");
     }
 
     #[test]
@@ -334,60 +296,5 @@ mod tests {
             })
         );
         assert_eq!(writes(&backend), []);
-    }
-
-    #[test]
-    fn the_release_of_a_left_click_toggles_the_popup() {
-        assert!(is_left_click(&click(
-            MouseButton::Left,
-            MouseButtonState::Up
-        )));
-    }
-
-    #[test]
-    fn a_press_or_another_button_does_not_toggle_the_popup() {
-        for (button, state) in [
-            (MouseButton::Left, MouseButtonState::Down),
-            (MouseButton::Right, MouseButtonState::Up),
-            (MouseButton::Right, MouseButtonState::Down),
-            (MouseButton::Middle, MouseButtonState::Up),
-        ] {
-            assert!(
-                !is_left_click(&click(button, state)),
-                "{button:?} {state:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn hovering_or_a_double_click_does_not_toggle_the_popup() {
-        let id = TrayIconId::new(TRAY_ID);
-        let position = PhysicalPosition::new(10.0, 10.0);
-        let rect = Rect::default();
-        for event in [
-            TrayIconEvent::Enter {
-                id: id.clone(),
-                position,
-                rect,
-            },
-            TrayIconEvent::Move {
-                id: id.clone(),
-                position,
-                rect,
-            },
-            TrayIconEvent::Leave {
-                id: id.clone(),
-                position,
-                rect,
-            },
-            TrayIconEvent::DoubleClick {
-                id: id.clone(),
-                position,
-                rect,
-                button: MouseButton::Left,
-            },
-        ] {
-            assert!(!is_left_click(&event), "{event:?}");
-        }
     }
 }

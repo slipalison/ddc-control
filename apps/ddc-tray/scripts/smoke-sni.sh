@@ -2,19 +2,30 @@
 # Smoke test of the tray icon on a Linux desktop with a StatusNotifierItem
 # host (KDE Plasma, or GNOME with the AppIndicator extension).
 #
-# Usage: smoke-sni.sh <path-to-ddc-tray>
+# Usage: smoke-sni.sh [--activate] <path-to-ddc-tray>
 #
-# Starts the app and passes only when, within 15 s, the
-# org.kde.StatusNotifierWatcher lists a new item whose D-Bus connection
-# belongs to the app's own process, the app is still alive 2 s later, and
-# its stderr never says "panicked". The app is always stopped on the way
-# out. Needs busctl (systemd) and a session bus; never needs root.
+# Starts the app (with DDC_TRAY_DEBUG=1, so it says on stderr what the popup
+# does) and passes only when, within 15 s, the org.kde.StatusNotifierWatcher
+# lists a new item whose D-Bus connection belongs to the app's own process,
+# the app is still alive 2 s later, and its stderr never says "panicked".
+#
+# With --activate it then calls org.kde.StatusNotifierItem.Activate on that
+# item — what the host does on a left click — and passes only when the app
+# answers the call, prints "ddc-tray: popup shown" within 5 s of it, and is
+# still alive. Nothing is written to a monitor: the popup only reads.
+#
+# The app is always stopped on the way out. Needs busctl (systemd) and a
+# session bus; never needs root.
 set -euo pipefail
 
 readonly REGISTER_TIMEOUT_S=15
 readonly ALIVE_AFTER_S=2
+readonly SHOWN_TIMEOUT_S=5
 readonly STOP_TIMEOUT_S=5
 readonly WATCHER=org.kde.StatusNotifierWatcher
+readonly ITEM_INTERFACE=org.kde.StatusNotifierItem
+readonly DEFAULT_ITEM_PATH=/StatusNotifierItem
+readonly SHOWN_LINE='ddc-tray: popup shown'
 
 app_pid=""
 stderr_log=""
@@ -101,9 +112,37 @@ check_no_panic() {
     fi
 }
 
+# Calls Activate on the item, as a left click does, and waits for the popup.
+activate() {
+    local item=$1 service path lines
+    service=${item%%/*}
+    path=/${item#*/}
+    [[ $item == */* ]] || path=$DEFAULT_ITEM_PATH
+    lines=$(wc -l <"$stderr_log")
+    busctl --user call "$service" "$path" "$ITEM_INTERFACE" Activate ii 0 0 >/dev/null ||
+        fail "$service$path did not answer $ITEM_INTERFACE.Activate"
+    echo "smoke-sni: called $ITEM_INTERFACE.Activate on $service$path"
+
+    local deadline=$(($(now_ms) + SHOWN_TIMEOUT_S * 1000))
+    until tail -n "+$((lines + 1))" "$stderr_log" | grep -Fxq "$SHOWN_LINE"; do
+        kill -0 "$app_pid" 2>/dev/null || exited_early "after Activate"
+        (($(now_ms) < deadline)) ||
+            fail "no '$SHOWN_LINE' on stderr within ${SHOWN_TIMEOUT_S} s of Activate"
+        sleep 0.1
+    done
+    echo "smoke-sni: the app printed '$SHOWN_LINE' after Activate"
+    kill -0 "$app_pid" 2>/dev/null || exited_early "after showing the popup"
+    check_no_panic
+}
+
 main() {
+    local activate_item=0
+    if [[ ${1:-} == --activate ]]; then
+        activate_item=1
+        shift
+    fi
     local bin=${1:-}
-    [[ -n $bin ]] || fail "usage: smoke-sni.sh <path-to-ddc-tray>"
+    [[ -n $bin ]] || fail "usage: smoke-sni.sh [--activate] <path-to-ddc-tray>"
     [[ -x $bin ]] || fail "not an executable file: $bin"
     command -v busctl >/dev/null || fail "busctl not found (systemd)"
 
@@ -111,7 +150,7 @@ main() {
         fail "no $WATCHER on the session bus: run this in a desktop session with a StatusNotifierItem host (KDE Plasma, or GNOME with the AppIndicator extension)"
 
     stderr_log=$(mktemp -t ddc-tray-smoke.XXXXXX)
-    "$bin" >/dev/null 2>"$stderr_log" &
+    DDC_TRAY_DEBUG=1 "$bin" >/dev/null 2>"$stderr_log" &
     app_pid=$!
     echo "smoke-sni: started $bin as PID $app_pid"
 
@@ -133,10 +172,16 @@ main() {
         exited_early "within ${ALIVE_AFTER_S} s of registering its tray item"
     check_no_panic
 
+    local shown=""
+    if ((activate_item)); then
+        activate "$item"
+        shown=", showed its popup on Activate"
+    fi
+
     local pid=$app_pid
     stop_app
     check_no_panic
-    echo "smoke-sni: OK — PID $pid registered its tray item, was alive ${ALIVE_AFTER_S} s later and never panicked"
+    echo "smoke-sni: OK — PID $pid registered its tray item, was alive ${ALIVE_AFTER_S} s later$shown and never panicked"
 }
 
 main "$@"

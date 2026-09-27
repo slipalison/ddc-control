@@ -13,10 +13,12 @@ pub mod i18n;
 pub mod menu;
 pub mod panel;
 pub mod popup;
+pub mod scroll;
 pub mod tray;
 
+use std::ffi::OsStr;
 use std::fmt::Display;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use ddc_adapters::{CachingMonitorBackend, DdcHiMonitorBackend, default_cache_dir};
@@ -34,6 +36,13 @@ const POPUP: &str = "popup";
 /// WebKitGTK's switch that turns its DMA-BUF renderer off.
 #[cfg(target_os = "linux")]
 const DMABUF_SWITCH: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+
+/// Set to `1` to have the app say on stderr what the popup and the tray do
+/// (`ddc-tray: popup shown`…); the tray's smoke test reads those lines.
+pub const DIAGNOSTICS_SWITCH: &str = "DDC_TRAY_DEBUG";
+
+/// Whether the diagnostic lines are on, decided once at start.
+static DIAGNOSTICS: OnceLock<bool> = OnceLock::new();
 
 /// Builds the core over the real DDC/CI backend, with the on-disk
 /// capabilities cache the CLI also uses (D-2026-09-26-tray-app-3). Without
@@ -61,15 +70,18 @@ pub fn compose_osd() -> Result<SharedOsd, DdcError> {
 pub fn run() -> Result<(), tauri::Error> {
     #[cfg(target_os = "linux")]
     restart_without_dmabuf_renderer();
-    tauri::Builder::default()
+    DIAGNOSTICS.get_or_init(|| diagnostics_on(std::env::var_os(DIAGNOSTICS_SWITCH).as_deref()));
+    let builder = tauri::Builder::default()
         // First plugin: a second launch only shows this popup and exits
         // before building a backend, so one process owns the I2C bus
         // (D-2026-09-26-tray-app-7).
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_popup(app);
-        }))
-        // Tracks where the tray icon is, to anchor the popup to it.
-        .plugin(tauri_plugin_positioner::init())
+        }));
+    // Windows: tracks where the tray icon is, to anchor the popup to it.
+    #[cfg(not(target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_positioner::init());
+    builder
         .setup(|app| {
             app.manage(AppState::new(compose_osd()));
             app.manage(PopupGate::new());
@@ -117,8 +129,14 @@ fn restart_without_dmabuf_renderer() {
 /// it is unset, else none — whatever the user set, even an empty or
 /// non-UTF-8 value, is kept (D-2026-09-26-tray-app-10).
 #[cfg(target_os = "linux")]
-fn dmabuf_switch_to_set(current: Option<&std::ffi::OsStr>) -> Option<&'static str> {
+fn dmabuf_switch_to_set(current: Option<&OsStr>) -> Option<&'static str> {
     current.is_none().then_some("1")
+}
+
+/// Whether [`DIAGNOSTICS_SWITCH`], set to `value`, turns the diagnostic
+/// lines on: only `1` does.
+fn diagnostics_on(value: Option<&OsStr>) -> bool {
+    value == Some(OsStr::new("1"))
 }
 
 /// Shows and focuses the popup, and tells the UI to revalidate what it
@@ -131,8 +149,9 @@ pub(crate) fn show_popup<R: Runtime>(app: &AppHandle<R>) {
         .show()
         .and_then(|()| popup.set_focus())
         .and_then(|()| popup.emit(POPUP_SHOWN, ()));
-    if let Err(error) = shown {
-        report("show the popup", &error);
+    match shown {
+        Ok(()) => diagnose("popup shown"),
+        Err(error) => report("show the popup", &error),
     }
 }
 
@@ -143,6 +162,7 @@ fn hide_popup_on_leave<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         return;
     }
     match event {
+        WindowEvent::Focused(true) => diagnose("popup focused"),
         WindowEvent::Focused(false) => {
             if let Some(gate) = window.try_state::<PopupGate>() {
                 gate.hidden_on_blur(Instant::now());
@@ -158,8 +178,9 @@ fn hide_popup_on_leave<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 }
 
 fn hide<R: Runtime>(window: &Window<R>) {
-    if let Err(error) = window.hide() {
-        report("hide the popup", &error);
+    match window.hide() {
+        Ok(()) => diagnose("popup hidden"),
+        Err(error) => report("hide the popup", &error),
     }
 }
 
@@ -167,6 +188,40 @@ fn hide<R: Runtime>(window: &Window<R>) {
 /// and the user has nothing to act on.
 pub(crate) fn report(action: &str, error: &dyn Display) {
     eprintln!("ddc-tray: could not {action}: {error}");
+}
+
+/// Says on stderr what just happened, when [`DIAGNOSTICS_SWITCH`] is `1`.
+pub(crate) fn diagnose(event: &str) {
+    if DIAGNOSTICS.get().copied().unwrap_or(false) {
+        eprintln!("ddc-tray: {event}");
+    }
+}
+
+#[cfg(test)]
+mod diagnostics_tests {
+    use std::ffi::OsStr;
+
+    use super::{DIAGNOSTICS_SWITCH, diagnostics_on};
+
+    #[test]
+    fn the_diagnostics_switch_is_ddc_tray_debug() {
+        assert_eq!(DIAGNOSTICS_SWITCH, "DDC_TRAY_DEBUG");
+    }
+
+    #[test]
+    fn only_a_switch_set_to_1_turns_the_diagnostics_on() {
+        assert!(diagnostics_on(Some(OsStr::new("1"))));
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some("1 "),
+            Some("yes"),
+        ] {
+            assert!(!diagnostics_on(value.map(OsStr::new)), "{value:?}");
+        }
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
