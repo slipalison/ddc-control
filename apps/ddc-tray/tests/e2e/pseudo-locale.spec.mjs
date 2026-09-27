@@ -3,10 +3,11 @@
 // the demo wraps each translated text in ⟦…⟧, and each text the monitor or
 // the core wrote (a monitor's name, a value name no locale translates, a
 // VCP code, a backend's message) sits under `translate="no"`. So, in every
-// state below, a visible text with neither reached the page from no key —
-// a literal, whatever const, helper or template carried it — and a text
-// under `translate="no"` that carries the marks is a translation passed off
-// as data. Readable attributes follow the same rule.
+// state below, a letter of a visible text outside both reached the page
+// from no key — a literal, whatever const, helper or template carried it,
+// alone or glued to a translation — and a text under `translate="no"` that
+// carries the marks is a translation passed off as data. Readable
+// attributes follow the same rule.
 
 import {
   CSP,
@@ -39,6 +40,9 @@ const READABLE_ATTRIBUTES = [
   'placeholder',
   'label',
 ];
+
+/** What `textsOf` reads the page with. */
+const READING = Object.freeze({ open: OPEN_MARK, close: CLOSE_MARK, attributes: READABLE_ATTRIBUTES });
 
 const RTK = '/?demo=rtk';
 const TWO_MONITORS = '/?demo=two-monitors';
@@ -159,9 +163,12 @@ const STATES = [
  * What `document` shows that is neither translated nor data, as problems:
  * visible text nodes (outside script and style), readable attributes of
  * any element, and text a style generates (`::before`/`::after`), which
- * no key can reach. The counts keep an empty page from passing.
+ * no key can reach. Outside `translate="no"` a text must carry the marks,
+ * and no letter may be left once every ⟦…⟧ (nested ones too) is taken out:
+ * a translation only vouches for what it wraps. The counts keep an empty
+ * page from passing.
  */
-function textsOf({ open: mark, attributes }) {
+function textsOf({ open: mark, close, attributes }) {
   // The nearest `translate` attribute decides, as in HTML.
   const isData = (element) =>
     element.closest('[translate]')?.getAttribute('translate').trim().toLowerCase() === 'no';
@@ -170,13 +177,36 @@ function textsOf({ open: mark, attributes }) {
   const report = { texts: 0, marked: 0, data: 0, problems: [] };
   const problem = (what, value, element, why) =>
     report.problems.push(`${what} ${JSON.stringify(value)} in ${where(element)} ${why}`);
+  // Innermost first, so a translation inside another one goes too, and a
+  // mark left without its pair keeps what follows it outside.
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const innermost = new RegExp(`${escape(mark)}[^${escape(mark)}${escape(close)}]*${escape(close)}`, 'gu');
+  const outsideMarks = (value) => {
+    let rest = value;
+    let before;
+    do {
+      before = rest;
+      rest = rest.replace(innermost, '');
+    } while (rest !== before);
+    return rest;
+  };
   const judge = (what, value, element) => {
     const marked = value.includes(mark);
     const data = isData(element);
     if (marked) report.marked += 1;
     if (data) report.data += 1;
-    if (!marked && !data) problem(what, value, element, 'is neither translated nor under translate="no"');
-    if (marked && data) problem(what, value, element, 'is a translation under translate="no"');
+    if (data) {
+      if (marked) problem(what, value, element, 'is a translation under translate="no"');
+      return;
+    }
+    if (!marked) {
+      problem(what, value, element, 'is neither translated nor under translate="no"');
+      return;
+    }
+    const outside = outsideMarks(value);
+    if (/\p{L}/u.test(outside)) {
+      problem(what, value, element, `has text outside the marks: ${JSON.stringify(outside)}`);
+    }
   };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -204,7 +234,7 @@ function textsOf({ open: mark, attributes }) {
 
 async function expectEveryTextTranslatedOrData(page) {
   await expect(page).toHaveTitle(pseudo('app.title'));
-  const report = await page.evaluate(textsOf, { open: OPEN_MARK, attributes: READABLE_ATTRIBUTES });
+  const report = await page.evaluate(textsOf, READING);
   expect(report.problems, 'texts that came from no key').toEqual([]);
   expect(report.texts, 'visible text nodes read').toBeGreaterThanOrEqual(3);
   expect(report.marked, 'translated texts read').toBeGreaterThanOrEqual(3);
@@ -245,7 +275,7 @@ test('?pseudo=1 is ignored at the app origin: no text is wrapped', async ({ page
   await open(page, `${origin}${withPseudo(RTK)}`, 'error');
 
   await expect(page).toHaveTitle(t('app.title'));
-  const report = await page.evaluate(textsOf, { open: OPEN_MARK, attributes: READABLE_ATTRIBUTES });
+  const report = await page.evaluate(textsOf, READING);
   expect(report.marked, 'texts wrapped by the pseudo-locale').toBe(0);
   expect(report.texts).toBeGreaterThanOrEqual(3);
 });
