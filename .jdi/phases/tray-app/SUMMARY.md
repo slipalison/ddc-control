@@ -743,8 +743,375 @@ A demo diverge: o `silent` do `bridge.js` rejeita com `timeout`, então o `two-m
 | `cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` | TOTAL lines **88.70%** (2726 linhas, 308 sem cobertura) |
 
 ## Tests
-- Total: 339 (Rust, `cargo test --workspace --locked`) + 8 ignored (hardware, `DDC_HW_TESTS=1`)
-- Passing: 339
-- Coverage: 88.70% (`cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`, TOTAL lines, medido na T-8)
-- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 83 passing, 0 failing (medido na T-8)
-- Playwright (`cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test --reporter=list`): 36 passing, 0 failing, 4 skipped (screenshots sem `SCREENSHOTS=1`), medido na T-8
+- Total: 344 (Rust, `cargo test --workspace --locked`) + 9 ignored (hardware, `DDC_HW_TESTS=1`), medido na iteração 2 (na T-8: 339 + 8)
+- Passing: 344
+- Coverage: 88.79% (`cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`, TOTAL lines, medido na iteração 2; na T-8: 88.70%)
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 84 passing, 0 failing (iteração 2; na T-8: 83)
+- Playwright (`cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test --reporter=list`): 36 passing, 0 failing, 4 skipped (screenshots sem `SCREENSHOTS=1`), iteração 2
+
+## Iteração 2 — correções da review
+
+Modo fix (REVIEW iter 1 = BLOCKED). As 8 tasks já estavam `completed` e nenhuma foi reaberta. O trabalho foi o B-1 e o W-4. O CONTEXT.md não foi tocado.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `b110026` | fix | B-1: `load_panel` devolve o 1º erro de leitura que não seja `MonitorNotFound` quando nenhum dos 6 controles rápidos é lido. A falha parcial continua como antes (D-2026-09-26-tray-app-4/-5). São 2 testes novos por igualdade. |
+| `e4ed39f` | fix | Demo alinhada ao Rust: a TV muda do `two-monitors` passa a rejeitar com `transport` e a mensagem real, em vez de `timeout`. Entram o golden novo `contract-mute.json`, o teste Rust `mute_contract_matches_the_golden` e o teste JS que exige a mesma resposta da demo. `bridge-demo.test.mjs` e `fallback.spec.mjs` foram ajustados ao kind real. |
+| `aae9e95` | test | Teste de hardware `rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads`, `#[ignore]`, gated por `DDC_HW_TESTS=1`, só leituras. |
+| `f298cee` | refactor | W-4: a decisão do re-exec DMA-BUF virou `dmabuf_switch_to_set(Option<&OsStr>) -> Option<&str>`, função pura. Há 2 testes, sem `set_var`, que cobrem valor ausente, `1`, `0`, vazio e não-UTF-8. |
+| `2b8b67f` | docs | Saiu do README a limitação "mute opens as an empty panel", e as linhas ~310 e ~352 foram ajustadas. Também mudaram: a tabela da demo, os goldens (agora 2), a nota de dev setup, o CHANGELOG (vários monitores, goldens e testes de hardware) e `docs/hardware-validation.md` (passo 7 com os 2 testes e a saída esperada; passo 8 espera o popup no RTK). |
+
+### B-1: o que mudou
+- **Rust (`panel.rs`):** o laço guarda `first_failure` (`get_or_insert`). No fim, se `controls` está vazio, devolve `Err(ui_error(first_failure))`; senão, `Ok` com os controles lidos. `MonitorNotFound` continua curto-circuitando.
+- **Testes Rust (`panel/tests.rs`):**
+  - `a_mute_monitor_fails_its_panel_instead_of_loading_it_empty`: fake `mute_tv()` com os 256 códigos VCP em `Transport("DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)")`, que é a mensagem real da LG TV medida na `ddc-backends`. Espera `Err(UiError { kind: Transport, message: "transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)" })` e nenhuma escrita.
+  - `a_panel_with_no_control_fails_with_its_first_reading_error`: brilho em `Transport("nak")`, contraste em `Timeout` e o resto sem valor (`UnsupportedFeature`). Espera exatamente `Err(UiError { kind: Transport, message: "transport error: nak" })`, o que prova que é o 1º erro.
+  - `a_control_whose_read_times_out_is_left_out_and_the_rest_still_load` (falha parcial, 5 controles) continua verde e sem mudança.
+- **Contrato mudo:** `apps/ddc-tray/tests/fixtures/contract-mute.json` (`{ monitor, loadPanel }`) foi gerado de propósito, só ele, com `DDC_TRAY_UPDATE_GOLDEN=1 cargo test -p ddc-tray --locked --lib -- panel::tests::mute_contract_matches_the_golden`. O `contract-rtk.json` **não mudou**: o `git status` depois da geração mostrava só o arquivo novo. Os helpers de golden viraram `assert_matches_golden(file, &contract)`, compartilhados pelos 2 testes.
+- **Demo:** `demo-data.js` `muteTv()` ganhou `mute: { kind: 'transport', message: <a mesma> }`; `bridge.js` `answering()` rejeita com esse erro. O `contract.test.mjs` exige `monitors[0]` do `two-monitors` === `muteGolden.monitor` e `loadPanel(TV)` rejeitando `deepStrictEqual` a `muteGolden.loadPanel`.
+- **`fallback.spec.mjs`:** o heading esperado passou de `error.timeout` para `error.transport`. Continua verde pelo caminho certo: a demo rejeita a TV com o mesmo `{kind,message}` que o Rust devolve, então `firstAnswering` a pula, marca "(no DDC/CI)" e abre no RTK. Escolher a TV mostra o erro de transporte com `hint.ddc`, `header.noAnswer` e "Try again".
+
+### Mutações que provam os testes
+1. **Antes da correção** (testes novos contra o `load_panel` antigo):
+   ```
+   test panel::tests::a_panel_with_no_control_fails_with_its_first_reading_error ... FAILED
+   test panel::tests::a_mute_monitor_fails_its_panel_instead_of_loading_it_empty ... FAILED
+     left: Ok(PanelDto { monitor_id: "RTK-RTK-QHD-HDR-01010101", controls: [] })
+    right: Err(UiError { kind: Transport, message: "transport error: nak" })
+     left: Ok(PanelDto { monitor_id: "GSM-LG-TV-SSCR2-01010101", controls: [] })
+    right: Err(UiError { kind: Transport, message: "transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)" })
+   test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 92 filtered out
+   ```
+2. **Sobre o HEAD final**: só o braço `Some(error) if controls.is_empty() => Err(ui_error(error))` foi trocado por `Ok(PanelDto { .. })`. O arquivo foi restaurado da cópia e o `git status` ficou limpo.
+   ```
+   test panel::tests::a_mute_monitor_fails_its_panel_instead_of_loading_it_empty ... FAILED
+   test panel::tests::a_panel_with_no_control_fails_with_its_first_reading_error ... FAILED
+   test panel::tests::mute_contract_matches_the_golden ... FAILED
+   test result: FAILED. 94 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out
+   ```
+3. **Demo voltando a `timeout`**: `kind: 'transport'` virou `'timeout'` em `demo-data.js`, depois restaurado. O resultado foi `not ok 3 - the demo mute TV is listed first and fails its panel exactly as the Rust side does`, com `# pass 3`, `# fail 1`.
+
+### Validação real no hardware (só leituras + a escrita Safe restaurada do teste existente)
+Nenhum `ddc-tray`/`ddc-cli` rodando antes (`pgrep` vazio). O app e o popup **não** foram abertos na tela.
+
+```
+$ ddcutil --bus 5 getvcp 10
+VCP code 0x10 (Brightness                    ): current value =   100, max value =   100
+$ DDC_HW_TESTS=1 cargo test -p ddc-tray --locked --test rtk_qhd_hdr -- --ignored --test-threads=1 --nocapture
+test rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads ... list_monitors: 1.139824288s
+monitors: [ GSM-LG-TV-SSCR2-01010101 "LG TV SSCR2" (GSM), RTK-RTK-QHD-HDR-01010101 "RTK QHD HDR" (RTK) ]
+load_panel GSM-LG-TV-SSCR2-01010101: 4.830290219s
+LG TV SSCR2: Err(UiError { kind: Transport, message: "transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)" })
+load_panel RTK: 756.917794ms
+RTK panel codes: [10, 12, 62, 60, 14, D6]
+ok
+test rtk_qhd_hdr_panel_loads_and_one_safe_brightness_write_is_restored ... list_monitors: 1.218785784s
+load_panel: 513.08197ms
+write 0x10: 145.660721ms
+brightness 100 -> 90 (max 100): read back Ok(ReadBackDto { current: 90, max: 100 })
+restore 0x10: 145.81669ms
+restored brightness: Ok(ReadBackDto { current: 100, max: 100 }); fresh read: Ok(FeatureReading { ... value: VcpValue { current: 100, max: 100 }, declared_in_capabilities: true })
+ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.84s
+$ ddcutil --bus 5 getvcp 10
+VCP code 0x10 (Brightness                    ): current value =   100, max value =   100
+```
+
+- A LG TV, listada em 1º, agora falha o painel com `Transport`. A mensagem é **idêntica** à do `contract-mute.json`, então o golden e a demo reproduzem o hardware literalmente.
+- O RTK carrega os 6 controles. O brilho fica em 100 → 90 → 100, e o `ddcutil` mostra 100 antes e depois. Nada Dangerous foi escrito.
+
+<details><summary>Saída completa do teste de hardware (sem as 2 linhas de aviso future-incompat do <code>nom</code>)</summary>
+
+```
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running tests/rtk_qhd_hdr.rs (target/debug/deps/rtk_qhd_hdr-e8ebe46ec3c2a18e)
+
+running 2 tests
+test rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads ... list_monitors: 1.139824288s
+monitors: [
+    MonitorDto {
+        id: "GSM-LG-TV-SSCR2-01010101",
+        label: "LG TV SSCR2",
+        manufacturer: Some(
+            "GSM",
+        ),
+        model: Some(
+            "LG TV SSCR2",
+        ),
+    },
+    MonitorDto {
+        id: "RTK-RTK-QHD-HDR-01010101",
+        label: "RTK QHD HDR",
+        manufacturer: Some(
+            "RTK",
+        ),
+        model: Some(
+            "RTK QHD HDR",
+        ),
+    },
+]
+load_panel GSM-LG-TV-SSCR2-01010101: 4.830290219s
+LG TV SSCR2: Err(UiError { kind: Transport, message: "transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)" })
+load_panel RTK: 756.917794ms
+RTK panel codes: [10, 12, 62, 60, 14, D6]
+ok
+test rtk_qhd_hdr_panel_loads_and_one_safe_brightness_write_is_restored ... list_monitors: 1.218785784s
+monitors: [
+    MonitorDto {
+        id: "GSM-LG-TV-SSCR2-01010101",
+        label: "LG TV SSCR2",
+        manufacturer: Some(
+            "GSM",
+        ),
+        model: Some(
+            "LG TV SSCR2",
+        ),
+    },
+    MonitorDto {
+        id: "RTK-RTK-QHD-HDR-01010101",
+        label: "RTK QHD HDR",
+        manufacturer: Some(
+            "RTK",
+        ),
+        model: Some(
+            "RTK QHD HDR",
+        ),
+    },
+]
+load_panel: 513.08197ms
+panel: PanelDto {
+    monitor_id: "RTK-RTK-QHD-HDR-01010101",
+    controls: [
+        ControlDto {
+            code: 16,
+            key: Some(
+                "brightness",
+            ),
+            dangerous: false,
+            value: Continuous {
+                current: 100,
+                max: 100,
+            },
+        },
+        ControlDto {
+            code: 18,
+            key: Some(
+                "contrast",
+            ),
+            dangerous: false,
+            value: Continuous {
+                current: 50,
+                max: 100,
+            },
+        },
+        ControlDto {
+            code: 98,
+            key: Some(
+                "volume",
+            ),
+            dangerous: false,
+            value: Continuous {
+                current: 30,
+                max: 100,
+            },
+        },
+        ControlDto {
+            code: 96,
+            key: Some(
+                "input",
+            ),
+            dangerous: true,
+            value: NonContinuous {
+                current: 15,
+                options: [
+                    OptionDto {
+                        value: 1,
+                        name: Some(
+                            "VGA-1",
+                        ),
+                    },
+                    OptionDto {
+                        value: 3,
+                        name: Some(
+                            "DVI-1",
+                        ),
+                    },
+                    OptionDto {
+                        value: 4,
+                        name: Some(
+                            "DVI-2",
+                        ),
+                    },
+                    OptionDto {
+                        value: 15,
+                        name: Some(
+                            "DisplayPort-1",
+                        ),
+                    },
+                    OptionDto {
+                        value: 16,
+                        name: Some(
+                            "DisplayPort-2",
+                        ),
+                    },
+                    OptionDto {
+                        value: 17,
+                        name: Some(
+                            "HDMI-1",
+                        ),
+                    },
+                    OptionDto {
+                        value: 18,
+                        name: Some(
+                            "HDMI-2",
+                        ),
+                    },
+                ],
+            },
+        },
+        ControlDto {
+            code: 20,
+            key: Some(
+                "preset",
+            ),
+            dangerous: false,
+            value: NonContinuous {
+                current: 1,
+                options: [
+                    OptionDto {
+                        value: 1,
+                        name: Some(
+                            "sRGB",
+                        ),
+                    },
+                    OptionDto {
+                        value: 2,
+                        name: Some(
+                            "Display Native",
+                        ),
+                    },
+                    OptionDto {
+                        value: 4,
+                        name: Some(
+                            "5000 K",
+                        ),
+                    },
+                    OptionDto {
+                        value: 5,
+                        name: Some(
+                            "6500 K",
+                        ),
+                    },
+                    OptionDto {
+                        value: 6,
+                        name: Some(
+                            "7500 K",
+                        ),
+                    },
+                    OptionDto {
+                        value: 8,
+                        name: Some(
+                            "9300 K",
+                        ),
+                    },
+                    OptionDto {
+                        value: 11,
+                        name: Some(
+                            "User 1",
+                        ),
+                    },
+                ],
+            },
+        },
+        ControlDto {
+            code: 214,
+            key: Some(
+                "power",
+            ),
+            dangerous: true,
+            value: NonContinuous {
+                current: 1,
+                options: [
+                    OptionDto {
+                        value: 1,
+                        name: Some(
+                            "On",
+                        ),
+                    },
+                    OptionDto {
+                        value: 4,
+                        name: Some(
+                            "Off (DPM)",
+                        ),
+                    },
+                    OptionDto {
+                        value: 5,
+                        name: Some(
+                            "Off (write-only)",
+                        ),
+                    },
+                ],
+            },
+        },
+    ],
+}
+write 0x10: 145.660721ms
+brightness 100 -> 90 (max 100): read back Ok(ReadBackDto { current: 90, max: 100 })
+restore 0x10: 145.81669ms
+restored brightness: Ok(ReadBackDto { current: 100, max: 100 }); fresh read: Ok(FeatureReading { feature: Feature { code: VcpCode(16), kind: Continuous, access: ReadWrite, risk: Safe, allowed_values: None }, value: VcpValue { current: 100, max: 100 }, declared_in_capabilities: true })
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.84s
+```
+</details>
+
+### W-1..W-4
+- **W-1 (`cargo audit`):** nada aqui. O `audit.toml`, com cada ignore justificado, fica para a phase `ci-crossbuild`. Os itens são RUSTSEC-2024-0429 `glib 0.18.5` e RUSTSEC-2024-0370 `proc-macro-error`, via Tauri/gtk-rs, e RUSTSEC-2018-0005 `serde_yaml 0.7.5` e RUSTSEC-2024-0320 `yaml-rust`, via `ddc-hi` → `mccs-db`.
+- **W-2 / W-3:** nada a fazer. O orquestrador já corrigiu o Verify de capabilities (`9bc74c0`), e o W-3 era só registro.
+- **W-4:** feito (`f298cee`). A cobertura de `lib.rs` foi de 0% para 17.78% de linhas. O resto é cola do Tauri (`run`, eventos de janela), prevista no R-3.
+
+### Verify do CONTEXT.md (todos, menos o smoke SNI, que é do reviewer)
+| # | Critério | Resultado |
+|---|---|---|
+| 1 | fmt + clippy `-D warnings` | `OK` (exit 0) |
+| 2 | build release `ddc-tray` | `OK` |
+| 3 | só o composition root constrói `DdcHiMonitorBackend` | `OK` |
+| 4 | `panel.rs` puro sobre `MonitorControl` (≥5 `pub fn …<M: MonitorControl + ?Sized>`) | `OK` |
+| 5 | `#![forbid(unsafe_code)]` em lib/main, sem `allow(unsafe_code)`/`unsafe {` | `OK` |
+| 6 | `node --test` por módulo + total ≥20, 0 falhas, nada em `src/` | `OK` (84 pass, 0 fail) |
+| 7 | i18n paridade/HTML | `OK` |
+| 8 | CSP | `OK` |
+| 9 | capabilities | `OK` |
+| 10 | single-instance como 1º `.plugin(` | `OK` |
+| 11 | smoke SNI | não rodado (é do reviewer) |
+| 12 | teste de hardware existe, compila, gated, sem `confirmed: true`/`Confirm::Yes` | `OK` (lista os 2 testes `rtk_qhd_hdr*`) |
+| 13 | Gate 7 Playwright (exit 0 + 10 `critical_paths` ✓) | `OK`: `36 passed`, `4 skipped` |
+| 14 | TODO/FIXME em arquivos não-Rust do tray | `OK` |
+| 15 | screenshots claro/escuro | `OK` |
+| baseline | TODO/FIXME em `*.rs` sem issue | `OK` |
+
+### Gates (números finais)
+| Gate | Comando | Resultado |
+|---|---|---|
+| fmt | `cargo fmt --all --check` | exit 0 |
+| clippy | `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 |
+| testes Rust | `cargo test --workspace --locked` | **344 passed**, 0 failed, 9 ignored (hardware). Antes: 339 + 8. Entraram +5: 2 do B-1, 1 do golden mudo e 2 do W-4, mais 1 ignored de hardware. |
+| cross-check | `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked --target x86_64-pc-windows-msvc` e `--target x86_64-unknown-linux-gnu` | exit 0 / exit 0 |
+| JS | `node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'` | `# tests 84`, `# pass 84`, `# fail 0` |
+| Playwright | `npx playwright test --reporter=list` | `36 passed`, `4 skipped` (screenshots sem `SCREENSHOTS=1`) |
+| cobertura | `cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` | TOTAL lines **88.79%** (2747 linhas, 308 sem cobertura). `panel.rs` 99.08%, `lib.rs` 17.78%, `commands.rs` 52.14%, `tray.rs` 62.65%. |
+
+### Desvios e observações
+- **Arquivos fora do `files_modified` original:** todos foram pedidos pelo orquestrador nesta iteração.
+  - `dto.rs`: só o `//!`, que agora cita os 2 goldens.
+  - `tests/ui/bridge-demo.test.mjs`: o teste da TV muda passou a esperar `transport`.
+  - Arquivo novo: `tests/fixtures/contract-mute.json`.
+  - Docs: README, CHANGELOG e `docs/hardware-validation.md`.
+- **Nome do teste de hardware:** `rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads`, em vez do exemplo `…_listed_before_the_rtk_…`. O teste não exige a ordem de enumeração, que o backend não garante; só imprime a ordem. Nesta máquina a TV vem em 1º.
+- **Custo de tentar um monitor mudo:** o `load_panel` da TV leva **4.83 s**, e antes da correção levava o mesmo, já que as 6 leituras falhavam do mesmo jeito. Na 1ª abertura, sem monitor lembrado, o popup fica ~5 s em "carregando" antes de cair no RTK. Nas seguintes, o RTK lembrado é tentado primeiro. Isso está documentado no README e no passo 8 do roteiro.
+  - Uma otimização possível seria desistir após a 1ª falha de transporte. Ela não foi feita, porque mudaria a semântica de falha parcial da D-4. Fica como sugestão para uma phase futura.
+- **Atalhos de brilho antes de o popup carregar um painel:** `shortcut_target` cai no 1º monitor listado, a TV nesta máquina, e o atalho falha só no stderr. O comportamento é anterior à phase e o README já o descreve ("before that, the first monitor listed"). Não mexi.
+  - O `app.js` chama `refresh()` ao carregar (linha 132), então o webview oculto provavelmente seleciona o RTK logo após o start. Não verifiquei isso no app real, porque a instrução foi não abrir o app.
+- **Validação manual sugerida pela review:** o popup abrir no RTK com a TV marcada "(no DDC/CI)" não foi feita à mão, pela mesma instrução. Fica para o humano/PR. O passo 8 de `docs/hardware-validation.md` descreve o que conferir.
+- **Commit de docs:** `2b8b67f` recebeu um `--amend` local, antes de qualquer push, para incluir uma frase do dev setup do README ("of the tray's two [hardware tests]…").
