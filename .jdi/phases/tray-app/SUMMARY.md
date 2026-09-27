@@ -743,11 +743,11 @@ A demo diverge: o `silent` do `bridge.js` rejeita com `timeout`, então o `two-m
 | `cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` | TOTAL lines **88.70%** (2726 linhas, 308 sem cobertura) |
 
 ## Tests
-- Total: 344 (Rust, `cargo test --workspace --locked`) + 9 ignored (hardware, `DDC_HW_TESTS=1`), medido na iteração 2 (na T-8: 339 + 8)
-- Passing: 344
-- Coverage: 88.79% (`cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`, TOTAL lines, medido na iteração 2; na T-8: 88.70%)
-- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 84 passing, 0 failing (iteração 2; na T-8: 83)
-- Playwright (`cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test --reporter=list`): 36 passing, 0 failing, 4 skipped (screenshots sem `SCREENSHOTS=1`), iteração 2
+- Total: 371 (Rust, `cargo test --workspace --locked`) + 9 ignored (hardware, `DDC_HW_TESTS=1`), medido na iteração 3 (iteração 2: 344 + 9; T-8: 339 + 8)
+- Passing: 371
+- Coverage: 83.98% (`cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`, TOTAL lines, medido na iteração 3; iteração 2: 88.79%; T-8: 88.70%). Sem o filtro (Verify literal do PROJECT): 83.54%.
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 124 passing, 0 failing, 0 cancelled (iteração 3; iteração 2: 84; T-8: 83)
+- Playwright (`cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test --reporter=list`): 52 passing, 0 failing, 6 skipped (screenshots sem `SCREENSHOTS=1`), iteração 3 (iteração 2: 36 + 4)
 
 ## Iteração 2 — correções da review
 
@@ -1115,3 +1115,93 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
   - O `app.js` chama `refresh()` ao carregar (linha 132), então o webview oculto provavelmente seleciona o RTK logo após o start. Não verifiquei isso no app real, porque a instrução foi não abrir o app.
 - **Validação manual sugerida pela review:** o popup abrir no RTK com a TV marcada "(no DDC/CI)" não foi feita à mão, pela mesma instrução. Fica para o humano/PR. O passo 8 de `docs/hardware-validation.md` descreve o que conferir.
 - **Commit de docs:** `2b8b67f` recebeu um `--amend` local, antes de qualquer push, para incluir uma frase do dev setup do README ("of the tray's two [hardware tests]…").
+
+## Iteração 3 — feedback do usuário + DoD endurecido
+
+Modo fix, cadeia autônoma do `/jdi-issue`. O usuário testou a versão instalada e reportou: (1) "sempre que eu seleciono um select list o painel fecha"; (2) "valide se é possível deixar o painel direto no tray seria melhor". O orquestrador travou D-2026-09-27-tray-app-1..4 e reescreveu o DoD (`896daf7`). O CONTEXT.md não foi tocado. As 8 tasks do PLAN continuam `completed`; o trabalho foi A–E abaixo, mais o W do DoD critic (reuso do servidor do Playwright).
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `8d26af0` | test | B: `reuseExistingServer: false` no `playwright.config.mjs`. Provado: com um `http.server` antigo na 1420 a suíte agora falha (`Process from config.webServer was not able to start. Exit code: 1`) em vez de validar outra UI. |
+| `480d816` | fix | A: dropdown in-page (D-2026-09-27-tray-app-1) no seletor de monitor, na predefinição de cor e nas NC de "Todos os ajustes"; nenhum `<select>` em `src/`. |
+| `144966a` | feat | C: StatusNotifierItem próprio no Linux via `ksni` 0.3.6 (D-2026-09-27-tray-app-2): clique esquerdo, roda, menu, tooltip; `scroll.rs`; `DDC_TRAY_DEBUG`; `smoke-sni.sh --activate`. O corpo recebeu um `--amend` local, antes de qualquer push, para corrigir a contagem de testes (18 → 19). |
+| `bf76e7b` | feat | D: ancoragem no KDE Wayland por script do KWin carregado via D-Bus (D-2026-09-27-tray-app-3). Funcionou; entrou. |
+| `50c9d68` | docs | E: README, CHANGELOG `[Unreleased]`, `docs/hardware-validation.md` (passos 6 e 8). |
+
+### A — dropdown in-page
+- `src/dropdown.js`: redutor puro `dropdownReduce(state, event)` (padrão WAI-ARIA select-only combobox) + `placeList` puro + ligação ao DOM `createDropdown`. Enter/Espaço/↑/↓/Alt+↓ abrem; ↑/↓/Home/End/PageUp/PageDown navegam, pulando opções desabilitadas; Enter/Espaço/Alt+↑ escolhem; Esc fecha sem mudar, com `preventDefault` (o popup não se esconde; o 2º Esc esconde); Tab e clique fora fecham sem mudar; foco volta ao botão (`div role="combobox"` com `aria-haspopup="listbox"`, `aria-expanded`, `aria-controls`, `aria-activedescendant`; lista `role="listbox"` com `role="option"` e `aria-selected` no valor atual).
+- A lista é `position: fixed`, medida no tamanho natural e colocada abaixo do botão, ou acima quando há mais espaço, sempre 8 px dentro dos limites do `.app` (o popup de 360×560), com rolagem interna. Só usa as custom properties `--dropdown-*` (CSP intacta; o `i18n-html.test.mjs` passou a cobrir o `dropdown.js`).
+- Achado durante os testes: o `scroll` que o Playwright dispara ao rolar o botão para a vista chega um frame depois e fechava a lista recém-aberta. Troquei "fecha em qualquer scroll" por "acompanha o botão e só fecha quando ele sai da área visível" (teste e2e próprio).
+- Bridge demo ganhou `__ddcDemo.hides` (contador de `hide_popup`), usado para provar que o 1º Esc não esconde o popup.
+- Testes: `tests/ui/dropdown.test.mjs` (28, redutor e posicionamento); `tests/e2e/dropdown.spec.mjs` (8 por tema, 16 ✓): escolher outra predefinição → exatamente 1 escrita `0x14` e o valor lido de volta na UI; monitor que mantém a predefinição → a UI mostra o valor lido de volta e anuncia; Esc → 0 escritas e `hides = 0`, 2º Esc → `hides = 1`; teclado (Alt+↓, End, Enter) → 1 escrita; axe sem critical/serious com a lista aberta + clique fora → 0 escritas; lista perto do fim abre para cima dentro da janela; NC perigosa (`0xCA`) pede confirmação e Cancelar restaura; scroll acompanha e fecha. `fallback.spec`/`scenarios.spec` migrados para o combobox.
+- Screenshots regenerados e conferidos (Read): claro, escuro, diálogo, e um novo `tray-popup-list-light.png` (lista aberta). A regeneração é determinística (3 execuções, SHA-1 iguais).
+
+### C — bandeja Linux via `ksni`
+- `Cargo.toml`: `tray-icon` e `tauri-plugin-positioner` só em `cfg(not(target_os = "linux"))`; `ksni` 0.3.6 (feature `tokio`, o runtime do Tauri) só no Linux. O `Cargo.lock` ganhou só `ksni` e `pastey`. zbus 5.19 (já na árvore via single-instance) resolve tokio/async-io em tempo de execução (`use_tokio()` checa `Handle::try_current()`), então o single-instance continua igual.
+- `tray.rs` virou a parte comum (toggle, ações do menu, atalhos); `tray/status_item.rs` (Linux) e `tray/notification_area.rs` (Windows, código antigo). Callbacks do ksni: `activate` → `run_on_main_thread(toggle_popup)` (mesmo gate blur↔clique); `scroll` (vertical) → `WheelQueue::push`; quando pede `Start`, um writer roda em `spawn_blocking` (`on_blocking_thread`) e emite `panel-changed` a cada escrita; menu = `menu_entries(locale, Linux)`; `assume_sni_available(true)` (espera um host que suba depois, como no login).
+- `scroll.rs` (Rust puro sobre `MonitorControl`): notch = 120 (o `angleDelta.y` que o Plasma envia, conferido nas strings do `org.kde.plasma.systemtray.so`: `Plasmoid.scroll(..., wheel.angleDelta.y, "vertical")`), ±5% por notch, 0–100%, sem escrita no limite, resto de notch acumulado e zerado ao inverter o sentido; coalescência: um writer por vez, as notches que chegam durante a escrita viram UMA escrita seguinte. 19 testes com `scroll` no nome (limites, `i32::MAX/MIN`, rajada → 1 escrita, notches durante a escrita → 1 escrita seguinte, sem monitor/timeout → nada escrito e o writer para).
+- Tooltip: título "DDC Control" + "‹monitor› · Role para mudar o brilho" (o `AppState` guarda os rótulos do último `list_monitors`; `select_monitor` pede ao host para reler o tooltip).
+- Diagnóstico `DDC_TRAY_DEBUG=1` (só `1` liga; testado): `tray item started`, `tray activated`, `popup shown`, `popup focused`, `popup hidden`, `popup placement …`.
+- **Evidências (KDE Plasma 6.7.5 Wayland):**
+  - D-Bus do item: `Id "ddc-control"`, `Title "DDC Control"`, `Category "Hardware"`, `ItemIsMenu false`, `ToolTip "DDC Control" / "RTK QHD HDR · Role para mudar o brilho"`; menu (`GetLayout`): Abrir painel | Brilho 0/25/50/75/100% | Sair.
+  - `Activate` → `tray activated`, `popup shown`, `popup focused` (o KWin deu foco mesmo com a ativação vindo do D-Bus); 2º `Activate` → `popup hidden`.
+  - AppIndicator fora: `cargo tree -p ddc-tray -e normal` sem `tray-icon`/`libappindicator`/`positioner`; `strings` do binário: 0 ocorrências de `libayatana-appindicator3.so.1` (antes: 1); `ldd … | grep -i appindicator`: vazio (antes também: a lib era carregada por `dlopen`, por isso conferi também o `/proc/<pid>/maps` do app rodando, com 0 linhas `appindicator|ayatana`).
+  - Provas negativas do `smoke-sni.sh --activate`: binário da iter 2 (AppIndicator) → `Call failed: Método inexistente "Activate"` → `FAIL: … did not answer org.kde.StatusNotifierItem.Activate`, exit 1; mutante com `activate()` sem toggle → `FAIL: no 'ddc-tray: popup shown' on stderr within 5 s of Activate`, exit 1. O smoke sem `--activate` segue passando.
+  - A roda NÃO foi acionada no monitor real (só testes com o fake); nenhuma escrita durante smoke/sessões.
+- Windows: o check `--target x86_64-pc-windows-msvc` do `ddc-tray` continua parando no `tauri-winres` (D-9). Para não commitar o módulo Windows às cegas, compilei-o no Linux num experimento descartável (tray-icon ligado e `mod notification_area` sem `cfg`): compila e seus 3 testes passam; árvore restaurada com `git checkout`.
+
+### D — ancoragem no KDE Wayland: FUNCIONOU (entrou)
+- Tentativa (a) da D-3, ~30 min: `org.kde.kwin.Scripting.loadScript(caminho, "ddc-tray-anchor")` + `/Scripting/Script<id> org.kde.kwin.Script.run`. O script (`src-tauri/kwin/anchor.js`) escuta `workspace.windowAdded` — no Wayland o GTK desmapeia a janela ao esconder, então cada exibição é um `windowAdded` — e, só para a janela com `pid` do app + `resourceClass "ddc-tray"` + `caption "DDC Control"` (conferidos ao vivo), centraliza no ponteiro e limita 8 px dentro de `clientArea(MaximizeArea, screenAt(ponteiro))`. Também aplica o que o `tauri.conf.json` pede e o Wayland ignora (sem entrada na barra de tarefas/alternador, acima das outras) — conferido ao vivo que o KWin ignorava `skipTaskbar`/`alwaysOnTop`.
+- `print()` do script não chega ao journal (categoria de debug do KWin desligada). Prova objetiva por outro canal: um script-sonda descartável chama `callDBus` para um nome inexistente e eu leio os argumentos com `dbus-monitor`.
+  - Sem o script: popup em `{"x":1356,"y":601}` (centro do HDMI-A-2 3072×1728).
+  - Com o script, ponteiro em `{"x":2338,"y":471}`: `{"x":2158,"y":191,"width":360,"height":560}` (= ponteiro − 180/280), `skipTaskbar=true keepAbove=true active=true`; escondido → a janela some da lista; mostrado de novo → reposicionado igual.
+  - Ciclo de vida no app real: `popup placement loaded into KWin as script 1`, `isScriptLoaded ddc-tray-anchor = true`, arquivo em `$XDG_RUNTIME_DIR/ddc-tray-kwin-anchor.js` com o PID; ao sair por "Sair" (`dbusmenu.Event`): `popup placement unloaded from KWin`, `isScriptLoaded = false`, arquivo removido.
+- Não consegui mover o ponteiro para o ícone (sem injeção de entrada no Wayland, e não instalo pacotes), então o caso "clique no ícone do painel do topo" foi provado pela lógica: `tests/ui/kwin-anchor.test.mjs` roda o `anchor.js` num `vm` com um KWin falso (9 testes: painel do topo real do dev, área y=34 → popup em y=42; painel embaixo; cantos; tela fora da origem; arredondamento; só a janela do próprio PID/classe/título; flags). 4 mutações do `anchor.js` (margem 0, sem checar PID, `windowActivated`, sem centralizar em y) foram pegas e revertidas. Rust: `applies()` (só `XDG_SESSION_TYPE=wayland` + `XDG_CURRENT_DESKTOP` com `KDE`), substituição do PID, e título/classe presos ao `tauri.conf.json`/nome do pacote.
+- Fallback silencioso: fora do KDE Wayland nada é carregado; falha de D-Bus/KWin vira só linha de diagnóstico. XWayland não foi usado; layer-shell ficou documentado como alternativa não feita.
+- Validação visual humana (clique real no ícone) segue em "Deferred to PR review".
+
+### Verify do CONTEXT.md (todos, rodados literalmente, `bash` a partir da raiz)
+| # | Critério | Resultado |
+|---|---|---|
+| 1 | fmt + clippy `-D warnings` | `OK` |
+| 2 | build release `ddc-tray` | `OK` |
+| 3 | só o composition root constrói `DdcHiMonitorBackend` | `OK` |
+| 4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| 5 | `#![forbid(unsafe_code)]` | `OK` |
+| 6 | `node --test` por módulo (inclui `dropdown`) + total ≥20, 0 fail, 0 cancelled | `OK` (124 pass) |
+| 7 | i18n paridade/HTML | `OK` |
+| 8 | CSP (base + por plataforma) | `OK` |
+| 9 | capabilities | `OK` |
+| 10 | single-instance como 1ª chamada do builder | `OK` |
+| 11 | smoke `--activate` (PID próprio, vivo, popup mostrado após `Activate`, sem `panicked`) | `OK` (instância do usuário encerrada antes e reaberta depois, conforme o protocolo do orquestrador) |
+| 12 | teste de hardware `#[ignore]` gated | `OK` |
+| 13 | Gate 7 Playwright (`reuseExistingServer: false`, 10 `critical_paths`, ≥4 ✓ do dropdown) | `OK` (52 passed, 6 skipped; 16 ✓ no `dropdown.spec`) |
+| 14 | nenhum `<select>` nativo em `src/` | `OK` |
+| 15 | `ksni` no Cargo.toml + ≥3 testes `scroll` | `OK` (`test result: ok. 19 passed`) |
+| 16 | TODO/FIXME em arquivos não-Rust do tray | `OK` |
+| 17 | screenshots regenerados byte a byte iguais | `OK` |
+| PROJECT | `cargo test --workspace --locked` | `OK` |
+| PROJECT | TODO/FIXME em `*.rs` (Verify novo da D-4) | `OK` |
+| PROJECT | cobertura ≥80% de linhas | 83.54% (literal) / 83.98% (forma do gate) |
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 |
+| `cargo test --workspace --locked` | **371 passed**, 0 failed, 9 ignored (iter 2: 344) |
+| cross-check `ddc-core ddc-adapters ddc-cli` em `x86_64-unknown-linux-gnu` e `x86_64-pc-windows-msvc` | exit 0 / exit 0 |
+| `node --test` (todos) | 124 pass, 0 fail, 0 cancelled (iter 2: 84) |
+| Playwright | 52 passed, 6 skipped (iter 2: 36 + 4) |
+| cobertura (gate) | TOTAL lines **83.98%** (iter 2: 88.79%). `scroll.rs` 100%, `popup.rs` 100%, `panel.rs` 99.08%; cola: `tray.rs` 59.64%, `commands.rs` 54.60%, `kwin_placement.rs` 36.72%, `lib.rs` 27.64%, `status_item.rs` 24.31% |
+
+### Desvios e observações
+- **Arquivos novos fora do PLAN original** (todos pedidos nesta iteração): `src/dropdown.js`, `src-tauri/src/scroll.rs` (+`scroll/tests.rs`), `src-tauri/src/tray/{status_item,notification_area,kwin_placement}.rs`, `src-tauri/kwin/anchor.js`, `tests/ui/{dropdown,kwin-anchor}.test.mjs`, `tests/e2e/dropdown.spec.mjs`, `docs/screenshots/tray-popup-list-light.png`.
+- **Contrato:** `select_monitor` passou a receber `AppHandle` (para atualizar o tooltip) e `list_monitors` guarda os rótulos no `AppState`; os argumentos vistos pela UI e os goldens não mudaram.
+- **Dependência:** `zbus` virou dependência direta no Linux (para o `loadScript`), sem crate novo no lock (a D-3 pedia "sem pacote novo": nenhum pacote de sistema nem crate novo além de `ksni`/`pastey` da D-2).
+- **Cobertura caiu de 88.79% para 83.98%**: a cola nova (callbacks do ksni, D-Bus do KWin) só roda com sessão gráfica; toda a lógica foi extraída e está em 100% (`scroll.rs`) ou testada em JS (`anchor.js`).
+- **GNOME:** a roda segue a convenção do Plasma (120 por notch, positivo = para longe do usuário); a extensão AppIndicator do GNOME manda outras unidades, então lá a roda pode não andar ou andar ao contrário. Não testado; documentado nas Known limitations, sem código especulativo.
+- **SIGTERM** (o smoke encerra assim) deixa o script do KWin carregado; ele só casa com o PID morto e o próximo start o substitui (o `docs/hardware-validation.md` mostra como descarregar à mão). Depois dos meus smokes descarreguei-o (`unloadScript` → `b true`).
+- Ao esconder pelo ícone aparecem duas linhas `popup hidden` (o hide gera um `Focused(false)`, que esconde de novo uma janela já escondida). Inofensivo; mantido.
+- **Instância do usuário:** encerrada (`pkill -x ddc-tray`) antes de cada smoke/sessão e reaberta logo depois com `setsid -f /home/slipalison/.local/bin/ddc-tray`, conforme o protocolo do orquestrador; nada foi instalado nem alterado em `~/.local`. Popups mostrados na tela: só os necessários (smokes `--activate`, sessão de toggle, 2 sessões da ancoragem).
