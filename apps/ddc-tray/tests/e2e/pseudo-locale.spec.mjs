@@ -12,7 +12,12 @@
 // out; listening to the tray, hiding the popup refused) and the waits a
 // user sees, because their texts show nowhere else: every toast the
 // popup's scripts show has a state here (`TOAST_STATES`, held to the
-// scripts by tests/ui/toast-states.test.mjs).
+// scripts by tests/ui/toast-states.test.mjs). So does every variant of the
+// confirmation dialog — the input's, with its note; power's, before and
+// after another mode is picked; the generic one of any other dangerous
+// setting, from a list and from a slider — and what only a monitor unlike
+// the demo's shows: a code the catalog does not name, a setting that gave
+// no value, a list whose current value is not one of its choices.
 
 import { readFileSync } from 'node:fs';
 import {
@@ -72,6 +77,7 @@ function withPseudo(path) {
 const BRIDGE = readFileSync(new URL('../../src/bridge.js', import.meta.url), 'utf8');
 const WAIT_LINE = "await wait(command === 'probe_features' ? latencyMs * PROBE_LATENCY_FACTOR : latencyMs);";
 const FEATURES_LINE = 'return features.map(featureDto);';
+const MONITORS_LINE = 'const monitors = scenarioMonitors(scenario);';
 
 /**
  * A demo in which `command` never answers, so the popup stays waiting on it
@@ -83,6 +89,35 @@ function holding(command) {
 
 /** A demo whose monitor declares nothing besides the quick controls. */
 const NOTHING_ELSE_DECLARED = { line: FEATURES_LINE, by: 'return [];' };
+
+/** A demo whose monitors `change` (a function's source) alters before any command. */
+function altering(change) {
+  return { line: MONITORS_LINE, by: `${MONITORS_LINE} for (const monitor of monitors) (${change})(monitor);` };
+}
+
+const PRESET = 0x14;
+/** A color preset the RTK does not list. */
+const UNLISTED_PRESET = 0x03;
+
+/**
+ * Codes the catalog does not name, declared as a monitor unlike the RTK
+ * may: the Rust side lists them without alias or name, and dangerous, as
+ * any unknown code (`risk_for_code`). One is a slider, one is not
+ * supported, one does not answer.
+ */
+const UNNAMED_CODES = [
+  { code: 0xe9, status: 'ok', reading: { current: 20, max: 40 } },
+  { code: 0xea, status: 'unsupported', reading: null },
+  { code: 0xeb, status: 'unresponsive', reading: null },
+].map((entry) => ({ alias: null, name: null, dangerous: true, origin: 'caps', options: null, ...entry }));
+
+const WITH_UNNAMED_CODES = altering(`(monitor) => monitor.features.push(...${JSON.stringify(UNNAMED_CODES)})`);
+
+/** The RTK reading a color preset that is not one of its choices. */
+const PRESET_OUTSIDE_ITS_LIST = altering(
+  `(monitor) => { const preset = monitor.controls.find(({ code }) => code === ${PRESET}); ` +
+    `if (preset) preset.reading.current = ${UNLISTED_PRESET}; }`,
+);
 
 async function serveBridge(page, { line, by }) {
   expect(BRIDGE, 'the demo line this state patches').toContain(line);
@@ -119,6 +154,13 @@ async function toastShows(page) {
   await expect(page.locator('#toast')).toBeVisible();
 }
 
+/** Waits for the confirmation dialog, its title, body and both buttons. */
+async function dialogShows(page) {
+  for (const id of ['confirm', 'confirm-title', 'confirm-body', 'confirm-cancel', 'confirm-accept']) {
+    await expect(page.locator(`#${id}`)).toBeVisible();
+  }
+}
+
 /**
  * The states checked, in pseudo-locale: `path` settles in `state`, then
  * `reach` takes the popup where the check runs; `bridge`, when there, is
@@ -126,8 +168,8 @@ async function toastShows(page) {
  * elements and waits for them but never asserts a text: telling a
  * translated text from a literal is the check's job alone. The
  * backend-unavailable state of the app itself is `/?demo=error`'s (same
- * kind, same nodes): outside the demo the pseudo-locale is off, as the
- * last test shows.
+ * kind, same nodes, less the detail line): outside the demo the
+ * pseudo-locale is off, as the last test shows.
  */
 const STATES = [
   { name: '/ ready', path: '/', state: 'ready' },
@@ -156,6 +198,61 @@ const STATES = [
       await page.getByRole('button', { name: pseudo('power.changeLabel'), exact: true }).click();
       await expect(page.locator('#confirm')).toBeVisible();
       await expect(page.locator('#confirm-choices')).toBeVisible();
+    },
+  },
+  {
+    name: 'rtk with the power confirmation open and another mode picked',
+    path: RTK,
+    state: 'ready',
+    reach: async (page) => {
+      await page.getByRole('button', { name: pseudo('power.changeLabel'), exact: true }).click();
+      await dialogShows(page);
+      const other = page.locator('#confirm-choice-list input[type="radio"]').nth(1);
+      await other.check();
+      await expect(other).toBeChecked();
+    },
+  },
+  {
+    name: 'rtk with the generic confirmation of a dangerous list open',
+    path: RTK,
+    state: 'ready',
+    reach: async (page) => {
+      await openAllSettings(page, 7);
+      await pick(combobox(page, 'feature.osd-lock'), pseudo('value.osd-disabled'));
+      await dialogShows(page);
+    },
+  },
+  {
+    name: 'rtk with all settings listing codes the catalog does not name',
+    path: RTK,
+    state: 'ready',
+    bridge: WITH_UNNAMED_CODES,
+    reach: async (page) => {
+      await openAllSettings(page, 7 + UNNAMED_CODES.length);
+      await expect(page.locator('#feature-list .feature-status')).toHaveCount(2);
+    },
+  },
+  {
+    name: 'rtk with the generic confirmation of a dangerous slider open',
+    path: RTK,
+    state: 'ready',
+    bridge: WITH_UNNAMED_CODES,
+    reach: async (page) => {
+      await openAllSettings(page, 7 + UNNAMED_CODES.length);
+      await page.getByRole('slider', { name: pseudo('format.code', { hex: '0xE9' }), exact: true }).press('ArrowRight');
+      await dialogShows(page);
+    },
+  },
+  {
+    name: 'rtk with a color preset outside its list, the list open',
+    path: RTK,
+    state: 'ready',
+    bridge: PRESET_OUTSIDE_ITS_LIST,
+    reach: async (page) => {
+      await combobox(page, 'feature.preset').click();
+      const list = page.getByRole('listbox', { name: pseudo('feature.preset'), exact: true });
+      await expect(list).toBeVisible();
+      await expect(list.locator('[role="option"][aria-disabled="true"]')).toHaveCount(1);
     },
   },
   {
