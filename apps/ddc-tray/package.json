@@ -4,7 +4,7 @@
   "description": "Browser validation of the ddc-tray popup in demo mode (Gate 7). Nothing here ships: the popup has no npm runtime.",
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "node --test --test-reporter=tap \"tests/ui/**/*.test.mjs\" && node scripts/playwright-browsers.mjs && playwright test"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
