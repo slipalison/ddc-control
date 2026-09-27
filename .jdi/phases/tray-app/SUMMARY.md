@@ -1818,3 +1818,124 @@ Depois do `1693cec`, `playwright.config.mjs`, `tests/e2e/*.mjs` e `tests/ui/*.mj
 - **Limite de desenho que segue (registrado pelo reviewer):** um literal colado a um *dado* sob `translate="no"` continua sem check. A D-7 aceita nós de dado sem ler o conteúdo, e a regra estrita vale só fora de `translate="no"`.
 - **Cobertura literal:** 82.84 % contra os 82.78 % da iter 7, sem nenhum `.rs` alterado. É variação de execução do `llvm-cov` (testes com threads e timers). O gate ficou igual (83.22 %).
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
+
+## Iteração 9 (rodada 2) — estados de falha no pseudo-locale
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 9 (rodada 2). O DoD critic da iter 8 (BLOCKED) mostrou que um literal colado a um texto de FALHA (`showToast(errorText(error, t) + NOT_APPLIED)`) passava em tudo: o demo nunca falhava, então nenhum estado do pseudo-locale mostrava o toast, o status de erro/vazio de "Todos os ajustes" nem o rótulo de sondagem. A outra linha do critic (TODO minúsculo / `todo!`) foi resolvida pelo orquestrador no CONTEXT/PROJECT (D-2026-09-27-tray-app-8), sem mudança de código: C18 e P3 dão `OK`. Não editei o CONTEXT, e o C15 ainda tem o hash da iter 8. As 8 tasks do PLAN continuam `completed`.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `4423525` | feat | `&fail=` no bridge demo (só em servidor local, D-6) + testes `node --test` |
+| `cdc0a90` | test | 7 estados novos no `pseudo-locale.spec.mjs` (falhas e esperas), cada um também com axe |
+| `2a8b59d` | test | 4 caminhos de falha no `scenarios.spec.mjs` (locale real): texto exato, comportamento, axe e console |
+| `a6498ee` | docs | README (demo + notas de teste) e CHANGELOG descrevem o `fail=` e os 20 estados |
+
+Depois do `2a8b59d`, `playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs` e `scripts/smoke-sni.sh` não mudaram mais.
+
+### `&fail=` no demo (`src/demo-data.js`, `src/bridge.js`)
+- `FAILURES` = `{ write: 'set_feature', features: 'load_features', probe: 'probe_features' }`. `failingCommands(search)` lê `fail=` (lista com vírgulas ou repetida) e ignora palavra desconhecida, como `scenarioName` ignora cenário desconhecido.
+- O comando marcado acha o monitor (`not_found` e o erro do TV mudo continuam valendo) e, na escrita, passa antes pelas checagens do core (`needs_confirmation`, `invalid_value`). Só então rejeita com o timeout do core, `{ kind: 'timeout', message: 'monitor did not respond in time' }`, sem mudar nada. É o `DdcError::Timeout`, e o mesmo erro que o demo já dava ao escrever num código sondado sem resposta, agora numa constante só.
+- **Nada inventado:** o `bridge-demo.test.mjs` lê a mensagem do `#[error("…")]` de `Timeout` em `crates/ddc-core/src/domain/error.rs`, como o `i18n-parity` já lê o `mccs_catalog.rs`, e compara o erro do demo com ela.
+- **Testes novos (6):** parsing do `fail=`; escrita que expira depois das checagens, sem gravar nada; `features`/`probe` expiram, e o resto do demo segue respondendo; o monitor é procurado antes da falha; o código sondado sem resposta expira como no core. O teste "outside a local dev server…" ganhou 2 URLs com `fail=`, e fora do servidor local continua tudo `backend_unavailable`.
+- `hide_popup` fica fora: o comando real nunca rejeita (`src-tauri/src/commands.rs:233`, só reporta no stderr).
+
+### Estados novos do pseudo-locale (`tests/e2e/pseudo-locale.spec.mjs`)
+| Estado | Como chega |
+|---|---|
+| toast depois de uma escrita de brilho que expirou | `fail=write`, `ArrowRight` no slider |
+| toast depois de trocar o preset de cor e expirar | `fail=write`, escolhe "Nativo" no dropdown |
+| "Todos os ajustes" ainda carregando (`more.loading`) | variante de teste do `bridge.js` que nunca responde `load_features` |
+| "Todos os ajustes" com falha (texto do erro + "Tentar de novo") | `fail=features` |
+| "Todos os ajustes" sem nada além dos rápidos (`more.empty`) | variante de teste do `bridge.js` com `load_features` → `[]` |
+| sondagem em andamento (`more.probing`) | variante de teste do `bridge.js` que nunca responde `probe_features` |
+| toast depois de uma sondagem que expirou | `fail=probe` |
+
+- **Por que variante do `bridge.js`, e não o relógio pausado:** o axe espera timers (é por isso que o estado `loading` antigo não tem axe). Com o comando segurado e o relógio andando, os 3 estados de espera também passam pelo axe. É o mesmo mecanismo de `slider`/`dropdown`/`confirm` (`serve(route, { patch })`), e o spec exige que a linha remendada ainda exista no `bridge.js` (`the demo line this state patches`).
+- O estado vazio só existe por variante: nenhum monitor do demo deixa de declarar ajustes, e criar um mudaria cenários presos aos goldens.
+- `reach` só espera elementos (o toast visível, `data-kind` do status, `aria-disabled` da sondagem). Julgar o texto continua sendo só do check.
+- **Produto atual:** 21 estados × 2 temas + `loading` × 2 + origem do app × 2 = 42/42. Os estados novos não acharam texto real fora das marcas, então `app.js` não mudou. Estabilidade: os estados novos com `--repeat-each=5` deram 70/70.
+
+### Caminhos de falha no Gate 7 (`tests/e2e/scenarios.spec.mjs`, locale pt-BR real)
+- **Escrita de brilho e troca de preset** (`fail=write`): toast e announcer = `t('error.timeout')`, com "Tentar de novo" no toast. O slider volta a `75`/`75%`, e o preset a `0x01`/`sRGB`.
+- **"Todos os ajustes"** (`fail=features`): `data-kind="error"`, o texto `t('error.timeout')` e "Tentar de novo" no status, nenhum item, nenhum toast.
+- **Sondagem** (`fail=probe`): o toast com o texto, o botão de novo disponível e nenhum resultado.
+- **Todos** terminam com `writes` vazio, axe e o coletor de console. São 8 testes (4 × 2 temas), e o `--repeat-each=5` deu 40/40.
+- Os títulos (`/?demo=rtk&fail=… after …`) não casam com `› <path> settles`, então o `n = 10` do C13 não muda.
+
+### Provas negativas (mutações não commitadas)
+- **Onde rodaram:** numa cópia descartável de `apps/ddc-tray` no scratchpad. `src/` e `tests/` foram copiados; `node_modules` e `src-tauri` entraram por symlink.
+- Junto rodaram os specs do `HEAD` da iter 8 (`git show 3f8de04:…`) como `old-*`.
+- `src/` foi recopiado antes de cada mutação, e a cópia foi apagada no fim. O repo não foi tocado.
+- "`node`" = `i18n-html` + `view-model` (41 testes, com o scanner estático).
+
+| Mutação (`src/app.js`, via `const` no topo do módulo) | `node` | pseudo antigo | pseudo novo | cenários antigos | cenários novos |
+|---|---|---|---|---|---|
+| **M1, a do critic:** `showToast(errorText(error, t) + NOT_APPLIED)` em `writeFailed`, `NOT_APPLIED = ' The monitor kept its previous value.'` | 41 pass | **28 passed** | **4 failed** (escrita de brilho e preset × 2 temas): `text "⟦O monitor não respondeu a tempo.⟧ The monitor kept its previous value." in <span#toast-text.toast-text> has text outside the marks`, idem em `<p#announcer>` | 16 passed | **4 failed** (texto exato) |
+| M2: `errorText(…) + ' (see the log)'` no status de "Todos os ajustes" | 41 pass | 28 passed | **2 failed**: `<span#more-status-text> has text outside the marks: " (see the log)"` | 16 passed | **2 failed** |
+| M3: `t('more.loading') + ' please wait'` | 41 pass | 28 passed | **2 failed** (ainda carregando) | 16 passed | 24 passed |
+| M4: `t('more.empty') + ' Nothing to show.'` | 41 pass | 28 passed | **2 failed** (nada além dos rápidos) | 16 passed | 24 passed |
+| M5: `t('more.probing') + ' (reading codes)'` | 41 pass | 28 passed | **2 failed**: `<span#probe-label> has text outside the marks: " (reading codes)"` | 16 passed | 24 passed |
+| M6: `errorText(…) + ' Probe stopped.'` no toast da sondagem | 41 pass | 28 passed | **2 failed** (toast e announcer) | 16 passed | **2 failed** |
+| M7, comportamento: `writeFailed` sem devolver o controle ao valor do monitor | 41 pass | 28 passed | 42 passed (texto intacto) | 16 passed | **4 failed**: `Expected "75" / Received "76"`, preset `"1"`/`"2"` |
+
+- Os seis literais M1 a M6 passavam no scanner estático e nos specs da iter 8. Agora o pseudo-locale reprova todos, e os cenários de texto exato reprovam M1, M2 e M6 também.
+
+### Harness
+- Mudaram nesta iteração `tests/ui/bridge-demo.test.mjs`, `tests/e2e/pseudo-locale.spec.mjs` e `tests/e2e/scenarios.spec.mjs`. Nada foi enfraquecido:
+  - só entram testes, estados e asserções;
+  - `textsOf`/`judge`, os mínimos de leitura, o teste `loading` e o da origem do app ficaram como estavam;
+  - `support.mjs` (coletor de console/pageerror, axe, `expectNoNativeSelect`), `playwright.config.mjs` e `scripts/smoke-sni.sh` não mudaram.
+- **Hash novo do harness:** `b911f1d74c2d5178d82e382eefa47363469b8d079dcbe09759c9b88a5d8a6e87`. São 20 arquivos (o manifesto agora inclui `scripts/smoke-sni.sh`, D-8), com a última mudança em `2a8b59d`. Foi calculado com `cd apps/ddc-tray && sha256sum playwright.config.mjs tests/e2e/*.mjs tests/ui/*.mjs scripts/smoke-sni.sh | sha256sum | cut -c1-64`.
+
+### Verify do CONTEXT.md e do PROJECT.md (extraídos por script do `.md`, rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`)
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (141 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n paridade/HTML + scanner | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` (PID 1567990, `org.kde.StatusNotifierItem-1567990-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK`: 110 passed, 6 skipped (= screenshots), 0 failed/flaky; n = 10, dd = 16/16, dr = 2, ps = 40 (eram 26); caminhos `fail=` 8/8 |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | `OK` |
+| C15 | hash do harness | **não rodado, como pedido.** O CONTEXT tem o hash da iter 8 (`0566f416…518a`), e o novo está acima |
+| C16 | nenhum `<select>` em `src/` | `OK` |
+| C17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | `OK` (PID 1569170, `75 -> 80` vertical, horizontal sem escrita em 1,5 s, `80 -> 75`) |
+| C18 | TODO/FIXME/`todo!` em todo arquivo versionado do produto (regra da D-8) | `OK` |
+| C19 | screenshots regenerados, nada pulado, byte a byte iguais | `OK` (6 PNGs, SHA-1 inalterados) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.78 % (gate com exclusões e `--fail-under-lines 80`: 83.22 %, exit 0) |
+| P3 | TODO/FIXME/`todo!` em `*.rs` (regra da D-8) | `OK` |
+
+- **Protocolo dos smokes (C11, C17):** um de cada vez.
+  - Antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário, encerrada com `pkill -x ddc-tray` (nunca `-f`).
+  - Logo depois, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu.
+  - PIDs do usuário: 1453315 → 1568221 → 1569412, que é a instância viva no fim. Nada em `~/.local` foi tocado.
+- **Porta 1420:** livre antes e depois do C13/C19.
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 / exit 0 |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored (nenhum `.rs` mudou) |
+| `node --test` (todos) | **141 pass** (eram 135), 0 fail/cancelled/skipped/todo |
+| Playwright | **110 passed** (eram 88), 6 skipped (screenshots sem `SCREENSHOTS=1`) |
+| cobertura (gate) | TOTAL lines **83.22 %** |
+| `Cargo.lock` / `package-lock.json` | intocados |
+
+### Desvios e observações
+- **README/CHANGELOG** (`a6498ee`) não estavam na lista. Descrevem o `fail=` e passam de 13 para 20 estados, porque o DoD manual #24 pede o README fiel ao comportamento atual.
+- **Estados além dos pedidos:** "Todos os ajustes" carregando (`more.loading`) também era um texto transitório fora de todo estado, então entrou junto com a sondagem em andamento.
+- **Mecanismo de espera:** os estados de espera usam variante de teste do `bridge.js`, não o relógio, para rodarem com axe (ver acima).
+- **Nenhum texto real** do produto apareceu fora das marcas nos estados novos, então não houve commit `fix`.
+- **Limites de desenho que seguem (registrados nas iters 7/8):**
+  - um literal colado a um *dado* sob `translate="no"` não é checado;
+  - um literal passado como parâmetro de `t()` sai dentro das marcas, e é coberto pelas asserções exatas dos cenários. Os textos de falha não têm parâmetros.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
