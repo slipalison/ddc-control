@@ -1,6 +1,6 @@
 # Phase 2: Review  (slug: ddc-backends)
 
-**Verdict:** APPROVED_PENDING_MANUAL
+**Verdict:** APPROVED_WITH_WARNINGS
 
 _Iter 2: nova verificação depois da rodada de correção de warnings do `/jdi-issue` (Step 6). A review anterior está em `e2b8b70`. Commits revistos: `26c68d6..HEAD`, com foco em `dc167dd..68add8a`. Os testes de hardware não foram rodados; os números de hardware citados abaixo são a evidência do doer (SUMMARY.md § Fix round)._
 
@@ -88,8 +88,8 @@ _Iter 2: nova verificação depois da rodada de correção de warnings do `/jdi-
 | 1 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | exit 0: 91 passed, 0 failed, 5 ignored |
 | 2 | Coverage >= 80% of lines | PROJECT | Auto | PASS | TOTAL Lines 95.32% (790 linhas, 37 perdidas); `--fail-under-lines 80` exit 0 |
 | 3 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | grep sem saída; exit 0 |
-| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: só existe `## [Unreleased]` (`CHANGELOG.md:8`), sem heading `## [version]` (nenhuma release nesta phase). `CHANGELOG.md:21-22` agora descreve o comportamento correto: sem `enumerate()` prévio; `Transport` rápido em VCP; distinção `MonitorNotFound` só em caps. A imprecisão da iter 1 foi corrigida. |
-| 5 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: `README.md:14` (novo bullet "No `enumerate()` needed first") e `README.md:15` (Retries reescrito) batem com `worker.rs`; as imprecisões de W-1/W-2 foram corrigidas. Não menciona explicitamente que um monitor sumido continua respondendo `Transport` até um novo `enumerate()` (N-4); isso é implícito, não impreciso. |
+| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | CONFIRMED | suggested: só existe `## [Unreleased]` (`CHANGELOG.md:8`), sem heading `## [version]` (nenhuma release nesta phase). `CHANGELOG.md:21-22` agora descreve o comportamento correto: sem `enumerate()` prévio; `Transport` rápido em VCP; distinção `MonitorNotFound` só em caps. A imprecisão da iter 1 foi corrigida. |
+| 5 | README accurately describes current behavior | PROJECT | Manual | CONFIRMED | suggested: `README.md:14` (novo bullet "No `enumerate()` needed first") e `README.md:15` (Retries reescrito) batem com `worker.rs`; as imprecisões de W-1/W-2 foram corrigidas. Não menciona explicitamente que um monitor sumido continua respondendo `Transport` até um novo `enumerate()` (N-4); isso é implícito, não impreciso. |
 | 6 | `ddc-hi` opcional, `default-features = false`, `["ddc-i2c","ddc-winapi"]`, feature `ddc-hi` em `default`, sem `nvapi`/`ddc-macos` | CONTEXT | Auto | PASS | OK |
 | 7 | `ddc-adapters` compila para Windows e a asserção estática prova `Send + Sync` | CONTEXT | Auto | PASS | exit 0, OK |
 | 8 | Teste `ddc_hi_backend_is_send_and_sync` | CONTEXT | Auto | PASS | `test result: ok. 1 passed; 0 failed` |
@@ -119,3 +119,14 @@ Rode `/jdi-confirm-dod ddc-backends` para confirmar cada item manual com evidên
 Forçado pelo `/jdi-issue` na re-verificação pós fix round: 0 linhas hollow. A linha #14 deixou de ser hollow — a garantia de não-vazamento está provada pelo tipo (`DdcError` sem `#[source]`, `Clone + Eq`), pela conversão de produção `transaction_error` e pelo teste `ddc_hi_error_chain_reaches_the_port_as_transport_text_only` (roda no `cargo test --workspace`). Resíduos não-hollow: o `Verify:` travado da #14 ainda aponta o teste baseado em fake; `source().is_none()` é decorativo; o critério "sempre Transport/Timeout" ficou desatualizado pelo `MonitorNotFound` de D-2026-09-26-ddc-backends-1.
 
 **Verdict:** APPROVED
+
+## DoD Manual Confirmations
+
+- [x] CHANGELOG.md updated with entry per release
+      **Confirmed at:** 2026-09-27T15:34:08Z
+      **By:** alison amorim
+      **Evidence:** PR #2, re-landed as PR #6 (2628f8c) revisado e mergeado pelo mantenedor; a entrada da phase está em `## [Unreleased]` do CHANGELOG.md. Nenhuma versão foi lançada ainda: o heading `## [versão]` passa a ser cortado pelo fluxo de release (phase `release-packaging`). Confirmado pelo usuário em 2026-09-27.
+- [x] README accurately describes current behavior
+      **Confirmed at:** 2026-09-27T15:34:08Z
+      **By:** alison amorim
+      **Evidence:** diff do README revisado no PR #2, re-landed as PR #6 (2628f8c) e mergeado na `main`. Confirmado pelo usuário em 2026-09-27.
