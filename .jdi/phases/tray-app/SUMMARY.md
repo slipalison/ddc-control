@@ -2575,3 +2575,91 @@ Extraídos por script da seção DoD de cada `.md` (19 + 3) e rodados com `bash`
   - **CSP por código.** Ela ainda poderia ser trocada em código (`on_web_resource_request`, protocolo customizado). Hoje não há nenhum, e o teste só olha a config.
   - **Windows.** Um `tauri.windows.conf.json` só é checado quando o teste roda no Windows (`ci-crossbuild`).
 - **Binário instalado.** O `/home/slipalison/.local/bin/ddc-tray` continua anterior ao `c181544`. Reinstalá-lo fica com o orquestrador ou o usuário.
+
+## Iteração 15 (rodada 3) — CSP efetiva em todos os alvos
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 15 (rodada 3, última). O trabalho é a linha do DoD critic da iter 14, pela emenda (iter 14) da D-2026-09-27-tray-app-11. O critic mostrou que um `tauri.windows.conf.json` com `{"app":{"security":{"csp":null}}}` apagava a CSP só no Windows e passava em tudo, porque o `generate_context!` do build Linux só mescla o arquivo do Linux.
+
+Não editei o CONTEXT, nem o harness congelado, nem nada de UI, README ou CHANGELOG. As 8 tasks do PLAN continuam `completed`. O `Cargo.toml` e o `Cargo.lock` não mudaram, e o W-1 (`cargo audit`) segue com a `ci-crossbuild`.
+
+### Commit
+| Commit | Tipo | O quê |
+|---|---|---|
+| `3b1c45b` | test | `lib.rs`, módulo `build_tests` (+23/−0): o teste novo `the_effective_csp_is_the_strict_policy_on_every_target`, ao lado do `the_effective_csp_is_the_strict_policy` (via `super::context()`), que não mudou |
+
+### O teste
+- **Para cada alvo** de `[Target::Linux, Target::Windows, Target::MacOS]`, lê a config como o build do Tauri a lê para aquele alvo:
+  - chama `read_from(target, Path::new(env!("CARGO_MANIFEST_DIR")))`, que devolve o `tauri.conf.json` mesclado por RFC 7396 com o `tauri.<alvo>.conf.json`, se ele existir;
+  - desserializa com `serde_json::from_value::<tauri::Config>`;
+  - exige `csp.to_string() == STRICT_CSP` exata e `dev_csp == None`. A mensagem da asserção nomeia o alvo (`windows`, `macOS`, `linux`).
+- **O mesmo caminho do Tauri.** O `tauri-codegen` 2.7.0 (`lib.rs:83`, o `generate_context!`) faz exatamente `serde_json::from_value(read_from(target, &parent)?.0)`, e o `tauri-build` 2.7.0 (`lib.rs:677`) chama o mesmo `read_from`. O `TAURI_CONFIG` do build não entra aqui: ele já é coberto pelo teste do `context()` (M-e da iter 14).
+- **Nomes reais da API** (`tauri-utils` 2.10.0, o do `Cargo.lock`): `tauri::utils::config::parse::read_from` e `tauri::utils::platform::Target`. O caminho `tauri::utils::config::parse::Target` não existe, porque `parse.rs:6` importa `Target` com um `use` privado.
+- **Sem dependência nova.** O `serde_json` já é dependência normal do crate. O teste roda em qualquer plataforma: `build_tests` é `#[cfg(test)]` sem `target_os`, e não precisa do toolchain do alvo.
+- `cargo test -p ddc-tray --lib build_tests` no HEAD: `3 passed`.
+
+### Provas negativas (mutações não commitadas)
+- **Onde:** numa cópia descartável, com `git archive HEAD` em `/home/slipalison/ddc-iter15-mut` e `CARGO_TARGET_DIR=/home/slipalison/ddc-iter15-mut-target`. Ficou em `/home` (btrfs), e não no `/tmp` (tmpfs com cota).
+- **Como:** cada mutação foi removida antes da seguinte. Rodei `cargo test -p ddc-tray --locked --lib build_tests`.
+- **Depois:** a cópia e o `target/` dela (2,7 GB) foram apagados.
+
+| Mutação | `…_on_every_target` | `…_strict_policy` (via `context()`, alvo Linux) |
+|---|---|---|
+| nenhuma (base da cópia) | ok | ok |
+| **M1 (a do critic):** `tauri.windows.conf.json` = `{"app":{"security":{"csp":null}}}` | **FAILED**: `assertion left == right failed: windows`, `left: None` | ok, que é a lacuna |
+| **M2:** `tauri.macos.conf.json` com `csp` frouxa (`script-src 'self' 'unsafe-inline' 'unsafe-eval'`, `style-src 'self' 'unsafe-inline'`) | **FAILED**: `…failed: macOS`, `left: Some("default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; …")` | ok |
+| M3: `tauri.windows.conf.json` com `devCsp` frouxo | **FAILED** (`lib.rs:360`, a asserção do `dev_csp`): `left: Some(Policy("default-src 'self' 'unsafe-eval'"))` | ok |
+| M4: `tauri.macos.conf.json` com `csp` como mapa de diretivas (`script-src 'self' 'unsafe-inline'`) | **FAILED**: `left: Some("script-src 'self' 'unsafe-inline'; default-src 'self'")` | ok |
+| restaurada (sem arquivo de plataforma) | ok | ok |
+
+A cláusula `jq` do C8, que proíbe `app.security` em arquivo de plataforma (`jq -e '(.app // {}) | has("security") | not'`), também reprova os 4 conteúdos: rodada sobre cada um, deu exit 1. Agora o teste reprova por conta própria, em qualquer plataforma onde rode.
+
+### Hash novo do módulo `build_tests`
+`ddf6636ab1b4caf909e8861abb4256114d9b5e770de1bc604d9205fb0b6e8061`. Calculado com `awk '/^mod build_tests \{/{f=1} f{print} f&&/^\}/{exit}' apps/ddc-tray/src-tauri/src/lib.rs | sha256sum | cut -c1-64`. O CONTEXT ainda tem `645f5f1c…2673`.
+
+### Verify do CONTEXT.md e do PROJECT.md
+- **Como rodei:** extraí os Verify por script da seção DoD de cada `.md` (19 + 3) e rodei cada um com `bash` a partir da raiz, sem `DDC_HW_TESTS`, `DDC_TRAY_FAKE` e `DDC_TRAY_DEBUG`.
+
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (157 pass, 0 fail) |
+| C7 | i18n + scanner + trava de frase + título da guarda | `OK` |
+| C8 | CSP + `custom-protocol` + `is_not_a_dev_build` + CSP efetiva + hash do `build_tests` | **reprova, como esperado, em 2 pontos** (ver Desvios) |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` (backend real, só leituras) | `OK` na 1ª execução (PID 2485018: `popup shown`, ainda mostrado 1,5 s depois) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK` em 17 s (contagem à parte: 138 passed, 6 skipped) |
+| C14 | bridge nunca cai no demo fora de servidor local | `OK` |
+| C15 | hash do harness (`ba730a00…c001`) | `OK` |
+| C16 | nenhum `<select>` | `OK` |
+| C17 | `ksni` + `scroll` + smoke `--fake --scroll` | `OK` (PID 2485544: `75 -> 80`, nada na horizontal, `80 -> 75`) |
+| C18 | TODO/FIXME em arquivo versionado do produto | `OK` |
+| C19 | screenshots regenerados e byte a byte iguais | `OK` |
+| P1 | `cargo test --workspace --locked` | `OK`: 386 passed (+1, o teste novo), 0 failed, 9 ignored |
+| P2 | cobertura (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines **82,93 %**, exit 0. Gate (`--locked --fail-under-lines 80`, sem `main.rs`/`build.rs`): **83,36 %**, exit 0 |
+| P3 | TODO/FIXME/`todo!` em `*.rs` | `OK` |
+
+- **Porta 1420:** livre antes e depois do C13/C19.
+- **Protocolo da instância do usuário:**
+  - antes do C11 e do C17, `pgrep -xa ddc-tray` mostrou a instância. Ela foi encerrada com `pkill -x ddc-tray` (nunca `-f`), esperando o processo sair;
+  - logo depois de cada smoke, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu;
+  - PIDs: 2446585 → 2485247 → 2485798, a única instância viva no fim. Nada em `~/.local` foi tocado.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17, o simulado.
+
+### Desvios e observações
+- **O C8 reprova em 2 pontos, não só no hash.** O filtro `cargo test -p ddc-tray --locked --lib the_effective_csp_is_the_strict_policy` é por substring e agora casa os 2 testes: dá `test result: ok. 2 passed; … 137 filtered out`, e o C8 exige `ok\. 1 passed`. Isso decorre do nome pedido, que contém o nome do teste atual, e de manter os dois testes.
+  - Numa cópia do C8 em scratch (o CONTEXT não foi tocado):
+    - trocando só o hash, o C8 ainda reprova;
+    - trocando o hash e `ok\. 1 passed` por `ok\. 2 passed` nesse filtro, o C8 imprime `OK`.
+  - **Sugestão para o orquestrador:** refixar o hash e usar `2 passed` nesse filtro. Os dois testes vivem no módulo congelado, então o hash já trava os corpos. A alternativa é rodar cada teste com `-- --exact build_tests::<nome>` e exigir `1 passed` em cada um.
+- **Caminho do `Target`:** é `tauri::utils::platform::Target`, e não `tauri::utils::config::parse::Target`, como sugerido no pedido. Motivo acima.
+- **README e CHANGELOG não mudaram**, porque o pedido era mínimo:
+  - `README.md:362` diz que o `cargo test` confere a CSP que o Tauri embute, mesclada com o arquivo de plataforma do alvo. `CHANGELOG.md:49` diz "strict CSP, tested as Tauri embeds it, with any platform config merged";
+  - os dois continuam corretos, mas não dizem que a checagem vale para Linux, Windows e macOS;
+  - ajustar essas linhas fica para a revisão Manual do PR (`/jdi-confirm-dod`), se o orquestrador quiser.
+- **Binário instalado.** O `/home/slipalison/.local/bin/ddc-tray` (08:48) não foi reinstalado. Esta iteração não muda o binário: só entrou um teste.
