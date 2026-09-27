@@ -14,9 +14,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use ddc_core::domain::{Confirm, MonitorId, VcpCode, VcpValue};
 use ddc_core::ports::MonitorControl;
 
-use crate::commands::shortcut_target;
 use crate::dto::{PanelChangedDto, UiError};
-use crate::panel::{brightness_for_percent, ui_error};
+use crate::panel::{brightness_for_percent, shortcut_target, ui_error};
 
 /// How far one notch moves the brightness, in percent of its maximum.
 pub const SCROLL_STEP_PERCENT: u8 = 5;

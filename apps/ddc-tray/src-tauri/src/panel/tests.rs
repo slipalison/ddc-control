@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::{
     QUICK_CONTROLS, brightness_for_percent, load_features, load_panel, monitors, probe_features,
-    set_brightness_percent, ui_error,
+    set_brightness_percent, shortcut_target, ui_error,
 };
 use crate::dto::{
     ControlDto, ControlValueDto, ErrorKind, FeatureDto, FeatureStatus, MonitorDto, OptionDto,
@@ -62,6 +62,20 @@ pub(crate) fn osd_with(
         })
         .build();
     (SoftwareOsd::new(backend.clone()), backend)
+}
+
+/// Id of the second monitor of the tests that pick among two.
+pub(crate) const DELL_ID: &str = "DEL-U2720Q-7";
+
+/// A second monitor, answering only brightness, at `current` of `max`.
+pub(crate) fn dell_monitor(current: u16, max: u16) -> FakeMonitor {
+    FakeMonitor::new(MonitorInfo {
+        id: MonitorId::new(DELL_ID),
+        manufacturer: Some("DEL".to_owned()),
+        model: Some("U2720Q".to_owned()),
+        serial: Some("7".to_owned()),
+    })
+    .with_value(VcpCode::BRIGHTNESS, current, max)
 }
 
 fn writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
@@ -708,6 +722,41 @@ fn a_brightness_shortcut_on_an_unreachable_monitor_writes_nothing() {
         Err(ErrorKind::NotFound)
     );
     assert_eq!(writes(&backend), []);
+}
+
+#[test]
+fn the_shortcut_targets_the_selected_monitor() {
+    let (osd, backend) = osd_with([rtk_monitor(), dell_monitor(30, 100)]);
+    let selected = MonitorId::new(DELL_ID);
+
+    let target = shortcut_target(&osd, Some(selected.clone()));
+
+    assert_eq!(target, Ok(selected));
+    assert_eq!(backend.calls(), []);
+}
+
+#[test]
+fn without_a_selection_the_shortcut_targets_the_first_monitor_listed() {
+    let (osd, _) = osd_with([rtk_monitor(), dell_monitor(30, 100)]);
+
+    let target = shortcut_target(&osd, None);
+
+    assert_eq!(target, Ok(rtk_id()));
+}
+
+#[test]
+fn without_a_selection_or_a_monitor_the_shortcut_has_no_target() {
+    let (osd, _) = osd_with([]);
+
+    let target = shortcut_target(&osd, None);
+
+    assert_eq!(
+        target,
+        Err(UiError {
+            kind: ErrorKind::NotFound,
+            message: "no monitor is reachable".to_owned(),
+        })
+    );
 }
 
 /// What the RTK golden pins: the three answers the popup needs to open on

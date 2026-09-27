@@ -1,17 +1,16 @@
 use std::sync::Arc;
 
-use ddc_adapters::{BackendCall, FakeMonitor, InMemoryMonitorBackend};
+use ddc_adapters::{BackendCall, InMemoryMonitorBackend};
 use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode};
 use tauri::async_runtime::block_on;
 
 use super::{
-    AppState, SharedOsd, WriteRequest, backend_unavailable, on_blocking_thread, shortcut_target,
-    write_feature,
+    AppState, SharedOsd, WriteRequest, backend_unavailable, on_blocking_thread, write_feature,
 };
 use crate::dto::{ErrorKind, MonitorDto, ReadBackDto, UiError};
 use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
 use crate::panel;
-use crate::panel::tests::{Osd, osd_with};
+use crate::panel::tests::{DELL_ID, Osd, dell_monitor, osd_with};
 
 /// HDMI-1: an input the dev monitor's capabilities declare.
 const HDMI_1: u16 = 0x11;
@@ -38,16 +37,6 @@ fn writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
 fn state_over(osd: Osd) -> AppState {
     let shared: SharedOsd = Arc::new(osd);
     AppState::new(Ok(shared))
-}
-
-fn second_monitor() -> FakeMonitor {
-    FakeMonitor::new(MonitorInfo {
-        id: MonitorId::new("DEL-U2720Q-7"),
-        manufacturer: Some("DEL".to_owned()),
-        model: Some("U2720Q".to_owned()),
-        serial: Some("7".to_owned()),
-    })
-    .with_value(VcpCode::BRIGHTNESS, 30, 100)
 }
 
 fn no_backend() -> AppState {
@@ -278,7 +267,7 @@ fn nothing_is_selected_at_start_and_the_last_selection_wins() {
     let state = state_over(osd);
     assert_eq!(state.selected(), None);
 
-    state.select(MonitorId::new("DEL-U2720Q-7"));
+    state.select(MonitorId::new(DELL_ID));
     state.select(rtk_id());
 
     assert_eq!(state.selected(), Some(rtk_id()));
@@ -286,7 +275,7 @@ fn nothing_is_selected_at_start_and_the_last_selection_wins() {
 
 #[test]
 fn the_selected_label_is_the_name_the_popup_was_given_for_it() {
-    let (osd, _) = osd_with([rtk_monitor(), second_monitor()]);
+    let (osd, _) = osd_with([rtk_monitor(), dell_monitor(30, 100)]);
     let listed = panel::monitors(&osd).unwrap();
     let state = state_over(osd);
     assert_eq!(state.selected_label(), None);
@@ -295,7 +284,7 @@ fn the_selected_label_is_the_name_the_popup_was_given_for_it() {
     assert_eq!(state.selected_label(), None, "nothing is selected yet");
     state.select(rtk_id());
     assert_eq!(state.selected_label().as_deref(), Some("RTK QHD HDR"));
-    state.select(MonitorId::new("DEL-U2720Q-7"));
+    state.select(MonitorId::new(DELL_ID));
     assert_eq!(state.selected_label().as_deref(), Some("U2720Q"));
     state.select(MonitorId::new("GONE"));
     assert_eq!(
@@ -321,39 +310,4 @@ fn a_new_listing_replaces_the_names_remembered() {
     state.remember_listed(&[]);
 
     assert_eq!(state.selected_label(), None);
-}
-
-#[test]
-fn the_shortcut_targets_the_selected_monitor() {
-    let (osd, backend) = osd_with([rtk_monitor(), second_monitor()]);
-    let selected = MonitorId::new("DEL-U2720Q-7");
-
-    let target = shortcut_target(&osd, Some(selected.clone()));
-
-    assert_eq!(target, Ok(selected));
-    assert_eq!(backend.calls(), []);
-}
-
-#[test]
-fn without_a_selection_the_shortcut_targets_the_first_monitor_listed() {
-    let (osd, _) = osd_with([rtk_monitor(), second_monitor()]);
-
-    let target = shortcut_target(&osd, None);
-
-    assert_eq!(target, Ok(rtk_id()));
-}
-
-#[test]
-fn without_a_selection_or_a_monitor_the_shortcut_has_no_target() {
-    let (osd, _) = osd_with([]);
-
-    let target = shortcut_target(&osd, None);
-
-    assert_eq!(
-        target,
-        Err(UiError {
-            kind: ErrorKind::NotFound,
-            message: "no monitor is reachable".to_owned(),
-        })
-    );
 }

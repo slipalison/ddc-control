@@ -1,8 +1,9 @@
 //! Presentation of the popup, as plain code on the core's `MonitorControl`
 //! port (D-2026-09-26-tray-app-3): which controls it shows and in which
 //! order, what "all settings" lists, what an error means to the UI, and the
-//! brightness shortcuts. Names, aliases, risks and value lists all come from
-//! the core; nothing here knows the webview or the DDC/CI transport.
+//! brightness shortcuts with the monitor they act on. Names, aliases, risks
+//! and value lists all come from the core; nothing here knows the webview
+//! or the DDC/CI transport.
 
 use ddc_core::domain::{
     Capabilities, Confirm, DdcError, Feature, FeatureKind, MonitorId, VcpCode, VcpValue,
@@ -168,6 +169,31 @@ pub fn set_brightness_percent<M: MonitorControl + ?Sized>(
     osd.set_feature(id, VcpCode::BRIGHTNESS, value, Confirm::No)
         .map(ReadBackDto::from)
         .map_err(ui_error)
+}
+
+/// The monitor a tray shortcut acts on: the one the popup last selected,
+/// else the first one listed.
+///
+/// # Errors
+///
+/// The enumeration's [`UiError`], or `not_found` when no monitor is
+/// reachable.
+pub fn shortcut_target<M: MonitorControl + ?Sized>(
+    osd: &M,
+    selected: Option<MonitorId>,
+) -> Result<MonitorId, UiError> {
+    if let Some(id) = selected {
+        return Ok(id);
+    }
+    osd.list_monitors()
+        .map_err(ui_error)?
+        .into_iter()
+        .next()
+        .map(|monitor| monitor.id)
+        .ok_or_else(|| UiError {
+            kind: ErrorKind::NotFound,
+            message: "no monitor is reachable".to_owned(),
+        })
 }
 
 /// Whether "all settings" lists `feature`: a code the quick controls do not

@@ -1,5 +1,5 @@
-use ddc_adapters::{BackendCall, FakeMonitor, InMemoryMonitorBackend};
-use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode, VcpValue};
+use ddc_adapters::{BackendCall, InMemoryMonitorBackend};
+use ddc_core::domain::{DdcError, MonitorId, VcpCode, VcpValue};
 
 use super::{
     Push, SCROLL_STEP_PERCENT, WHEEL_NOTCH, WheelQueue, drain_wheel, percent_of, scroll_brightness,
@@ -7,21 +7,9 @@ use super::{
 };
 use crate::dto::{ErrorKind, PanelChangedDto, UiError};
 use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
-use crate::panel::tests::{Osd, osd_with};
-
-const DELL_ID: &str = "DEL-U2720Q-7";
+use crate::panel::tests::{DELL_ID, Osd, dell_monitor, osd_with};
 
 type Batch = Result<Option<PanelChangedDto>, UiError>;
-
-fn dell_monitor(current: u16, max: u16) -> FakeMonitor {
-    FakeMonitor::new(MonitorInfo {
-        id: MonitorId::new(DELL_ID),
-        manufacturer: Some("DEL".to_owned()),
-        model: Some("U2720Q".to_owned()),
-        serial: Some("7".to_owned()),
-    })
-    .with_value(VcpCode::BRIGHTNESS, current, max)
-}
 
 fn brightness_writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
     backend

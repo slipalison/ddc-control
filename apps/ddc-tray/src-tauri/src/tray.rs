@@ -33,7 +33,7 @@ use ddc_core::domain::MonitorId;
 use ddc_core::ports::MonitorControl;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::commands::{AppState, on_blocking_thread, shortcut_target};
+use crate::commands::{AppState, on_blocking_thread};
 use crate::dto::{PANEL_CHANGED, PanelChangedDto, UiError};
 use crate::i18n::Locale;
 use crate::menu::MenuAction;
@@ -84,7 +84,7 @@ pub fn brightness_shortcut<M: MonitorControl + ?Sized>(
     selected: Option<MonitorId>,
     percent: u8,
 ) -> Result<PanelChangedDto, UiError> {
-    let id = shortcut_target(osd, selected)?;
+    let id = panel::shortcut_target(osd, selected)?;
     panel::set_brightness_percent(osd, &id, percent)?;
     Ok(PanelChangedDto {
         monitor_id: id.as_str().to_owned(),
@@ -173,25 +173,13 @@ fn report_ui(action: &str, error: &UiError) {
 
 #[cfg(test)]
 mod tests {
-    use ddc_adapters::{BackendCall, FakeMonitor, InMemoryMonitorBackend};
-    use ddc_core::domain::{DdcError, MonitorId, MonitorInfo, VcpCode};
+    use ddc_adapters::{BackendCall, InMemoryMonitorBackend};
+    use ddc_core::domain::{DdcError, MonitorId, VcpCode};
 
     use super::{APP_NAME, TRAY_ID, brightness_shortcut};
     use crate::dto::{ErrorKind, PanelChangedDto, UiError};
     use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
-    use crate::panel::tests::osd_with;
-
-    const DELL_ID: &str = "DEL-U2720Q-7";
-
-    fn dell_monitor() -> FakeMonitor {
-        FakeMonitor::new(MonitorInfo {
-            id: MonitorId::new(DELL_ID),
-            manufacturer: Some("DEL".to_owned()),
-            model: Some("U2720Q".to_owned()),
-            serial: Some("7".to_owned()),
-        })
-        .with_value(VcpCode::BRIGHTNESS, 30, 100)
-    }
+    use crate::panel::tests::{DELL_ID, dell_monitor, osd_with};
 
     fn writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
         backend
@@ -215,7 +203,7 @@ mod tests {
 
     #[test]
     fn a_shortcut_sets_the_selected_monitor_and_names_it() {
-        let (osd, backend) = osd_with([rtk_monitor(), dell_monitor()]);
+        let (osd, backend) = osd_with([rtk_monitor(), dell_monitor(30, 100)]);
 
         let outcome = brightness_shortcut(&osd, Some(MonitorId::new(DELL_ID)), 75);
 
@@ -232,7 +220,7 @@ mod tests {
 
     #[test]
     fn without_a_selection_a_shortcut_sets_the_first_monitor_listed() {
-        let (osd, backend) = osd_with([rtk_monitor(), dell_monitor()]);
+        let (osd, backend) = osd_with([rtk_monitor(), dell_monitor(30, 100)]);
 
         let outcome = brightness_shortcut(&osd, None, 25);
 

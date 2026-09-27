@@ -1,7 +1,7 @@
 //! The popup's commands (D-2026-09-26-tray-app-4): thin `async` wrappers
 //! that run the presentation of [`crate::panel`] on a blocking thread, plus
-//! the synchronous pieces they share with the tray — the app state, the
-//! write the user asked for, and the monitor a tray shortcut acts on.
+//! the synchronous pieces they share with the tray — the app state and the
+//! write the user asked for.
 //!
 //! This is the one place where the user's "yes" from the popup's dialog
 //! becomes [`Confirm::Yes`] (D-2026-09-26-tray-app-7).
@@ -135,31 +135,6 @@ pub fn write_feature<M: MonitorControl + ?Sized>(
     )
     .map(ReadBackDto::from)
     .map_err(ui_error)
-}
-
-/// The monitor a tray shortcut acts on: the one the popup last selected,
-/// else the first one listed.
-///
-/// # Errors
-///
-/// The enumeration's [`UiError`], or `not_found` when no monitor is
-/// reachable.
-pub fn shortcut_target<M: MonitorControl + ?Sized>(
-    osd: &M,
-    selected: Option<MonitorId>,
-) -> Result<MonitorId, UiError> {
-    if let Some(id) = selected {
-        return Ok(id);
-    }
-    osd.list_monitors()
-        .map_err(ui_error)?
-        .into_iter()
-        .next()
-        .map(|monitor| monitor.id)
-        .ok_or_else(|| UiError {
-            kind: ErrorKind::NotFound,
-            message: "no monitor is reachable".to_owned(),
-        })
 }
 
 /// Runs `call` on the core on a blocking thread: a DDC/CI round-trip takes
