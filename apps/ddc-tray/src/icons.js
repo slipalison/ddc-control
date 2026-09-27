@@ -143,7 +143,9 @@ let instances = 0;
  */
 export function createIcon(name, doc = globalThis.document) {
   const icon = ICONS[name];
-  if (!icon) throw new Error(`unknown icon ${name}`);
+  // The name alone: an error's message may reach the page, as data
+  // (D-2026-09-27-tray-app-9).
+  if (!icon) throw new RangeError(name);
   instances += 1;
   const ids = new Map(icon.gradients.map(({ name: gradient }) => [gradient, `icon-${instances}-${gradient}`]));
   const svg = node(doc, 'svg', {

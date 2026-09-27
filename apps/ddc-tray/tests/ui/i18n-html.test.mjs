@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 import en from '../../src/i18n/en.js';
 import ptBR from '../../src/i18n/pt-BR.js';
-import { ICONS } from '../../src/icons.js';
+import { ICONS, createIcon } from '../../src/icons.js';
 
 // Every text of the popup comes from a key (D-2026-09-26-tray-app-6), and
 // under the strict CSP (D-2026-09-26-tray-app-7) nothing inline runs or
@@ -247,6 +247,12 @@ test('every icon the page and the app ask for exists', () => {
     asked.filter((name) => !Object.hasOwn(ICONS, name)),
     [],
   );
+});
+
+// An error's message may reach the page as the error state's detail line,
+// which shows data: an unknown icon's is its name alone.
+test('an unknown icon throws a RangeError whose message is its name alone', () => {
+  assert.throws(() => createIcon('no-such-icon', null), { name: 'RangeError', message: 'no-such-icon' });
 });
 
 // ------------------------------------------------ literal text in the DOM
