@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 
 import en from '../../src/i18n/en.js';
+import { GUARDED_ATTRIBUTES, OBSERVED, UNTRANSLATED, textGuard, writtenTexts } from '../../src/i18n/guard.js';
+import { LOCALES, translator } from '../../src/i18n/index.js';
 import ptBR from '../../src/i18n/pt-BR.js';
 import { ICONS, createIcon } from '../../src/icons.js';
 
@@ -615,6 +617,11 @@ const NOT_LANGUAGE = [
   { file: 'app.js', literal: 'slider has-icon', why: 'the class names of a slider with an icon (className)' },
   { file: 'app.js', literal: 'feature-row is-silent', why: 'the class names of a feature with no value (className)' },
   { file: 'icons.js', literal: 'icon icon-${}', why: "the class names of an icon's svg (its class attribute)" },
+  {
+    file: 'i18n/guard.js',
+    literal: 'ddc-tray: untranslated text:',
+    why: "the dev guard's console error (D-2026-09-27-tray-app-11): a developer reads it, the popup never shows it",
+  },
 ];
 
 const WORD = /\p{L}{2,}/u;
@@ -842,4 +849,180 @@ test('the demo-data scan finds each way to name the module, and only literals', 
       '9 "demo-data"',
     ],
   );
+});
+
+// ------------------------------------------------------------ the dev guard
+//
+// D-2026-09-27-tray-app-11. The scans above read the sources and the
+// pseudo-locale spec reads the states it renders; on the demo, the guard
+// reads every text the page comes to show, on every path a Playwright test
+// walks: a text with a letter that `t()` never answered, outside
+// `translate="no"`, is a console error, and the suite fails on any. Its
+// logic is pure and checked here with stand-ins for the DOM; that it runs
+// on the demo, and only there, is checked in a browser by
+// tests/e2e/text-guard.spec.mjs.
+
+/** A stand-in for a DOM element: what the guard reads of one. */
+function fakeElement(localName, { id = '', classes = [], translate = true, attributes = {}, children = [] } = {}) {
+  const element = {
+    nodeType: 1,
+    localName,
+    id,
+    classList: classes,
+    translate,
+    isConnected: true,
+    childNodes: [],
+    getAttribute: (name) => (Object.hasOwn(attributes, name) ? attributes[name] : null),
+  };
+  for (const child of children) {
+    child.parentElement = element;
+    element.childNodes.push(child);
+  }
+  return element;
+}
+
+/** A stand-in for a DOM text node. */
+function fakeText(data, { connected = true } = {}) {
+  return { nodeType: 3, data, parentElement: null, isConnected: connected };
+}
+
+/** A stand-in for `MutationObserver` that keeps what the guard gave it. */
+class FakeObserver {
+  static made = [];
+
+  constructor(callback) {
+    this.callback = callback;
+    FakeObserver.made.push(this);
+  }
+
+  observe(target, options) {
+    this.target = target;
+    this.options = options;
+  }
+
+  disconnect() {
+    this.disconnected = true;
+  }
+}
+
+test('a text no translation produced is reported by the dev guard', () => {
+  const reports = [];
+  const guard = textGuard({ enabled: true, report: (message) => reports.push(message) });
+  const t = guard.track(translator('pt-BR'));
+  const announcer = fakeElement('p', { id: 'announcer', classes: ['visually-hidden'] });
+  const detail = fakeElement('p', { id: 'message-detail', translate: false });
+  const accept = t('confirm.accept');
+  const readBack = t('announce.readBack', {
+    feature: t('feature.brightness'),
+    value: t('format.percent', { value: 80 }),
+  });
+  const pseudo = guard.track(translator('pt-BR', LOCALES, { pseudo: true }))('more.title');
+
+  assert.equal(UNTRANSLATED, 'ddc-tray: untranslated text:');
+  // Registered: each text t() answered, exactly as it answered it.
+  for (const text of [accept, readBack, pseudo]) {
+    assert.equal(guard.check(text, announcer), true, text);
+  }
+  // Reported: a literal, a translation with a literal glued to it, and a
+  // key no locale has, which t() answers as is.
+  assert.equal(guard.check('Saved', announcer), false);
+  assert.equal(guard.check(`${accept} now`, announcer), false);
+  assert.equal(guard.check(t('no.such.key'), announcer), false);
+  // Ignored: the monitor's data, under translate="no", and a text without
+  // a letter.
+  assert.equal(guard.check('RTK QHD HDR', detail), true);
+  for (const text of ['75%', ' ', '20 · 40', '—']) {
+    assert.equal(guard.check(text, announcer), true, JSON.stringify(text));
+  }
+  assert.deepEqual(reports, [
+    'ddc-tray: untranslated text: "Saved" in <p#announcer.visually-hidden>',
+    'ddc-tray: untranslated text: "Aplicar now" in <p#announcer.visually-hidden>',
+    'ddc-tray: untranslated text: "no.such.key" in <p#announcer.visually-hidden>',
+  ]);
+
+  // Off, as outside the demo: the translator is handed back untouched,
+  // no text is checked and nothing watches the page.
+  const quiet = [];
+  const off = textGuard({ enabled: false, report: (message) => quiet.push(message) });
+  const tr = translator('pt-BR');
+  FakeObserver.made = [];
+  const stop = off.watch(fakeElement('body', { children: [fakeText('Saved')] }), FakeObserver);
+
+  assert.equal(off.enabled, false);
+  assert.equal(off.track(tr), tr);
+  assert.equal(off.check('Saved', announcer), true);
+  assert.equal(typeof stop, 'function');
+  assert.deepEqual(FakeObserver.made, []);
+  assert.deepEqual(quiet, []);
+});
+
+test('the dev guard reads each text a change leaves on the page, whatever wrote it', () => {
+  const label = fakeText('Brilho');
+  const edited = fakeText('Editado');
+  const gone = fakeText('Gone', { connected: false });
+  const chip = fakeElement('span', { translate: false, children: [fakeText('HDMI-1')] });
+  const button = fakeElement('button', {
+    id: 'refresh',
+    attributes: { 'aria-label': 'Atualizar', title: 'Recarregar', 'aria-hidden': 'true', class: 'icon-button' },
+    children: [chip],
+  });
+  fakeElement('p', { id: 'toast-text', children: [label, edited] });
+  const records = [
+    { type: 'childList', addedNodes: [label, gone, button] },
+    { type: 'characterData', target: edited },
+    { type: 'attributes', target: button, attributeName: 'title' },
+    { type: 'attributes', target: button, attributeName: 'aria-hidden' },
+  ];
+
+  const texts = writtenTexts(records).map(({ text, element }) => `${text} @ ${element.localName}`);
+
+  assert.deepEqual(texts, [
+    'Brilho @ p',
+    'Atualizar @ button',
+    'Recarregar @ button',
+    'HDMI-1 @ span',
+    'Editado @ p',
+    'Recarregar @ button',
+  ]);
+});
+
+test('the dev guard checks the page it watches, then every change to it', () => {
+  const reports = [];
+  const guard = textGuard({ enabled: true, report: (message) => reports.push(message) });
+  const t = guard.track(translator('pt-BR'));
+  const root = fakeElement('body', {
+    children: [
+      fakeElement('h1', { children: [fakeText('Hardcoded')] }),
+      fakeElement('p', { children: [fakeText('\n  ')] }),
+    ],
+  });
+  FakeObserver.made = [];
+
+  const stop = guard.watch(root, FakeObserver);
+
+  const [observer] = FakeObserver.made;
+  assert.equal(FakeObserver.made.length, 1);
+  assert.equal(observer.target, root);
+  assert.deepEqual(observer.options, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: GUARDED_ATTRIBUTES,
+  });
+  assert.equal(observer.options, OBSERVED);
+  assert.deepEqual(reports, ['ddc-tray: untranslated text: "Hardcoded" in <h1>']);
+
+  const spoken = fakeText('Saved');
+  const translated = fakeText(t('more.title'));
+  fakeElement('p', { id: 'announcer', children: [spoken, translated] });
+  observer.callback([{ type: 'childList', addedNodes: [spoken, translated] }]);
+  stop();
+
+  assert.deepEqual(reports.slice(1), ['ddc-tray: untranslated text: "Saved" in <p#announcer>']);
+  assert.equal(observer.disconnected, true);
+});
+
+test('the dev guard watches every readable attribute the static scan reads', () => {
+  assert.deepEqual([...GUARDED_ATTRIBUTES].sort(), [...READABLE_ATTRIBUTES].sort());
 });

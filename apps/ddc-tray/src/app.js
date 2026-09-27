@@ -9,12 +9,15 @@
 // a window of its own, and the popup hid on losing the focus to it
 // (D-2026-09-27-tray-app-1). What the monitor or the core wrote — a name,
 // a value name no locale translates, a code, a backend's message — is data
-// and carries `translate="no"` (D-2026-09-27-tray-app-7).
+// and carries `translate="no"` (D-2026-09-27-tray-app-7). On the demo, a
+// text the page shows that is neither a translation nor data is reported
+// as a console error (D-2026-09-27-tray-app-11).
 
 import { createBridge } from './bridge.js';
 import { createWriteQueue } from './debounce.js';
 import { createDropdown } from './dropdown.js';
 import { createIcon } from './icons.js';
+import { textGuard } from './i18n/guard.js';
 import { LOCALES, detectLocale, pseudoRequested, translator } from './i18n/index.js';
 import {
   confirmView,
@@ -43,10 +46,14 @@ const CONTROL_ICONS = Object.freeze({
 
 const bridge = createBridge(window);
 const locale = detectLocale(navigator);
-// `?pseudo=1` checks the texts of the demo only (D-2026-09-27-tray-app-7):
-// inside the app it is never on.
-const pseudo = bridge.mode === 'demo' && pseudoRequested(window.location.search);
-const t = translator(locale, LOCALES, { pseudo });
+// The texts are checked on the demo only: `?pseudo=1` marks the
+// translated ones (D-2026-09-27-tray-app-7), and the guard reports any
+// other that is not data (D-2026-09-27-tray-app-11). Inside the app
+// neither is ever on.
+const demo = bridge.mode === 'demo';
+const pseudo = demo && pseudoRequested(window.location.search);
+const guard = textGuard({ enabled: demo });
+const t = guard.track(translator(locale, LOCALES, { pseudo }));
 const platform = detectPlatform(navigator);
 const storage = storageOf(window);
 
@@ -145,6 +152,7 @@ const monitorDropdown = createDropdown({
 start();
 
 function start() {
+  guard.watch(document, window.MutationObserver);
   monitorDropdown.node.hidden = true;
   ui.title.append(monitorDropdown.node);
   translatePage(document);
