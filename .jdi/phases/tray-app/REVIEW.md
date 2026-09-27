@@ -147,3 +147,10 @@ Rode `/jdi-confirm-dod tray-app` para confirmar cada item manual com evidência.
 ## Nota do orquestrador (pós-review, antes do critic)
 
 W-2 era do `Verify:` do C8 (escrito pelo orquestrador), não do código: o C8 foi endurecido com os três ajustes testados pelo reviewer — cada arquivo `tauri*.json5`/`Tauri*.toml`/`tauri*.toml` reprova sozinho e `config-(json5|toml)` no Cargo.toml reprova; `cargo tree … -e normal,features -i tauri` exige `custom-protocol` na resolução NORMAL (Linux e Windows), não em dev-deps; e `assert!(!tauri::is_dev()` precisa estar no `lib.rs`. HEAD imprime OK; os mutantes (a) `Tauri.linux.toml` com CSP frouxa e (b) feature só em `[dev-dependencies]` reprovam (numa cópia descartável). Nenhum arquivo do harness congelado mudou.
+
+## DoD Critic (enhanced)
+
+- DoD row «8 (CSP)»: `tauri.linux.conf.json` com `{"app":{"security":{"csp":null}}}` apaga a CSP efetiva no Linux (merge RFC 7396; `config().app.security.csp == None`, nenhum header CSP servido) e todos os Verify imprimem OK — o C8 pula CSP nula em arquivo de plataforma.
+- DoD row «7 (i18n)»: `const spoken = kept ? 'Saved' : t('announce.readBack', …); announce(spoken);` em `showReadBack` anuncia "Saved" em inglês no popup pt-BR após uma escrita bem-sucedida — nenhum estado do pseudo-locale faz uma escrita cuja leitura confere; scanner e trava de frases não veem (variável, uma palavra).
+
+**Verdict:** BLOCKED
