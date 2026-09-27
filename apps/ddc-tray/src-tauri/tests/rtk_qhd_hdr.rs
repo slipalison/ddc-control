@@ -9,7 +9,9 @@
 //! Only reads, plus ONE safe brightness write — never confirmed — that a
 //! guard puts back to the original value and checks by reading it back,
 //! even when an assertion fails first. Nothing dangerous (input, power,
-//! OSD lock, resets) is ever written.
+//! OSD lock, resets) is ever written. The mute-monitor test only reads: on
+//! the dev machine an LG TV is listed next to the RTK, and its DDC/CI never
+//! answers.
 
 use std::time::Instant;
 
@@ -17,7 +19,7 @@ use ddc_core::domain::{MonitorId, VcpCode};
 use ddc_core::ports::MonitorControl;
 use ddc_tray::commands::{WriteRequest, write_feature};
 use ddc_tray::compose_osd;
-use ddc_tray::dto::{ControlDto, ControlValueDto, MonitorDto, PanelDto, ReadBackDto};
+use ddc_tray::dto::{ControlDto, ControlValueDto, ErrorKind, MonitorDto, PanelDto, ReadBackDto};
 use ddc_tray::panel;
 
 const REASON: &str = "needs the dev monitor attached; run with DDC_HW_TESTS=1";
@@ -152,4 +154,37 @@ fn rtk_qhd_hdr_panel_loads_and_one_safe_brightness_write_is_restored() {
             max
         })
     );
+}
+
+#[test]
+#[ignore = "needs the dev monitor attached; run with DDC_HW_TESTS=1"]
+fn rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads() {
+    if !hardware_enabled() {
+        return;
+    }
+    let osd = compose_osd().expect("the DDC/CI backend starts");
+    let monitors = timed("list_monitors", || panel::monitors(&*osd)).unwrap();
+    println!("monitors: {monitors:#?}");
+    let (dev, mute): (Vec<&MonitorDto>, Vec<&MonitorDto>) =
+        monitors.iter().partition(|monitor| is_dev_monitor(monitor));
+    assert_eq!(dev.len(), 1, "exactly one RTK QHD HDR attached");
+    assert!(!mute.is_empty(), "a mute monitor (the LG TV) is listed too");
+
+    for monitor in mute {
+        let id = MonitorId::new(monitor.id.clone());
+        let loaded = timed(&format!("load_panel {}", monitor.id), || {
+            panel::load_panel(&*osd, &id)
+        });
+        println!("{}: {loaded:?}", monitor.label);
+        let error = loaded.expect_err("a mute monitor fails its panel");
+        assert!(
+            matches!(error.kind, ErrorKind::Transport | ErrorKind::Timeout),
+            "{error:?}"
+        );
+    }
+    let rtk = MonitorId::new(dev[0].id.clone());
+    let panel = timed("load_panel RTK", || panel::load_panel(&*osd, &rtk)).unwrap();
+    let codes: Vec<u8> = panel.controls.iter().map(|control| control.code).collect();
+    println!("RTK panel codes: {codes:02X?}");
+    assert_eq!(codes, RTK_PANEL);
 }
