@@ -13,6 +13,14 @@
 
 [advisories]
 ignore = [
+    # serde_yaml 0.7.5 — uncontrolled recursion when deserializing hostile
+    # YAML (vulnerability). Path: ddc-adapters -> ddc-hi 0.4.1 -> mccs-db
+    # 0.1.3 -> serde_yaml. ddc-hi only calls `mccs_db::Database::from_version`,
+    # which parses the `data/mccs.yml` compiled into mccs-db with
+    # `include_bytes!`; ddc-control never calls `Database::from_database` and
+    # never hands YAML from a monitor, a file or the user to it.
+    # Re-check when ddc-hi or mccs-db release a version off serde_yaml 0.7.
+    "RUSTSEC-2018-0005",
     # proc-macro-error 1.0.4 — unmaintained. Path: glib-macros 0.18.5 and
     # gtk3-macros 0.18.2 (proc-macros of the gtk-rs 0.18 stack that
     # webkit2gtk/tao/wry pull for Tauri on Linux). It only runs at compile
