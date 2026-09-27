@@ -91,7 +91,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
   - **Testes** (nenhum em `src/`), com pelo menos 20 `test()` verdes: coalescência (5 inputs em menos de 80 ms → 1 escrita com o último; a 2ª espera a 1ª; `flush` manda o valor final; com `mock.timers`); view-model e demo por cenário; `contract.test.mjs`, em que o RTK da demo `deepEqual` o golden; paridade de chaves, sem valor vazio. Mutação no SUMMARY: sem coalescência, o teste de 1 escrita falha.
 - **Dependencies:** T-2
 - **Test:** Verify da CONTEXT de `node --test` e i18n
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4 (parallel-eligible)
 

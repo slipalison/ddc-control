@@ -1,12 +1,13 @@
 # Phase 5: Tray app — Summary  (slug: tray-app)
 
 **Status:** partial
-**Tasks:** 3/8 complete, 0 blocked
+**Tasks:** 4/8 complete, 0 blocked
 
 ## Executed tasks
 - T-1: scaffold do crate `ddc-tray` (lib `ddc_tray` + bin `ddc-tray`) no workspace, com a config Tauri, a capability mínima, o `icon.svg` próprio, o conjunto de ícones gerado e o `tray.png`. Commits `e91a453` (build) e `4c93104` (docs).
 - T-2: apresentação pura (`panel.rs`) genérica em `M: MonitorControl + ?Sized`, DTOs serde do contrato A-1 (`dto.rs`), 42 testes com o fake RTK e o golden `apps/ddc-tray/tests/fixtures/contract-rtk.json`. Commit `72d274e` (feat).
 - T-3: os 7 comandos Tauri (`async fn` + `spawn_blocking`), o composition root (`compose_osd()`/`run()` com single-instance, blur/close escondem, `popup-shown`), o gate puro `popup.rs`, as permissões `allow-*` por comando e o teste de hardware `rtk_qhd_hdr`, rodado no RTK (brilho 100 → 90 → 100, conferido com `ddcutil`). Commit `e033137` (feat).
+- T-4: módulos ES puros e sem dependências (`bridge.js` Tauri/demo, `demo-data.js`, `debounce.js`, `view-model.js`, `i18n/` en + pt-BR) e 63 testes `node --test` fora de `src/`, incluindo o RTK da demo `deepStrictEqual` ao golden. Commit `35c5ffd` (feat).
 
 ## Blocked tasks
 - nenhuma
@@ -233,7 +234,109 @@ Brilho depois: `ddcutil --bus 5 getvcp 10` → `current value = 100, max value =
 | `cargo build -p ddc-tray --release --locked` | OK |
 | `cargo llvm-cov ... --fail-under-lines 80` | TOTAL lines 90.77%; `popup.rs` 100%, `dto.rs` 100%, `panel.rs` 99.04%, `commands.rs` 52.14%, `lib.rs` 0% |
 
+## T-4 — Módulos JS puros (bridge demo, i18n, debounce, view-model) + `node --test`
+
+### O que foi feito
+Todos são ES modules sem dependências, com `window`/`navigator`/timers injetados. Nenhum teste fica em `src/`: os 5 arquivos de teste estão em `apps/ddc-tray/tests/ui/` e resolvem caminhos por `import.meta.url`.
+
+- **`bridge.js`** (D-2026-09-26-tray-app-4, -8): `createBridge(window, { latencyMs, timers })`.
+  - API única nos dois modos: `mode`, `listMonitors`, `selectMonitor`, `loadPanel`, `loadFeatures`, `probeFeatures`, `setFeature(id, code, value, { confirmed })`, `hidePopup`, `onPopupShown` e `onPanelChanged`.
+  - **Tauri** (quando existe `window.__TAURI__.core.invoke`):
+    - chama os 7 comandos do A-1 com args em camelCase (`monitorId`, `confirmed` sempre booleano);
+    - normaliza rejeições para `{kind,message}`, e o que estiver fora do contrato (ex.: permissão negada) vira `unknown`;
+    - entrega ao handler só o `payload` dos eventos.
+  - **Demo** (`?demo=rtk|two-monitors|empty|error`; sem o parâmetro ou com valor desconhecido, `rtk`). Reproduz o que o core faz com a UI, com as mesmas mensagens do `DdcError`:
+    - `dangerous` sem `confirmed` → `needs_confirmation`, sem registrar escrita;
+    - valor fora das `options` ou acima do max → `invalid_value`;
+    - monitor ausente → `not_found`; código ausente ou sem suporte → `unsupported`; `unresponsive` → `timeout`.
+  - A resposta da demo é o read-back `{current,max}`. No NC, o max é o bruto: entrada 3, preset 11, energia 5.
+  - Escritas aceitas vão para `window.__ddcDemo.writes` como `{monitorId,code,value,confirmed}`. O `__ddcDemo` também expõe `scenario`, `selected` e `emit(event, payload)`, para a T-6/T-7 simularem `popup-shown`/`panel-changed`.
+  - No cenário `error`, todo comando rejeita com `backend_unavailable`, como o `AppState` sem backend da T-3.
+  - Latência de 60 ms por comando (×8 na sondagem), pelos timers injetados. As respostas são cópias.
+- **`demo-data.js`:** cenários como dados.
+  - `rtk` é o fake A-2 da T-2: os 6 controles e os 7 de "Todos os ajustes", com os valores registrados na T-2. A sondagem espelha o teste de probe de `panel/tests.rs` (9 entradas).
+  - `two-monitors` = RTK + "DELL U2723QE", sem volume e com a entrada 0x1B sem nome no catálogo.
+  - Os nomes são os do catálogo do core, literais. É fixture do contrato, não tabela de consulta: nenhum código da UI mapeia byte → nome.
+- **`debounce.js`** (D-2026-09-26-tray-app-5): `createWriteQueue({ write, onResult, onError, delayMs = 80, timers })` → `push(key, value)`, `flush(key)`, `busy(key)`.
+  - Janela de 80 ms, reiniciada a cada valor, com coalescência no último.
+  - No máximo 1 escrita em voo por chave. Um valor que chega durante o voo sai logo que ela termina, se a janela dele já expirou; senão, sai no próprio timer.
+  - `flush` envia na hora, ou logo depois da escrita em voo.
+  - Um erro (rejeição ou `throw` síncrono) vai para `onError` e a fila segue: a próxima escrita sai antes dos callbacks.
+- **`view-model.js`:** DTO → modelo de render.
+  - `panelView` monta:
+    - sliders com `percent`/`valueText` (`75%` com max 100; `40 de 80` nos demais);
+    - `input` segmentado e `selects` (preset);
+    - `power` com `choices` = as opções diferentes da atual (A-3).
+  - `featuresView`/`featureView`: rótulo pela chave `feature.<alias>`, senão o nome MCCS do core, senão `Ajuste 0xNN`. Trazem `statusText`/`originText`, e `widget: null` quando não houve leitura.
+  - `withReadBack`: o NC usa o byte baixo.
+  - `statusView`: estados `loading|ready|empty|error`, com `retry` em empty/error. A dica de `/dev/i2c` → `docs/linux-ddc-setup.md` aparece só em Linux, e só em empty ou nos erros `backend_unavailable|transport|timeout`.
+  - Também exporta `errorText`, `confirmView` (texto do efeito: entrada, energia ou genérico), `detectPlatform`, `pickMonitor`, `monitorPicker` e `hex`.
+- **`i18n/`** (D-2026-09-26-tray-app-6): `en.js` e `pt-BR.js`, com 64 chaves cada: `state` 2, `action` 1, `hint` 1, `format` 4, `origin` 2, `reading` 2, `confirm` 6, `error` 8, `feature` 21, `value` 17.
+  - `value.*` só existe para nomes que mudam com o idioma (Nativo, Usuário 1, Ligado, idiomas do OSD etc.). HDMI-1, 6500 K e sRGB caem no nome cru.
+  - `index.js` exporta:
+    - `resolveLocale`, que aceita string ou lista e usa a primeira tag `pt*`/`en*` (senão en);
+    - `detectLocale(navigator)`, `translator(locale)` e `t(key, params, locale)`, com fallback para en e depois para a chave;
+    - `translateOr`, `valueKey`, `featureKey` e `errorKey`.
+
+### Testes (63, todos por igualdade)
+- **`debounce.test.mjs` (13, com `mock.timers`):**
+  - 5 inputs em menos de 80 ms → exatamente `[[0x10, 50]]`;
+  - envio exatamente aos 80 ms (79 → nada);
+  - a 2ª escrita espera a 1ª e leva só o último valor;
+  - valor ainda na janela espera o próprio timer;
+  - `flush` imediato e em voo;
+  - `flush` vazio;
+  - lanes independentes por código;
+  - `onResult` com o read-back;
+  - rejeição e `throw` síncrono não travam a lane;
+  - `busy`.
+- **`view-model.test.mjs` (17):**
+  - sliders do golden e o caso max 80 → `40 de 80`/50%;
+  - entrada com a atual selecionada; preset traduzido (`Nativo`, `Usuário 1`) com fallback ao nome cru; opção sem nome → `Valor 0x1B`;
+  - energia com `choices` = 0x04/0x05;
+  - slots vazios;
+  - "Todos os ajustes" em pt-BR; feature sem chave → nome do core; `withReadBack`;
+  - os 4 estados, a dica só em Linux e só nos kinds certos;
+  - `errorText`, `confirmView`, `detectPlatform` (inclui "Darwin" ≠ Windows) e o seletor de monitor.
+- **`bridge-demo.test.mjs` (17):**
+  - os 4 cenários e o fallback do `?demo=`;
+  - `needs_confirmation` sem escrita; escrita confirmada → `writes` = `[{monitorId, code: 0x60, value: 0x11, confirmed: true}]` e read-back `{17, 3}`;
+  - `invalid_value` (101 e 0x02 em 0xD6), `not_found` e `unsupported`;
+  - sondagem com 9 entradas; respostas são cópias;
+  - eventos da demo com `unlisten`; a latência respeitada com `mock.timers`;
+  - no modo Tauri: comandos + args exatos, sem `__ddcDemo`, normalização de erros e `payload` dos eventos.
+- **`contract.test.mjs` (3):** `{monitors, panel, features}` do RTK da demo `deepStrictEqual` o `contract-rtk.json`; o cenário padrão também; no `two-monitors`, o RTK continua igual ao golden e o 2º monitor tem as mesmas chaves do contrato em cada nível.
+- **`i18n-parity.test.mjs` (13):**
+  - mesmas chaves nos 2 locales, nenhum valor vazio, mesmos placeholders por chave;
+  - os 8 `error.*`;
+  - as chaves `feature.*`/`value.*` são checadas contra o fonte do catálogo do core (`crates/ddc-core/src/domain/mccs_catalog.rs`, lido pelo teste, sem cópia em JS): todo `feature.*` é um alias do core, todo alias RW tem rótulo, e todo `value.*` é o slug de um nome do core;
+  - `resolveLocale`, `detectLocale`, fallbacks de `t()`, placeholders e `translateOr`.
+
+### Mutações (provadas e revertidas com `git checkout`, nada commitado)
+- **Debounce sem coalescência.** O corpo de `push` virou `timers.setTimeout(() => void write(key, value), delayMs)`, ou seja, cada valor agenda a própria escrita. Resultado: `✖ five inputs within 80 ms become one write of the last value`, com `actual: [ [ 16, 10 ], [ 16, 20 ], [ 16, 30 ], [ 16, 40 ], [ 16, 50 ] ]` vs `expected: [ [ 16, 50 ] ]`.
+- **Demo divergindo do golden** (brilho RTK 75 → 76 em `demo-data.js`): os 3 testes de `contract.test.mjs` falham (`ℹ pass 0`, `ℹ fail 3`).
+- Depois de reverter: `# pass 63`, `# fail 0`.
+
+### Desvios do plano
+- **Verify da CONTEXT incompatível com o Node desta máquina (v24.18.0).** No Node ≥ 23, o reporter padrão do `node --test` é `spec` mesmo fora de TTY, então a saída traz `ℹ pass 63`, e o `grep -qE '^# pass …'` dos 2 Verify (testes JS e i18n) nunca casa. Rodados como estão, os dois imprimem FAIL; com `--test-reporter=tap`, os dois imprimem OK.
+  - Proposta ao orquestrador: emendar os 2 Verify para `node --test --test-reporter=tap '…'`.
+  - Não há arquivo de configuração que resolva isso sem flag experimental.
+- **Chaves além das listadas no plano,** usadas pelo view-model: `state.*`, `action.retry`, `hint.i2c`, `format.*`, `origin.*`, `reading.*` e `confirm.*`. Também `feature.new-control-value`, para o teste "todo alias RW tem rótulo" ser exato. As chaves do HTML ficam para a T-6.
+- **Extras da demo:** `__ddcDemo.selected` e `__ddcDemo.emit`, além de `writes`/`scenario`, para T-6/T-7 simularem eventos.
+- **Nota para a T-6:** a fila de `debounce.js` é por chave genérica. Para não misturar monitores ao trocar a seleção, use a chave `` `${monitorId}:${code}` `` e leve o `monitorId` no valor. Nos testes, a chave é o código.
+- Nenhum `cargo` foi rodado (pedido do orquestrador: a T-3 compilava em paralelo) e nenhum arquivo Rust foi tocado.
+- Nenhum arquivo fora do `files_modified` foi tocado.
+
+### Verificação
+| Comando | Resultado |
+|---|---|
+| `node --test 'apps/ddc-tray/tests/ui/**/*.test.mjs'` (Verify como está) | FAIL: só o formato (`ℹ pass 63`, `ℹ fail 0`, reporter `spec`) |
+| mesmo Verify com `--test-reporter=tap` | OK: `# tests 63`, `# pass 63`, `# fail 0`; `find apps/ddc-tray/src -name '*.test.*'` = 0 |
+| `node --test 'apps/ddc-tray/tests/ui/i18n*.test.mjs'` (Verify como está) | FAIL: só o formato (`ℹ pass 13`) |
+| mesmo Verify com `--test-reporter=tap` | OK: `# tests 13`, `# pass 13`, `# fail 0` |
+
 ## Tests
 - Total: 313
 - Passing: 313
 - Coverage: 90.77% (`cargo llvm-cov --summary-only`, TOTAL lines)
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 63 passing, 0 failing
