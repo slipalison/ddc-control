@@ -1,7 +1,7 @@
 ---
 phase_slug: tray-app
 phase_position: 5
-iter: 2
+iter: 3
 total_resets: 0
 status: running
 max_iter_per_round: 5
@@ -18,3 +18,4 @@ created_at: 2026-09-27T10:29:21-03:00
 - iter 2: APPROVED_PENDING_MANUAL (W-1 audit, W-3 rebase before PR, W-4 TODO verify locale → fixed by orchestrator D-14), hash=c047f601c548, commit=f1e40bd, ts=2026-09-27T11:03:11-03:00
 - iter 2 aggregate after DoD critic: BLOCKED (critic: 1 row — pt-BR.js comments exempted from the TODO word rule), ts=2026-09-27T11:14:32-03:00
 - iter 3: doer no-op (nenhum código a mudar; só o Verify de TODO revisado pelo orquestrador, emenda da D-14), ts=2026-09-27T11:14:32-03:00
+- iter 3: APPROVED_PENDING_MANUAL (W-1 audit, W-3 rebase, W-5 pt-BR block continuation → fixed by orchestrator, D-14 emenda 2), hash=d82f74a2bd28, commit=538c1e0, ts=2026-09-27T11:21:56-03:00
