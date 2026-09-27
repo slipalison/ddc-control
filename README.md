@@ -342,6 +342,8 @@ Then open `http://localhost:1420/?demo=<scenario>`:
 
 Nothing leaves the page; accepted writes are listed in `window.__ddcDemo.writes`.
 
+Add `pseudo=1` to the query (`?demo=rtk&pseudo=1`) for the pseudo-locale: every translated text shows between `⟦` and `⟧`, and what the monitor or the core wrote (monitor names, value names no locale translates such as `HDMI-1` or `sRGB`, VCP codes, the backend's messages) is marked `translate="no"` instead. A text with neither came from no translation key. The pseudo-locale exists only in the demo: inside the app `pseudo=1` is ignored.
+
 Anywhere else without Tauri (inside the app, at `tauri://localhost` or `http://tauri.localhost`, should its API be missing) the demo never starts: every command fails as `backend_unavailable` and the popup shows that error, never simulated values as a monitor's.
 
 ### Tests
@@ -361,6 +363,7 @@ cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
 - `DDC_TRAY_FAKE=1` (only `1`) starts the app on a simulated monitor, for tests that must not touch a real one: the RTK of the contract test (`src-tauri/src/fixture.rs`), held in memory, so no `/dev/i2c-*` is opened and writes change only that memory. The app says so on stderr every time.
 - Tray icon smoke test (`apps/ddc-tray/scripts/smoke-sni.sh`: `--activate` clicks the icon over D-Bus and requires the popup to stay shown; `--fake --scroll` rolls the wheel over the icon against the simulated monitor) and the hardware tests: [`docs/hardware-validation.md`](docs/hardware-validation.md#tray-app--phase-tray-app).
 - The Playwright suite also fails any state of the popup that has a native `<select>`, whose menu is a window of its own and took the focus from the popup.
+- In the pseudo-locale, the Playwright suite reads every visible text, readable attribute (`aria-label`, `title`, `aria-valuetext`…) and generated `::before`/`::after` text of 13 states, in both themes (the demo scenarios, both confirmation dialogs, **All settings** open and probed, the open lists, the mute TV's error, loading). Each one must be translated (`⟦…⟧`) or marked `translate="no"`, and nothing marked `translate="no"` may be a translation. A literal text fails it even when it reaches the page through a constant or a helper, where the `node --test` scan of `app.js` does not look.
 
 ### Known limitations of the tray app
 
