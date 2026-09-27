@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ddc-cli` names: `<vcp>` takes any catalog name (`sharpness`, `osd-language`, `red-black-level`, `v-frequency`…), and `<value>` takes value names, ignoring case and punctuation (`set preset srgb`, `set preset 6500k`, `set input hdmi-1 --yes`). A name that is no value of the feature being set exits 2 before any monitor is touched.
 - `get` and `set` show what a value means (`1 (0x01) sRGB`, `514 (0x202) 2.2`); JSON gains `value_name`/`interpreted` only when there is one.
 - `ddc-cli reset <factory|brightness-contrast|geometry|color> [--yes]`, the same write as `set <code> reset --yes`: `0x01` to `0x04`/`0x05`/`0x06`/`0x08`, refused without `--yes` (exit 5), reported as sent since the reset codes are write-only.
+- `ddc-tray` (`apps/ddc-tray`), a Tauri 2 system-tray app over the same core, backend and capabilities cache as `ddc-cli`, run with `cargo run -p ddc-tray` (no installer yet).
+  - A 360×560 popup, hidden on focus loss and Esc: brightness, contrast and volume sliders, color preset, input source, power mode, and an "All settings" section loaded on demand, with a read-only probe of the codes the capabilities leave out.
+  - Sliders write 80 ms after the last move, coalesced, one write in flight per feature; the popup shows the value the monitor reads back.
+  - Every dangerous change (input, power, dangerous "All settings" entries) goes through a confirmation dialog first; `Confirm::Yes` is built only in the app's command layer.
+  - Several monitors: a selector; the popup opens on the last monitor it loaded, else the first whose panel loads.
+  - Tray menu in English or Brazilian Portuguese, from the system's locale: "Open panel" and "Quit", plus brightness shortcuts 0/25/50/75/100% on Linux, where the StatusNotifierItem reports no clicks. On Windows a left click toggles the popup anchored above the icon (not built on Windows yet).
+  - Popup in English or Brazilian Portuguese, every text from locale keys; light and dark themes; keyboard operable; strict CSP; capabilities limited to the app's own commands; single instance.
+  - On Linux, a restart at launch with WebKitGTK's DMA-BUF renderer off (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) unless the variable is already set: that renderer crashed the app on NVIDIA under Wayland.
+  - A browser demo of the popup (`?demo=rtk|two-monitors|empty|error`) without Tauri, checked by a Playwright + axe suite (no console errors, no critical/serious accessibility violations, light and dark) that also takes the README screenshots; `node --test` suites for the UI modules; a golden JSON contract shared by the Rust and JS tests; a StatusNotifierItem smoke script; and an `#[ignore]`d hardware test that writes one safe brightness change and restores it.
 
 ### Changed
 

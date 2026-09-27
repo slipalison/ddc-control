@@ -73,5 +73,17 @@ Applied by `/jdi-bootstrap` to `.opencode/opencode.jsonc`. Other runtimes ignore
 
 ```yaml
 frontend:
-  has_frontend: false   # tray popup Tauri não é web app roteável; phase tray-app pode reverter via D-XX
+  # D-2026-09-26-tray-app-8: o popup do tray roda num navegador comum em modo demo (bridge JS
+  # fake quando `window.__TAURI__` não existe, cenário escolhido por `?demo=`). O Gate 7 roda a
+  # suíte Playwright do próprio app em `apps/ddc-tray`: `npm ci --ignore-scripts && npx playwright test`
+  # (zero erro de console/`pageerror` e zero violação axe critical/serious em cada caminho abaixo).
+  has_frontend: true
+  frontend_url: http://localhost:1420
+  dev_command: python3 -m http.server 1420 --directory apps/ddc-tray/src
+  critical_paths:
+    - /
+    - /?demo=rtk
+    - /?demo=two-monitors
+    - /?demo=empty
+    - /?demo=error
 ```

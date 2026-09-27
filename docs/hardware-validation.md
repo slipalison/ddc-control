@@ -1,8 +1,8 @@
-# Hardware validation — phase `full-osd-control`
+# Hardware validation
 
-The exact script to validate `ddc-cli` on the dev machine: Linux, the "RTK QHD HDR" monitor (`RTK-RTK-QHD-HDR-01010101`, `/dev/i2c-5`) and an LG TV whose DDC/CI is mute. Run it from the repository root, in order, one command at a time, and compare each result with the expected one.
+The exact script to validate `ddc-cli` (phase `full-osd-control`, steps 0 to 5) and the tray app (phase `tray-app`, [its own section](#tray-app--phase-tray-app)) on the dev machine: Linux, the "RTK QHD HDR" monitor (`RTK-RTK-QHD-HDR-01010101`, `/dev/i2c-5`) and an LG TV whose DDC/CI is mute. Run it from the repository root, in order, one command at a time, and compare each result with the expected one.
 
-Only reads and the few safe, reversible writes of step 3 are allowed. Read [Never run](#never-run) before starting.
+Only reads and the few safe, reversible writes of step 3 and of the tray steps are allowed. Read [Never run](#never-run) and [Never do through the popup](#never-do-through-the-popup) before starting.
 
 ## 0. Build and record the original values
 
@@ -134,3 +134,66 @@ On any monitor, with or without `--yes`, never run a write to:
 - any code outside the [feature catalog](../README.md#feature-catalog), or any code written by number.
 
 `set` accepts the catalog values of `0x1E` and `0xCA` with `--yes` (D-2026-09-26-full-osd-control-10), and that path is tested only against the in-memory backend; this script never exercises it on hardware. Reading any of these codes is fine.
+
+## Tray app — phase `tray-app`
+
+Same machine and monitors. The tray app is single-instance so that one process talks to the monitors: quit any running `ddc-tray` (**Quit** in its tray menu) before steps 6 and 7, and do not run `ddc-cli` while it is up.
+
+### 6. Tray icon smoke test
+
+Needs a desktop session whose tray is a StatusNotifierItem host (KDE Plasma, or GNOME with the AppIndicator extension) and `busctl`. Never `sudo`.
+
+```sh
+cargo build -p ddc-tray --release --locked
+bash apps/ddc-tray/scripts/smoke-sni.sh target/release/ddc-tray
+```
+
+Expected: exit 0 a few seconds later, with
+
+```text
+smoke-sni: started target/release/ddc-tray as PID <pid>
+smoke-sni: org.kde.StatusNotifierWatcher lists :1.<n>/org/ayatana/NotificationItem/tray_icon_tray_app_ddc_control, owned by PID <pid>
+smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later and never panicked
+```
+
+The script lists the watcher's items, starts the app, and waits up to 15 s for a new item whose D-Bus connection belongs to the app's own PID (`GetConnectionUnixProcessID`); the app must then still be alive 2 s later, with no `panicked` on its stderr. It always stops the app on the way out (SIGTERM, SIGKILL after 5 s). Nothing is written to any monitor. On Linux the app replaces itself at launch to turn WebKitGTK's DMA-BUF renderer off (D-2026-09-26-tray-app-10); the PID stays the same, so the check still holds.
+
+Any other outcome is exit 1 with a `smoke-sni: FAIL:` line and the end of the app's stderr: no watcher on the session bus; the app exited before registering (most often another instance was already running); no item owned by that PID within 15 s; the app died within 2 s of registering; or `panicked` on its stderr.
+
+### 7. Tray hardware test
+
+```sh
+ddcutil --bus 5 getvcp 10
+DDC_HW_TESTS=1 cargo test -p ddc-tray --locked -- --ignored rtk_qhd_hdr --test-threads=1 --nocapture
+ddcutil --bus 5 getvcp 10
+```
+
+The test goes through the app's own composition root (`compose_osd()`: the real backend with the capabilities cache) and never confirms a write:
+
+1. It lists the monitors and picks the RTK by manufacturer and model.
+2. It loads the RTK's panel, reads only: exactly `0x10 0x12 0x62 0x60 0x14 0xD6`, with 7 input sources, 7 color presets and 3 power modes.
+3. It writes brightness once: the original value +10, or −10 when +10 would pass the maximum, and expects that value read back.
+4. A guard writes the original value back, also when an assertion failed first, and expects both the value read back and a fresh read to equal it.
+
+Expected: `1 passed`, with the timings, the monitors, the panel, `brightness <original> -> <target> (max 100): read back Ok(ReadBackDto { current: <target>, max: 100 })` and `restored brightness: Ok(ReadBackDto { current: <original>, max: 100 })`; both `ddcutil` reads show the same brightness. On 2026-09-26: `list_monitors` 1.17 s, `load_panel` 0.51 s, the write and the restore about 146 ms each, brightness 100 → 90 → 100. Without `DDC_HW_TESTS=1` the test prints `skipped: …` and passes without touching a monitor. If the second `ddcutil` read differs from the first, put the value back with `$B -m RTK set brightness <original>` (step 0 builds `$B`).
+
+### 8. The popup by hand (optional)
+
+Start `target/release/ddc-tray` and choose **Open panel** in its tray menu. On the dev machine the LG TV is listed first and, since a mute monitor loads as a panel with no controls (see the README's known limitations of the tray app), the popup may open on it: pick the RTK in the selector at the top. Then only:
+
+- move brightness, contrast and volume and change the color preset, putting each back to its step 0 value right after;
+- use the menu's **Brightness** entries only while the popup shows the RTK (they set the monitor the popup last loaded), then put brightness back;
+- open the input and power dialogs only to read them, and close them with **Cancel** or Esc;
+- open **All settings** and run **Probe hidden settings**, which only read, without changing any entry.
+
+Choose **Quit** in the tray menu when done, and record anything the popup shows that `ddc-cli` reads differently.
+
+### Never do through the popup
+
+On any monitor, never press **Apply** in the confirmation dialog, which means never completing:
+
+- an input switch (the input chips): the screen may go dark, and only the monitor's own buttons bring it back;
+- a power mode change (the power button in the header): the monitor may turn off;
+- a change to any entry tagged **Caution** under **All settings** or among the probed ones: OSD control `0xCA`, auto setup `0x1E`, geometry `0x20`, `0x30` and `0x7E`, the manufacturer-specific `0xE6` and `0xF1`, or any other code the core marks dangerous — the codes of [Never run](#never-run). A **Caution** slider opens the dialog when released: cancel it.
+
+The tray's hardware test never confirms a write, and neither does anyone validating the tray by hand.
