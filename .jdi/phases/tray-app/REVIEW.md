@@ -2,121 +2,100 @@
 
 **Verdict:** APPROVED_PENDING_MANUAL
 
-Iteração 9 (rodada 2). Re-verificação completa dos gates 1-8 sobre o `HEAD` `19f86b3`. Cobre os commits `4423525..f98c10a` e o `19f86b3`, que refixa o hash do harness revisado; o manifesto agora inclui `scripts/smoke-sni.sh` (D-2026-09-27-tray-app-8).
-
-A revisão foi read-only: no repo, só este REVIEW.md foi escrito. As mutações rodaram numa cópia descartável de `apps/ddc-tray` no scratchpad, já apagada. `git status` terminou limpo, exceto por este arquivo e pelo `.idea/`, que foi ignorado.
+Iteração 10 (rodada 2), revisão completa dos gates 1-8 em `abfafab` (commits `2e2c76d..8c6c8d2` + `abfafab`). Todo `Verify:` do PROJECT.md e do CONTEXT.md foi extraído por script do `.md` e rodado literalmente em `bash`, a partir da raiz, sem `DDC_HW_TESTS` e sem `DDC_TRAY_FAKE` no ambiente. Nenhum teste `#[ignore]` foi rodado e nada foi escrito no monitor real.
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
-| Build | PASS | `cargo build --workspace --locked`: exit 0. Cross-check de `ddc-core`/`ddc-adapters`/`ddc-cli` em `x86_64-pc-windows-msvc`: exit 0. O tray fica fora do cross-check Windows (D-2026-09-26-tray-app-9). |
-| Tests | PASS | 383 passed, 0 failed, 9 ignored (hardware). É igual à iter 8, porque nenhum `.rs` mudou. `node --test`: 141 pass (eram 135), 0 fail/cancelled/skipped/todo. |
-| Coverage | PASS | 83.22% de lines na linha TOTAL (3271 linhas, 549 sem cobertura), com `main.rs`/`build.rs` excluídos e `--fail-under-lines 80` exit 0. Literal do PROJECT, sem exclusões: 82.78%. |
-| Lint | PASS | `cargo fmt --all --check`: exit 0. `cargo clippy --workspace --all-targets --locked -- -D warnings`: exit 0. Nenhum `#[allow(...)]` fora de testes. |
-| Hexagonal/Safety/Hygiene | WARN | 5.1-5.9 e 5.11 limpos. 5.10 = W-1, conhecido, fica com a `ci-crossbuild`. |
-| Consistency | PASS | 6 commits `(tray-app)` com tipos coerentes (feat/test/docs) e D-XX citada no corpo. Nenhum commit mistura código e `.jdi/`. `Cargo.lock`, `package.json` e `package-lock.json` estão sem diff. D-1, D-2, D-2026-09-26-tray-app-2/-3/-6 e D-2026-09-27-tray-app-6/-7/-8 estão conformes. |
-| UI Validation | PASS (com W-2) | Playwright: 110 passed, 6 skipped (= screenshots sem `SCREENSHOTS=1`), 0 failed/flaky. Sub-contagens: `n = 10`, dropdown 16/16, `dr = 2`, `ps = 40`. Caminhos `fail=`: 8/8. Pseudo-locale: 42/42. |
+| Build | PASS | `cargo build --workspace --locked` exit 0. Cross-check Windows `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --target x86_64-pc-windows-msvc --locked` exit 0 (tray fora, D-2026-09-26-tray-app-9). Release `ddc-tray` (C2) OK |
+| Tests | PASS | 383 passed, 0 failed, 9 ignored (hardware). Igual à iter 9: nenhum `.rs` mudou na iter 10 |
+| Coverage | PASS | 83.22% lines (TOTAL, `main.rs`/`build.rs` excluídos, `--fail-under-lines 80` exit 0). Literal do PROJECT, sem exclusões: 82.78% |
+| Lint | PASS | `cargo fmt --all --check` exit 0; `cargo clippy --workspace --all-targets --locked -- -D warnings` exit 0; nenhum `#[allow(` fora de testes |
+| Hexagonal/Safety/Hygiene | WARN | 5.1-5.9 e 5.11 limpos (hits de 5.5/5.6/5.7c conferidos, ver abaixo). 5.10: W-1 (`cargo audit`), conhecido e adiado para `ci-crossbuild` |
+| Consistency | PASS | commits da iter 10 com escopo `tray-app` e tipos coerentes; `files_modified` do PLAN presentes no log; D-1/D-2 e D-tray-app relevantes respeitados |
+| UI Validation | PASS | `npx playwright test`: 120 passed, 6 skipped (= screenshots), 0 failed/flaky; `n=10`, `dr=2`, `ps=44`, `dd=dl=16`, `sk=sl=6` |
 | DoD | PASS_PENDING_MANUAL | 22/22 auto, 2 manual pending |
+
+### Gate 5 — hits conferidos (não são findings)
+- 5.5: `apps/ddc-tray/src-tauri/src/lib.rs:146` é doc comment que cita `unsafe` (`std::env::set_var`), não código. As 3 raízes têm `#![forbid(unsafe_code)]`.
+- 5.6: `kwin_placement.rs:246-267`, `stop_signals.rs:105-108` e `lib.rs:269` ficam em módulos `#[cfg(test)]` (`mod tests` e `mod switch_tests`). `worker.rs:141` é doc comment.
+- 5.7c: `crates/ddc-adapters/tests/real_monitor.rs` tem 7 testes, todos com `#[ignore]` e o gate `hardware_enabled()` (`DDC_HW_TESTS=1`). `lib.rs:77` é o composition root.
+- 5.10: `cargo audit` agora está instalado. Resultado: 1 vulnerabilidade, RUSTSEC-2018-0005 (`serde_yaml` 0.7.5 ← `mccs-db` ← `ddc-hi`, anterior a esta phase). Avisos: RUSTSEC-2024-0370 (`proc-macro-error`), RUSTSEC-2024-0320 (`yaml-rust`) e RUSTSEC-2024-0429 (`glib` 0.18.5, unsound, entrou pela pilha GTK do Tauri nesta phase). Também aparece o aviso future-incompat de `nom` 3.2.1 (← `edid` ← `ddc-hi`, anterior a esta phase). É o W-1.
 
 ## Blockers
 Nenhum.
 
 ## Warnings
+- **W-1 (5.10, conhecido):** as advisories acima. Não é um bloqueio do gate por ferramenta, e foi adiado para a phase `ci-crossbuild` pelo orquestrador. Nenhum lockfile mudou na iter 10 (`Cargo.lock`, `package.json` e `package-lock.json` intocados).
 
-- **W-1 (5.10, herdado, fica com a `ci-crossbuild`):** `cargo audit` acha 1 vulnerabilidade e 3 avisos, os mesmos das iters 7 e 8.
-  - Vulnerabilidade: RUSTSEC-2018-0005 (`serde_yaml` 0.7.5).
-  - Avisos: RUSTSEC-2024-0370 (`proc-macro-error`, sem manutenção), RUSTSEC-2024-0320 (`yaml-rust`, sem manutenção) e RUSTSEC-2024-0429 (`glib` 0.18.5, unsound).
-  - Nenhuma dependência nova entrou na iter 9.
+## Avaliação da iteração 10
 
-- **W-2 (Gate 7 / D-2026-09-27-tray-app-7, novo): dois toasts de falha continuam fora de todo estado do pseudo-locale.** É a mesma classe de lacuna que o DoD critic da iter 8 apontou. A iter 9 fechou 3 dos 5 pontos em que `app.js` mostra um erro num toast (`writeFailed`, "Todos os ajustes" e a sondagem). Ficaram de fora:
-  - `apps/ddc-tray/src/app.js:200`, no `catch` de `listen()`, quando registrar `popup-shown`/`panel-changed` falha;
-  - `apps/ddc-tray/src/app.js:207`, no `.catch` de `bridge.hidePopup()` (Esc).
-  - **Por que a suíte não vê esses dois:** o demo nunca os faz falhar. O `listen` do demo (`bridge.js:152`) e o do bridge indisponível (`bridge.js:105`) nunca rejeitam, e `FAILURES` (`demo-data.js`) só tem `write`/`features`/`probe`. No app real, os dois rejeitam se o IPC do Tauri falhar: o `invoke` de `hide_popup` e o `event.listen` (`bridge.js:95`) rejeitam por permissão ou IPC, mesmo que o comando Rust `hide_popup` (`commands.rs:233`) devolva `()`. O SUMMARY exclui o `hide_popup` com o argumento "o comando real nunca rejeita" e não menciona o `listen`.
-  - **Prova (mutante independente, cópia descartável):** `const EVENTS_OFF = ' Changes made from the tray will not show here.'`, com `showToast(errorText(error, t) + EVENTS_OFF)` nas duas linhas. Resultado: suíte Playwright inteira com **110 passed, 0 failed**, e `i18n-html` + `view-model` com **41 pass**. Ou seja, um literal hardcoded (D-2026-09-26-tray-app-6) passaria por todos os gates.
-  - **Sugestão:** estender o `fail=` do demo com, por exemplo, `events` (o `listen` do demo rejeita) e `hide` (o `hide_popup` do demo rejeita). Depois, acrescentar os 2 estados ao `pseudo-locale.spec.mjs` e 2 cenários de texto exato ao `scenarios.spec.mjs`, como a iter 9 fez para os outros três. Outra saída é registrar numa D-XX por que esses dois ficam de fora.
-  - Não é blocker: nenhum `Verify:` falha, e a D-7 enumera os estados cobertos sem prometer todos os toasts. Mas é a lacuna que o critic procuraria a seguir.
+### Correção `d3e54a6` (toast da falha de eventos que persiste)
+- **Correta e mínima.** `model.toastLasts` só é ligado no `catch` de `listen()` (`apps/ddc-tray/src/app.js:205`). O `hideToast()` (`app.js:406-408`) respeita a marca, e o `showToast()` (`app.js:398-399`) a limpa. Não há `showToast(` novo, texto novo nem chave i18n nova. A ordem entre `listen()` e `refresh()`, que rodam juntos em `start()` (`app.js:153-154`), não importa: se o carregamento terminar antes da falha, o toast aparece depois; se terminar depois, a marca já está ligada.
+- **O bug existia, e o teste o reproduz.** Pelo relato do doer, com o `app.js` sem a correção, os 4 testes de `events` reprovavam (`Received: hidden`). Nesta revisão, os 4 testes de `events` e os 4 de `hide` passam (pseudo-locale e cenários, × 2 temas).
+- **Limites de desenho (observações, não findings, já descritos no README):**
+  - O "Tentar de novo" do toast chama `refresh()` (`app.js:181`) e nunca refaz o `listen()`. O painel é relido, mas o toast continua, então o botão não resolve a falha que o toast relata. É o mesmo comportamento dos outros toasts (o retry do toast sempre relê o monitor), e o `README.md:324` descreve isso.
+  - Uma falha posterior substitui o toast e limpa a marca. Quando essa falha se resolve, o aviso de "sem eventos" some de vez, embora os eventos continuem desligados. O README diz "stays until another failure replaces it".
+- **No app real, esse caminho é inalcançável:** `capabilities/default.json` concede `core:event:default`, e no tauri 2.12 isso inclui `allow-listen` (`tauri-2.12.0/permissions/event/autogenerated/reference.md`). A correção protege contra um erro de configuração. Um texto próprio e um retry que refaça o `listen()` servem para uma issue de follow-up, como o próprio doer sugeriu. Não justificam outra iteração.
 
-## Blocker da iter 8 (DoD critic) conferido
+### `listen` normalizado no bridge Tauri (`apps/ddc-tray/src/bridge.js:108-114`)
+- **Caminho de sucesso inalterado.** O `listen` do Tauri já devolvia `Promise<UnlistenFn>` (`scripts/bundle.global.js`: `h("plugin:event|listen",…).then(n=>async()=>S(e,n))`). O wrapper faz `return await` e devolve o mesmo valor, que o `app.js` descarta de qualquer forma. A diferença é um microtask a mais.
+- **Caminho de falha:** a string crua passa a ser `{ kind: 'unknown', message }`. O texto na tela não muda: `errorText` de uma string também caía em `error.unknown` (`view-model.js:218-219`). Um erro síncrono de `tauri.event.listen` já era capturado pelo `try` de `listen()` e continua sendo.
+- **A mensagem de recusa do demo confere com a do Tauri:** `tauri-2.12.0/src/webview/mod.rs:2112` (`Command {} not allowed by ACL`, só em `#[cfg(not(debug_assertions))]`, ou seja, em build release).
+- **No binário real (C11),** o popup abre no `Activate` e continua aberto por 1,5 s. O smoke não observa o `listen` do JS diretamente, mas, pela leitura do código, o único efeito observável da mudança é o toast persistente, que só aparece se o `listen()` for recusado.
 
-- **Textos de falha fora dos estados do pseudo-locale: FECHADO para escrita, "Todos os ajustes" e sondagem.** O resto está no W-2.
-  - **Demo:** `apps/ddc-tray/src/bridge.js:109-210` e `demo-data.js:21-43`. O `fail=` só existe dentro de `demoBridge`, que só roda em servidor local (D-2026-09-27-tray-app-6). `tests/ui/bridge-demo.test.mjs` confirma que `tauri://localhost/?demo=rtk&fail=write` e `http://tauri.localhost/?fail=features,probe` continuam `backend_unavailable`.
-  - **Mensagem de timeout:** vem do core. O teste lê o `#[error("…")] Timeout` de `crates/ddc-core/src/domain/error.rs:35` ("monitor did not respond in time") e compara com a do demo.
-  - **Ordem:** a escrita ainda passa por `needs_confirmation`/`invalid_value` antes de expirar, e o monitor ainda é procurado antes (`not_found`, e `transport` para a TV muda).
-  - **Pseudo-locale** (`tests/e2e/pseudo-locale.spec.mjs:56-84, 207-272`): 7 estados novos.
-    - Os estados de espera usam uma variante do `bridge.js` servida por `page.route`, com a mesma trava de `slider`/`dropdown`/`confirm`: o spec exige que a linha remendada exista no `bridge.js` (`the demo line this state patches`).
-    - `textsOf`/`judge`, os mínimos de leitura, o teste `loading` e o da origem do app não mudaram.
-  - **Cenários** (`tests/e2e/scenarios.spec.mjs:169-252`): 4 caminhos × 2 temas, com texto exato `t('error.timeout')` no toast e no announcer. O controle volta ao valor lido (`75`/`75%`, preset `0x01`/`sRGB`), `writes` fica vazio, e passam o axe e o coletor de console.
-  - **Mutante do critic refeito de forma independente:** `const NOT_APPLIED = ' The monitor kept its previous value.'` e `showToast(errorText(error, t) + NOT_APPLIED)` em `writeFailed` (`app.js:681`). Resultado: **8 failed**.
-    - Pseudo-locale, 4 falhas: escrita de brilho e troca de preset × 2 temas, com `has text outside the marks: " The monitor kept its previous value."`.
-    - Cenários `fail=write`, 4 falhas: texto exato.
-- **TODO minúsculo / `todo!(`:** resolvido pelo orquestrador no `Verify:` (D-2026-09-27-tray-app-8). C18 e P3 passam com a regra nova.
-
-## Observações (não bloqueiam, não são warnings)
-
-- **Harness congelado (D-2026-09-27-tray-app-7/-8):**
-  - O hash recalculado é `b911f1d74c2d5178d82e382eefa47363469b8d079dcbe09759c9b88a5d8a6e87`, sobre 20 arquivos (`smoke-sni.sh` incluído), e bate com o CONTEXT.
-  - A última mudança no harness é `2a8b59d`, anterior ao refixo em `19f86b3`.
-  - Li os diffs dos 3 arquivos alterados: só entram testes, estados e asserções. `support.mjs` (coletor de console/pageerror, axe, `expectNoNativeSelect`), `playwright.config.mjs` e `smoke-sni.sh` não mudaram.
-- **Contagem no SUMMARY:** a iter 9 diz "21 estados × 2 temas + `loading` × 2 + origem do app × 2 = 42/42". A soma não fecha (daria 46). A lista real tem 19 estados em `STATES` + `loading` = 20 estados × 2 = 40 (`ps = 40`), mais a origem × 2 = 42. O README ("20 states") está certo.
-- **Limites de desenho já registrados (iters 7/8):** um literal colado a um *dado* sob `translate="no"` não é checado. Um literal passado como parâmetro de `t()` sai dentro das marcas, e quem o pega são as asserções exatas.
-- **Para o `/jdi-ship` (fora dos gates):** `origin/main` está em `1bca909`, o squash do PR #7. `phase/tray-app` tem 108 commits à frente, e 25 deles são os commits originais da `full-osd-control`. Como o usuário mergeia por squash, é preciso rebasear sobre o `origin/main` antes de abrir o PR.
-- **`nom` 3.2.1:** o aviso de future-incompat de sempre, via `ddc-hi` 0.4.1. Não é desta phase.
-- **Smokes e instância do usuário:** os smokes rodaram um de cada vez. Antes de cada um, `pkill -x ddc-tray` + `pidwait`; logo depois, `setsid -f /home/slipalison/.local/bin/ddc-tray`. PIDs do usuário: 1569412 → 1596371 → 1596918, que é a única instância viva no fim. A porta 1420 ficou livre antes e depois.
-
-## Gate 5 (detalhe)
-| Check | Resultado |
-|---|---|
-| 5.1 deps do core | só `thiserror` (sem saída) |
-| 5.2 I/O/cfg de plataforma no core | sem saída |
-| 5.3 portas | nenhum `impl MonitorBackend` no core; nenhum `pub trait` fora do core |
-| 5.4 composition roots | sem saída nas duas buscas |
-| 5.5 `unsafe` | único hit em `apps/ddc-tray/src-tauri/src/lib.rs:146`, que é doc comment (por que o `exec` evita `set_var`); `#![forbid(unsafe_code)]` em `ddc-core`/`ddc-cli`/`ddc-tray` (a busca por raiz sem o atributo não teve saída) |
-| 5.6 panics | todos os hits estão em `#[cfg(test)]`: `kwin_placement.rs` (mod na linha 195), `lib.rs` (`switch_tests`, linha 239) e `stop_signals.rs` (linha 82). O `worker.rs:141` é doc comment |
-| 5.7 escrita no monitor | `Dangerous` classificado no core (`feature.rs:33`). Nenhum `Confirm::Yes` fora de `ddc-cli`/`src-tauri/src/commands*`/testes. `DdcHiMonitorBackend` em testes só aparece em `crates/ddc-adapters/tests/real_monitor.rs`, com 7/7 `#[ignore]` + `DDC_HW_TESTS=1`. `apps/.../lib.rs:28,77` é o composition root |
-| 5.8 paths de device no core | sem saída |
-| 5.9 comandos Tauri | todos `async fn` |
-| 5.10 supply chain | W-1 |
-| 5.11 segredos/TODO | sem saída |
+### Harness (D-2026-09-27-tray-app-7)
+- **Só adições.** Mudaram `pseudo-locale.spec.mjs` (+2 estados, `TOAST_STATES`, o teste de consistência), `scenarios.spec.mjs` (+2 caminhos `fail=`) e `bridge-demo.test.mjs` (+testes), e entrou o `toast-states.test.mjs`, que é novo. As duas linhas removidas do `bridge-demo.test.mjs` viraram asserções mais amplas: uma URL com `?fail=events` e uma lista maior de palavras desconhecidas.
+- **Não mudaram:** `support.mjs`, `playwright.config.mjs` e `scripts/smoke-sni.sh`.
+- **Hash:** o C15 bate com `c3976dbf…37e2`, fixado em `abfafab`.
+- **Limite residual (observação):** a trava `toast-states.test.mjs` cobre toda menção a `showToast`, a `toastText` e a `'toast-text'` nos scripts. Uma escrita direta via `ui.toast` (ex.: `ui.toast.children[1].textContent = …`) não passaria por ela. Só o pseudo-locale a pegaria, e apenas se algum estado chegasse àquele caminho. Seria um contorno deliberado do helper, não um erro acidental.
 
 ## DoD Checklist (gate 8)
 
-Os `Verify:` foram extraídos por script do `.md` e rodados literalmente em `bash`, a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`. O P2 (formato "`cmd` → coluna Lines") foi rodado literalmente, e a coluna foi lida a olho.
-
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | fmt + clippy `-D warnings` limpos, incluindo `ddc-tray` | CONTEXT | Auto | PASS | `OK` |
-| 2 | `ddc-tray` compila em release no Linux | CONTEXT | Auto | PASS | `OK` |
-| 3 | Só o composition root constrói `DdcHiMonitorBackend` | CONTEXT | Auto | PASS | `OK` (1× em `lib.rs:77`) |
-| 4 | `panel.rs` é Rust puro sobre `MonitorControl` | CONTEXT | Auto | PASS | `OK` |
-| 5 | `#![forbid(unsafe_code)]` em `src-tauri`, nenhum `unsafe` | CONTEXT | Auto | PASS | `OK` |
-| 6 | `node --test` (debounce, view-model, bridge demo…), 0 falhas | CONTEXT | Auto | PASS | `OK`: 141 pass, 0 fail/cancelled/skipped/todo |
-| 7 | Paridade i18n + nenhum texto hardcoded no HTML/scanner | CONTEXT | Auto | PASS | `OK` |
-| 8 | CSP sem `unsafe-inline`, `script-src 'self'` | CONTEXT | Auto | PASS | `OK` |
-| 9 | Capabilities sem shell/fs/http/opener | CONTEXT | Auto | PASS | `OK` |
-| 10 | single-instance é o 1º plugin do builder | CONTEXT | Auto | PASS | `OK` |
-| 11 | Smoke SNI `--activate` (PID próprio, popup mostrado e mantido) | CONTEXT | Auto | PASS | `OK`: PID 1596135, `org.kde.StatusNotifierItem-1596135-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras |
-| 12 | Teste de hardware `#[ignore]` gated por `DDC_HW_TESTS=1` | CONTEXT | Auto | PASS | `OK`: 2 testes listados, não executados |
-| 13 | Gate 7: console/axe nos `critical_paths` + dropdown + arrasto + pseudo | CONTEXT | Auto | PASS | `OK`: 110 passed, 6 skipped; `n=10`, `dd=dl=16`, `sk=sl=6`, `dr=2`, `ps=40` (ver W-2) |
-| 14 | Bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | CONTEXT | Auto | PASS | `OK` |
-| 15 | Harness igual ao revisado (hash do manifesto) | CONTEXT | Auto | PASS | `OK`: `b911f1d7…6e87`, 20 arquivos |
-| 16 | Nenhum `<select>` nativo em `src/` | CONTEXT | Auto | PASS | `OK` |
-| 17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | CONTEXT | Auto | PASS | `OK`: 20 testes `scroll`; PID 1596683 com `75 -> 80` na vertical, nada na horizontal em 1,5 s, `80 -> 75` |
-| 18 | Nenhum TODO/FIXME/`todo!` sem issue nos arquivos versionados do produto | CONTEXT | Auto | PASS | `OK` (regra da D-2026-09-27-tray-app-8) |
-| 19 | Screenshots claro/escuro regenerados, nada pulado, byte a byte iguais | CONTEXT | Auto | PASS | `OK`: 6 passed; 720×1120; SHA-1 dos 6 PNGs inalterados |
-| 20 | `cargo test --workspace` exit 0 | PROJECT | Auto | PASS | `OK`: 383 passed, 0 failed, 9 ignored |
-| 21 | Cobertura >= 80% de lines | PROJECT | Auto | PASS | literal `cargo llvm-cov --workspace --summary-only`: TOTAL lines 82.78% (gate com exclusões: 83.22%) |
-| 22 | Nenhum TODO/FIXME/`todo!` sem issue em `*.rs` | PROJECT | Auto | PASS | `OK` (regra da D-2026-09-27-tray-app-8) |
-| 23 | CHANGELOG.md atualizado por release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` em `CHANGELOG.md:8`, com o tray em Added, que agora descreve o `fail=` e os 20 estados |
-| 24 | README descreve o comportamento atual | PROJECT | Manual | MANUAL_REQUIRED | suggested: seção `## Tray app` (`README.md:265`); `fail=` em `README.md:345`; rótulos "All settings"/"Probe hidden settings" batem com `i18n/en.js:16,19` |
+| 1 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | `OK`; 383 passed, 0 failed, 9 ignored |
+| 2 | Coverage >= 80% of lines | PROJECT | Auto | PASS | literal `cargo llvm-cov --workspace --summary-only`: TOTAL Lines 82.78% |
+| 3 | No TODO/FIXME without issue (`*.rs`, D-4/D-8) | PROJECT | Auto | PASS | `OK` |
+| 4 | fmt + clippy `-D warnings` incl. `ddc-tray` | CONTEXT | Auto | PASS | `OK` |
+| 5 | `ddc-tray` compila em release no Linux | CONTEXT | Auto | PASS | `OK` |
+| 6 | Só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | CONTEXT | Auto | PASS | `OK` |
+| 7 | `panel.rs` puro sobre `MonitorControl` | CONTEXT | Auto | PASS | `OK` |
+| 8 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | CONTEXT | Auto | PASS | `OK` |
+| 9 | `node --test` (debounce, view-model, bridge demo…) | CONTEXT | Auto | PASS | `OK`; total 147 pass, 0 fail/cancelled/skipped/todo (Node 24.18.0) |
+| 10 | Paridade i18n + nenhum texto hardcoded | CONTEXT | Auto | PASS | `OK` |
+| 11 | CSP sem `unsafe-inline`, `script-src 'self'` | CONTEXT | Auto | PASS | `OK` |
+| 12 | Capabilities sem shell/fs/http/opener | CONTEXT | Auto | PASS | `OK` |
+| 13 | single-instance 1º no builder | CONTEXT | Auto | PASS | `OK` |
+| 14 | Smoke SNI `--activate` (binário release, backend real só com leituras) | CONTEXT | Auto | PASS | `OK`; PID 1696917, `org.kde.StatusNotifierItem-1696917-1` do próprio PID, `popup shown` e ainda mostrado 1,5 s depois, sem `panicked` |
+| 15 | Teste `#[ignore]` de hardware RTK, gated | CONTEXT | Auto | PASS | `OK` (listado, não executado) |
+| 16 | Gate 7: console/axe nos `critical_paths` + drag + pseudo-locale | CONTEXT | Auto | PASS | `OK`; 120 passed, 6 skipped; `n=10 dr=2 ps=44 dd=16 dl=16 sk=6 sl=6` |
+| 17 | App real nunca mostra dados simulados | CONTEXT | Auto | PASS | `OK` |
+| 18 | Harness idêntico ao revisado | CONTEXT | Auto | PASS | `OK` (hash `c3976dbf…37e2`) |
+| 19 | Nenhum `<select>` nativo | CONTEXT | Auto | PASS | `OK` |
+| 20 | SNI `ksni` + roda testada + smoke `--fake --scroll` | CONTEXT | Auto | PASS | `OK`; PID 1697406 (`DDC_TRAY_FAKE=1`), `75 -> 80` na vertical, nada na horizontal em 1,5 s, `80 -> 75` |
+| 21 | Nenhum TODO/FIXME/`todo!` em arquivo versionado do produto | CONTEXT | Auto | PASS | `OK` |
+| 22 | Screenshots regenerados, nada pulado, byte a byte iguais | CONTEXT | Auto | PASS | `OK`; `git diff --quiet -- docs/screenshots` |
+| 23 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` em `CHANGELOG.md:8`, sem heading de versão; o bullet do demo cita `fail=events,hide` e os 22 estados |
+| 24 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: `README.md:324` descreve o toast que persiste; seção "Browser demo" descreve `events`/`hide` |
 
 **Totals:** 24 items | Auto: 22 (22 PASS, 0 FAIL) | Manual: 2 pending
 
 **Manual confirmation required:**
-Rode `/jdi-confirm-dod tray-app` para confirmar cada item manual com evidência. Sem isso, o `/jdi-ship` recusa a phase.
+Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Without that, `/jdi-ship` will refuse the phase.
+
+Protocolo dos smokes (14 e 20), um de cada vez: antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário, encerrada com `pkill -x ddc-tray`; logo depois, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu. PIDs do usuário: 1666583 → 1697142 → 1697644, a única instância viva no fim. A porta 1420 estava livre antes e depois dos itens 16 e 22.
 
 ## Recommendation
-A iter 9 fecha o blocker do DoD critic da iter 8 para os textos de falha de escrita, de "Todos os ajustes" e da sondagem, sem enfraquecer o harness, e o hash refixado bate. Todos os gates auto passam. Os próximos passos:
+- A phase está pronta para `/jdi-confirm-dod tray-app` (CHANGELOG e README) e, depois, `/jdi-ship`. O único warning é o W-1, conhecido e adiado para `ci-crossbuild`.
+- Os limites da `d3e54a6` (o retry não refaz o `listen()` e o aviso some depois de outra falha) e o texto genérico "Algo deu errado." ficam como issue de follow-up. O caminho é inalcançável com a capability atual e não pede outra iteração.
+- **Nota para o ship, fora dos gates:** `phase/tray-app` parte de `2628f8c` e ainda carrega os commits pré-squash da `full-osd-control` (até `c2fac93`). O `origin/main` já tem o squash `1bca909`, com a mesma árvore de `crates/` e `Cargo.toml`. Antes do PR, rebasear só a faixa da phase: `git rebase --onto origin/main c2fac93`. O usuário faz squash-merge.
 
-1. **Decidir o W-2 antes de rodar o critic de novo.** Os toasts de `app.js:200` (`listen`) e `app.js:207` (`hide_popup`) aceitam um literal colado sem que nenhum gate perceba. Há duas saídas: uma rodada curta que estende o `fail=` (`events`/`hide`) e acrescenta os 2 estados, ou uma D-XX que os deixa de fora com justificativa.
-2. **W-1** continua com a `ci-crossbuild`.
-3. **Antes do PR:** rebasear `phase/tray-app` sobre o `origin/main` (`1bca909`), rodar `/jdi-confirm-dod tray-app` para os 2 itens manuais e anexar ao PR a saída do `rtk_qhd_hdr` com `DDC_HW_TESTS=1`, rodado pelo orquestrador.
+## DoD Critic (enhanced)
+
+- DoD row «21 (TODO repo-wide)»: `f=$(git ls-files -z …)` perde os NULs no bash; o `xargs -0 grep` falha e o Verify imprime OK sem ler arquivo nenhum — `// TODO:` em `app.js` e `TODO:` no `README.md` passam.
+- DoD row «3 (TODO *.rs, PROJECT)»: `//! todo: …` e `// TODOs: …` passam.
+- DoD row «10 (i18n)»: nota do diálogo de confirmação genérico (`const note = input ? t(…) : 'Some monitors only undo this from their own buttons.'`) aparece em inglês no popup pt-BR — nenhum estado do pseudo-locale abre o diálogo genérico e o scanner só lê argumentos dos sinks.
+- Suspeitas (objective:false): «6» `crate::compose_osd()` chamado de um comando; «15» uma segunda escrita Safe sem guard.
+
+**Verdict:** BLOCKED

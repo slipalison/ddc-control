@@ -1,8 +1,8 @@
 ---
 phase_slug: tray-app
 phase_position: 5
-iter: 4
-total_resets: 1
+iter: 0
+total_resets: 2
 status: running
 max_iter_per_round: 5
 max_resets: 3
@@ -28,3 +28,6 @@ created_at: 2026-09-26T21:35:52-03:00
 - iter 8 (round 2, 3): APPROVED_PENDING_MANUAL (1 warn: W-1), hash=63e2479e211c, commit=8382d9c, ts=2026-09-27T04:59:20-03:00
 - iter 8 aggregate after DoD critic: BLOCKED (critic: 3 rows — failure-state texts outside pseudo states; lowercase todo / todo!()), ts=2026-09-27T04:59:20-03:00
 - iter 9 (round 2, 4): APPROVED_PENDING_MANUAL (2 warns: W-1 audit, W-2 two toasts outside pseudo states), hash=40e2da24aa72, commit=19f86b3, ts=2026-09-27T05:23:32-03:00 — critic não rodado: W-2 é a classe que ele acharia; rodada de warnings (iter 10) disparada
+- iter 10 (round 2, 5): APPROVED_PENDING_MANUAL (1 warn: W-1), hash=583b196a9ea2, commit=abfafab, ts=2026-09-27T06:05:08-03:00
+- iter 10 aggregate after DoD critic: BLOCKED (critic: 3 rows — TODO verify read nothing (orchestrator bug), //! todo, generic confirm-dialog note outside pseudo states), ts=2026-09-27T06:05:08-03:00
+--- AUTO-RESET 2 (iter cap 5 of round 2 reached; /jdi-issue takes Continue automatically; 1 reset left before kill) at 2026-09-27T06:05:08-03:00 ---
