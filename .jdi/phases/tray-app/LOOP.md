@@ -1,9 +1,9 @@
 ---
 phase_slug: tray-app
 phase_position: 5
-iter: 4
-total_resets: 2
-status: running
+iter: 5
+total_resets: 3
+status: killed
 max_iter_per_round: 5
 max_resets: 3
 created_at: 2026-09-26T21:35:52-03:00
@@ -38,3 +38,6 @@ created_at: 2026-09-26T21:35:52-03:00
 - iter 13 aggregate after DoD critic: BLOCKED (critic: 2 rows — platform csp:null erases the CSP; untranslated one-word announce via ternary), ts=2026-09-27T09:05:25-03:00
 - iter 14 (round 3, 4): APPROVED_PENDING_MANUAL (2 warns: W-1 audit; W-2 C8 verify comment bypass → fixed by orchestrator), hash=7e386f0b11ac, commit=3c1bb2d, ts=2026-09-27T09:35:19-03:00
 - iter 14 aggregate after DoD critic: BLOCKED (critic: 1 row — Windows platform file csp:null outside the Linux-merged effective check), ts=2026-09-27T09:49:31-03:00
+- iter 15 (round 3, 5): APPROVED_PENDING_MANUAL (1 warn: W-1), hash=002a7a45cee7, commit=c04133d, ts=2026-09-27T10:23:13-03:00
+- iter 15 aggregate after DoD critic: BLOCKED (critic: 2 rows — TODO verifies miss a lowercase marker mid-comment and 'To do:'; code has no TODO), ts=2026-09-27T10:23:13-03:00
+--- iter cap 5 of round 3 reached: /jdi-issue takes Continue → reset 3/3 → KILLED (15 iterations absolute). Nada é enviado; retomada só com /jdi-loop tray-app --reset-loop confirmado por humano, depois de revisar CONTEXT.md. 2026-09-27T10:23:13-03:00 ---
