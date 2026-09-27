@@ -28,9 +28,6 @@ const realTimers = Object.freeze({
 const DEV_PROTOCOLS = new Set(['http:', 'https:']);
 const DEV_HOSTS = new Set(['localhost', '127.0.0.1']);
 
-/** Why every command fails when the page is neither in Tauri nor on a dev server. */
-export const UNAVAILABLE_MESSAGE = 'the Tauri API is missing from this window, so no monitor can be reached';
-
 /** The command behind `listen` in Tauri's own script. */
 const EVENT_LISTEN = 'plugin:event|listen';
 
@@ -107,9 +104,12 @@ function tauriBridge(tauri) {
 
 // No event ever comes, so listening succeeds and does nothing: the first
 // command already shows the error, and a second message would repeat it.
+// The error has no message: no backend answered, so there is none to show
+// as data, and the kind's text, translated, says what went wrong
+// (D-2026-09-27-tray-app-9).
 function unavailableBridge() {
   const invoke = async () => {
-    throw uiError('backend_unavailable', UNAVAILABLE_MESSAGE);
+    throw uiError('backend_unavailable', '');
   };
   const listen = async () => () => {};
   return api('unavailable', invoke, listen);

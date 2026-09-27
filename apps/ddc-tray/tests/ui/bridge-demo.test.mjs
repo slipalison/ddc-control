@@ -2,13 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import {
-  DEMO_LATENCY_MS,
-  UNAVAILABLE_MESSAGE,
-  createBridge,
-  isLocalDevServer,
-  normalizeError,
-} from '../../src/bridge.js';
+import { DEMO_LATENCY_MS, createBridge, isLocalDevServer, normalizeError } from '../../src/bridge.js';
 import { FAILURES, SCENARIOS, failingCommands, scenarioName } from '../../src/demo-data.js';
 
 const RTK = 'RTK-RTK-QHD-HDR-01010101';
@@ -82,7 +76,9 @@ async function refusals(bridge) {
   return answers;
 }
 
-const UNAVAILABLE = Object.freeze({ kind: 'backend_unavailable', message: UNAVAILABLE_MESSAGE });
+// No backend answered, so there is no message to pass on: the popup shows
+// the kind's text alone, translated (D-2026-09-27-tray-app-9).
+const UNAVAILABLE = Object.freeze({ kind: 'backend_unavailable', message: '' });
 
 test('outside a local dev server the bridge never falls back to the demo', async () => {
   const pages = [

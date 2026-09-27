@@ -1,10 +1,11 @@
 // Inside the app the popup never shows simulated values
 // (D-2026-09-27-tray-app-6): at the origin the Windows webview gives it,
 // `http://tauri.localhost`, a page without `window.__TAURI__` reports the
-// backend as unavailable instead of falling back to the demo. The files are
-// the ones the suite's server sends, under the same CSP.
+// backend as unavailable instead of falling back to the demo, in the
+// user's language alone: no backend answered, so there is no message to
+// show as data (D-2026-09-27-tray-app-9). The files are the ones the
+// suite's server sends, under the same CSP.
 
-import { UNAVAILABLE_MESSAGE } from '../../src/bridge.js';
 import { CSP, expect, expectAccessible, open, powerButton, retryButton, t, test } from './support.mjs';
 
 const APP_ORIGIN = 'http://tauri.localhost';
@@ -29,7 +30,8 @@ for (const path of ['/', '/?demo=rtk']) {
     await expect(
       page.getByRole('heading', { name: t('error.backend_unavailable'), exact: true }),
     ).toBeVisible();
-    await expect(page.locator('#message-detail')).toHaveText(UNAVAILABLE_MESSAGE);
+    await expect(page.locator('#message-detail')).toBeHidden();
+    await expect(page.locator('#message-detail')).toHaveText('');
     await expect(retryButton(page)).toBeVisible();
     await expect(page.locator('#panel')).toBeHidden();
     await expect(powerButton(page)).toBeHidden();
