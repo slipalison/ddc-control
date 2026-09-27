@@ -9,7 +9,10 @@
 // carries the marks is a translation passed off as data. Readable
 // attributes follow the same rule. The states include the failures the
 // demo's `&fail=` brings about (a write, "all settings", the probe timing
-// out) and the waits a user sees, because their texts show nowhere else.
+// out; listening to the tray, hiding the popup refused) and the waits a
+// user sees, because their texts show nowhere else: every toast the
+// popup's scripts show has a state here (`TOAST_STATES`, held to the
+// scripts by tests/ui/toast-states.test.mjs).
 
 import { readFileSync } from 'node:fs';
 import {
@@ -53,7 +56,10 @@ const TWO_MONITORS = '/?demo=two-monitors';
 const TV = 'LG TV SSCR2';
 const DELL = 'DELL U2723QE';
 
-/** The RTK, with the demo timing out the commands `what` names (`write`, `features`, `probe`). */
+/**
+ * The RTK, with the demo failing the commands `what` names: `write`,
+ * `features`, `probe` time out; `events`, `hide` are refused.
+ */
 const rtkFailing = (what) => `${RTK}&fail=${what}`;
 
 function withPseudo(path) {
@@ -270,7 +276,38 @@ const STATES = [
       await expect(page.locator('#probe')).toHaveAttribute('aria-disabled', 'false');
     },
   },
+  {
+    name: 'rtk after listening to the tray was refused',
+    path: rtkFailing('events'),
+    state: 'ready',
+    reach: toastShows,
+  },
+  {
+    name: 'rtk after hiding the popup was refused',
+    path: rtkFailing('hide'),
+    state: 'ready',
+    reach: async (page) => {
+      await page.keyboard.press('Escape');
+      await toastShows(page);
+    },
+  },
 ];
+
+/**
+ * Every mention of `showToast` in the popup's scripts but its definition,
+ * as `file › function it sits in`, with the state above that shows its
+ * toast: no other state shows that toast's text. Each state here must show
+ * the toast. tests/ui/toast-states.test.mjs reads this list and fails a
+ * mention the scripts gain without a state of its own.
+ */
+const TOAST_STATES = [
+  { site: 'app.js › listen', state: 'rtk after listening to the tray was refused' },
+  { site: 'app.js › hideOnEscape', state: 'rtk after hiding the popup was refused' },
+  { site: 'app.js › writeFailed', state: 'rtk after a brightness write that timed out' },
+  { site: 'app.js › probe', state: 'rtk after a probe that timed out' },
+];
+
+const SHOWS_A_TOAST = new Set(TOAST_STATES.map(({ state }) => state));
 
 /**
  * What `document` shows that is neither translated nor data, as problems:
@@ -358,10 +395,18 @@ for (const { name, path, state, bridge, reach } of STATES) {
     if (bridge) await serveBridge(page, bridge);
     await open(page, withPseudo(path), state);
     await reach?.(page);
+    if (SHOWS_A_TOAST.has(name)) await toastShows(page);
     await expectEveryTextTranslatedOrData(page);
     await expectAccessible(page);
   });
 }
+
+test('every toast state is a state checked here, and each has its own', () => {
+  const names = STATES.map(({ name }) => name);
+
+  expect([...SHOWS_A_TOAST].filter((state) => !names.includes(state))).toEqual([]);
+  expect(SHOWS_A_TOAST.size).toBe(TOAST_STATES.length);
+});
 
 // The page's clock stands still, so the demo never answers and the popup
 // stays loading. (Axe waits on timers too, so it has no run here.)
