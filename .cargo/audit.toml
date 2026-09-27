@@ -1,0 +1,40 @@
+# cargo-audit policy (D-2026-09-27-ci-crossbuild-6).
+#
+# `cargo audit`, run from the repository root, reads this file on its own.
+# Every entry below was measured with `cargo tree -i <crate> --target all
+# --locked` on 2026-09-27 and names: the dependency path, why ddc-control does
+# not reach the affected code, and the event that must trigger a re-check.
+# Nothing else in `[advisories]` may hide a finding: no `severity_threshold`,
+# no `informational_warnings` override, no `--ignore` on the command line.
+# To re-evaluate, delete an entry and run `cargo audit`: it must fail and name
+# the advisory, or the entry is stale and stays deleted.
+
+[advisories]
+ignore = [
+    # serde_yaml 0.7.5 — uncontrolled recursion when deserializing hostile
+    # YAML (vulnerability). Path: ddc-adapters -> ddc-hi 0.4.1 -> mccs-db
+    # 0.1.3 -> serde_yaml. ddc-hi only calls `mccs_db::Database::from_version`,
+    # which parses the `data/mccs.yml` compiled into mccs-db with
+    # `include_bytes!`; ddc-control never calls `Database::from_database` and
+    # never hands YAML from a monitor, a file or the user to it.
+    # Re-check when ddc-hi or mccs-db release a version off serde_yaml 0.7.
+    "RUSTSEC-2018-0005",
+    # proc-macro-error 1.0.4 — unmaintained. Path: glib-macros 0.18.5 and
+    # gtk3-macros 0.18.2 (proc-macros of the gtk-rs 0.18 stack that
+    # webkit2gtk/tao/wry pull for Tauri on Linux). It only runs at compile
+    # time, inside rustc; no ddc-control binary links it.
+    # Re-check when Tauri/wry move off gtk-rs 0.18 (gtk4 or glib >= 0.20).
+    "RUSTSEC-2024-0370",
+    # yaml-rust 0.4.5 — unmaintained. Path: ddc-hi 0.4.1 -> mccs-db 0.1.3 ->
+    # serde_yaml 0.7.5 -> yaml-rust. Same reach as the serde_yaml entry: it
+    # only ever parses the YAML embedded in mccs-db.
+    # Re-check with the serde_yaml entry, when ddc-hi or mccs-db are bumped.
+    "RUSTSEC-2024-0320",
+    # glib 0.18.5 — unsound `Iterator`/`DoubleEndedIterator` for
+    # `glib::VariantStrIter`. Path: gtk/gdk/webkit2gtk 0.18 -> glib, Linux
+    # target only (Tauri's webview and windowing). Neither ddc-control nor any
+    # crate in Cargo.lock calls `VariantStrIter`/`Variant::str_iter` (grep of
+    # the registry sources, 2026-09-27).
+    # Re-check when Tauri/wry move to glib >= 0.20.
+    "RUSTSEC-2024-0429",
+]
