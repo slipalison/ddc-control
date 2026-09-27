@@ -1,6 +1,6 @@
 # Phase 4: Review  (slug: full-osd-control)
 
-**Verdict:** APPROVED_PENDING_MANUAL
+**Verdict:** APPROVED
 
 Iteração 2 do loop. Esta review substitui a da iter 1 (`4ed9b02`, agregado BLOCKED pelo DoD critic) e cobre `18f9494..HEAD` (`2363bc7`), com foco no delta `4ed9b02..HEAD`: `a2f5fda`, `f3dc39d`, `2def274`, `6df4c07`, `8a09f06` e `2363bc7`, julgados contra a D-2026-09-26-full-osd-control-10 (`8fb334c`).
 
@@ -135,8 +135,8 @@ Iteração 2 do loop. Esta review substitui a da iter 1 (`4ed9b02`, agregado BLO
 | 1 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | exit 0: 247 passed, 0 failed, 7 ignored (Gate 2) |
 | 2 | Coverage >= 80% of lines | PROJECT | Auto | PASS | TOTAL 96.10% lines (Gate 3, main.rs/build.rs excluded) |
 | 3 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | Verify OK: grep vazio em `src/ crates/ apps/` |
-| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: só `## [Unreleased]` (`:8`), sem heading versionado `## [x.y.z]`. Changed `:44` (recusa só `0x02`) e `:45` (0x1E/0xCA com valores MCCS, `--yes`, byte de botões zero); Fixed `:54` (resposta de outro código). Nit: `:45` omite que 0x1E também aceitava qualquer valor ≤ max antes |
-| 5 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: status fase 4 (`:5`); exemplos com `1/2 OSD disabled` e `0/1 Off` (`:115`, `:141`, `:159`); catálogo 0x1E/0xCA com valores (`:216`, `:234`); regra das listas (`:243`); Known limitations 0x02/0xCA/0x1E (`:252-254`) e 0xAE dependente do modo (`:259`); "Replies for another code" com a validação no worker |
+| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | CONFIRMED | suggested: só `## [Unreleased]` (`:8`), sem heading versionado `## [x.y.z]`. Changed `:44` (recusa só `0x02`) e `:45` (0x1E/0xCA com valores MCCS, `--yes`, byte de botões zero); Fixed `:54` (resposta de outro código). Nit: `:45` omite que 0x1E também aceitava qualquer valor ≤ max antes |
+| 5 | README accurately describes current behavior | PROJECT | Manual | CONFIRMED | suggested: status fase 4 (`:5`); exemplos com `1/2 OSD disabled` e `0/1 Off` (`:115`, `:141`, `:159`); catálogo 0x1E/0xCA com valores (`:216`, `:234`); regra das listas (`:243`); Known limitations 0x02/0xCA/0x1E (`:252-254`) e 0xAE dependente do modo (`:259`); "Replies for another code" com a validação no worker |
 | 6 | Catálogo cobre os códigos observados com kind/access/risk travados + invariante RO≠Dangerous + novos Dangerous | CONTEXT | Auto | PASS | OK: `test result: ok. 1 passed; 0 failed` (39 códigos, D-8d; 0x1E/0xCA seguem `Dangerous`) |
 | 7 | `value_name` para 0x14/0x60/0xCC/0xD6 e os 4 resets | CONTEXT | Auto | PASS | OK: agora fixa as 10 listas por igualdade e quais códigos têm lista; mutação `(0x0E,"Italian")` reproduzida pelo reviewer derruba o teste |
 | 8 | `validate_write` rejeita `Table` antes de access/lista/max | CONTEXT | Auto | PASS | OK |
@@ -152,7 +152,7 @@ Iteração 2 do loop. Esta review substitui a da iter 1 (`4ed9b02`, agregado BLO
 
 **Totals:** 17 items | Auto: 15 (15 PASS, 0 FAIL) | Manual: 2 pending
 
-**Manual confirmation required** (only if any MANUAL_REQUIRED item exists):
+**Manual confirmation required** (only while a manual item is still pending):
 Run `/jdi-confirm-dod full-osd-control` to confirm each manual item with evidence. Without that, `/jdi-ship` will refuse the phase.
 
 ## Recommendation
@@ -177,3 +177,14 @@ Próximos passos:
 Forçado pelo `/jdi-issue` na iteração 2: 0 linhas hollow (critic retornou `[]`). A linha 7 deixou de ser hollow — as listas de valores do catálogo estão fixadas por igualdade.
 
 **Verdict:** APPROVED
+
+## DoD Manual Confirmations
+
+- [x] CHANGELOG.md updated with entry per release
+      **Confirmed at:** 2026-09-27T15:34:39Z
+      **By:** alison amorim
+      **Evidence:** PR #7 (1bca909) revisado e mergeado pelo mantenedor; a entrada da phase está em `## [Unreleased]` do CHANGELOG.md. Nenhuma versão foi lançada ainda: o heading `## [versão]` passa a ser cortado pelo fluxo de release (phase `release-packaging`). Confirmado pelo usuário em 2026-09-27.
+- [x] README accurately describes current behavior
+      **Confirmed at:** 2026-09-27T15:34:39Z
+      **By:** alison amorim
+      **Evidence:** diff do README revisado no PR #7 (1bca909) e mergeado na `main`. Confirmado pelo usuário em 2026-09-27.

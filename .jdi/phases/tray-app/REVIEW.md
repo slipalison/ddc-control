@@ -1,6 +1,6 @@
 # Phase 5: Review  (slug: tray-app)
 
-**Verdict:** APPROVED_PENDING_MANUAL
+**Verdict:** APPROVED_WITH_WARNINGS
 
 Loop reiniciado, iteração 4. Re-verificação completa (gates 1-8), escrita do zero sobre o HEAD `c8578ab`.
 
@@ -84,8 +84,8 @@ Nenhum.
 | 20 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | exit 0, `OK` (386 passed, 0 failed, 9 ignored) |
 | 21 | Coverage >= 80% of lines | PROJECT | Auto | PASS | Literal (`cargo llvm-cov --workspace --summary-only`): TOTAL lines 82.93%, exit 0. Gate 3: 83.36% |
 | 22 | No TODO/FIXME without linked issue (`*.rs`) | PROJECT | Auto | PASS | exit 0, `OK` (Verify da D-15, `LC_ALL=C.UTF-8`). As sondas em `.rs` (C, D, `@todo`, `todo!`, `unimplemented!`, `todo(#1) and todo`) reprovam, e `TODO(#12)` sozinho passa |
-| 23 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: só existe o heading `## [Unreleased]` (`CHANGELOG.md:8`), sem `## [version]`. A entrada do `ddc-tray` está em `CHANGELOG.md:40` |
-| 24 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: seção `## Tray app` (`README.md:265`), com Build and run (`:290`), Using it (`:308`), Browser demo (`:327`), Tests (`:352`) e Known limitations of the tray app (`:374`). Screenshots em `:275-276` |
+| 23 | CHANGELOG.md updated with entry per release | PROJECT | Manual | CONFIRMED | suggested: só existe o heading `## [Unreleased]` (`CHANGELOG.md:8`), sem `## [version]`. A entrada do `ddc-tray` está em `CHANGELOG.md:40` |
+| 24 | README accurately describes current behavior | PROJECT | Manual | CONFIRMED | suggested: seção `## Tray app` (`README.md:265`), com Build and run (`:290`), Using it (`:308`), Browser demo (`:327`), Tests (`:352`) e Known limitations of the tray app (`:374`). Screenshots em `:275-276` |
 
 **Totals:** 24 items | Auto: 22 (22 PASS, 0 FAIL) | Manual: 2 pending
 
@@ -109,3 +109,14 @@ W-6 era do `Verify:` do C18 (orquestrador): D-2026-09-27-tray-app-16 exige que o
 - DoD row «18 (TODO)» — suspeita, não objetiva: um placeholder `'todo: traduzir'` como VALOR de string do `pt-BR.js` passa (isenção decidida em D-13/D-15: strings do locale são português; `'TODO: traduzir'` e `fixme` reprovam), e grafias fora do padrão sem `:`/`(` (`TO-DO fix`, `FIX-ME:`, `Fix me:`) também. Todas as demais formas testadas reprovam em todos os tipos de arquivo.
 
 **Verdict:** APPROVED_WITH_WARNINGS
+
+## DoD Manual Confirmations
+
+- [x] CHANGELOG.md updated with entry per release
+      **Confirmed at:** 2026-09-27T15:34:40Z
+      **By:** alison amorim
+      **Evidence:** PR #8 (c352118) revisado e mergeado pelo mantenedor; a entrada da phase está em `## [Unreleased]` do CHANGELOG.md. Nenhuma versão foi lançada ainda: o heading `## [versão]` passa a ser cortado pelo fluxo de release (phase `release-packaging`). Confirmado pelo usuário em 2026-09-27.
+- [x] README accurately describes current behavior
+      **Confirmed at:** 2026-09-27T15:34:40Z
+      **By:** alison amorim
+      **Evidence:** diff do README revisado no PR #8 (c352118) e mergeado na `main`. Confirmado pelo usuário em 2026-09-27.
