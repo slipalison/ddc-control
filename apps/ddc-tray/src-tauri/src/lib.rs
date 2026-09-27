@@ -9,8 +9,11 @@
 
 pub mod commands;
 pub mod dto;
+pub mod i18n;
+pub mod menu;
 pub mod panel;
 pub mod popup;
+pub mod tray;
 
 use std::fmt::Display;
 use std::sync::Arc;
@@ -61,9 +64,12 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_popup(app);
         }))
+        // Tracks where the tray icon is, to anchor the popup to it.
+        .plugin(tauri_plugin_positioner::init())
         .setup(|app| {
             app.manage(AppState::new(compose_osd()));
             app.manage(PopupGate::new());
+            tray::install(app.handle())?;
             Ok(())
         })
         .on_window_event(hide_popup_on_leave)
