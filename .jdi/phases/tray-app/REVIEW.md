@@ -91,3 +91,11 @@ Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Witho
 ## Nota do orquestrador (pós-review, antes do critic)
 
 W-5 era do `Verify:` do C18 (orquestrador): emenda 2 da D-2026-09-27-tray-app-14 — no `pt-BR.js` as strings são removidas e a palavra reprova em qualquer ponto do resto. OK em `LC_ALL=C` e `pt_BR.UTF-8`; reprova continuação de bloco `/* … */` sem `*` e `// todo:`; aceita strings portuguesas, inclusive com `//` dentro. O índice `.jdi/DECISIONS.md` é view gerada (`npx jdi-cli render`).
+
+## DoD Critic (enhanced)
+
+- DoD row «18 (TODO repo-wide)»: no `pt-BR.js`, `// Don't shorten it: todo check that it still fits the 360px popup, it's the longest text.` passa — o `sed` que removia strings tomou os apóstrofos do comentário como aspas e engoliu o `todo`.
+- Suspeitas também demonstradas (objective:false no «22», mas corrigidas junto): `// To-dos: …` (plural com hífen) e `// TODO(#12): … FIXME: …` (o filtro de referência descartava a linha inteira).
+- Correção do orquestrador: D-2026-09-27-tray-app-15 (tokenizador JS no `pt-BR.js`, referência por ocorrência, `to-do(s):`).
+
+**Verdict:** BLOCKED

@@ -47,7 +47,7 @@ ddc-control
       **Verify:** `cargo llvm-cov --workspace --summary-only` → coluna Lines >= 80%
       **Source:** PROJECT
 - [ ] No `TODO`/`FIXME` without linked issue reference
-      **Verify:** `export LC_ALL=C.UTF-8; REF='\b(to[ -]?do|fixme)s?\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+'; ! grep -RInE '\b(TODO|FIXME)(S|s)?\b|\b(todo|unimplemented)!\(' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vEi "$REF" | grep -q . && ! grep -RInEi '\b(todo|fixme)s?\b|\bto[ -]do\b[[:space:]]*[:(]' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vEi "$REF" | grep -q . && echo OK` (D-2026-09-27-tray-app-4/-8/-9/-12/-13/-14: referência de issue colada ao marcador; `todo`/`fixme` como palavra em QUALQUER ponto e qualquer caixa, `todo!`/`unimplemented!`, `To do:`)
+      **Verify:** `export LC_ALL=C.UTF-8; STRIP='s/\b(to[ -]?dos?|fixmes?)\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+\)?//Ig'; W='\b(todo|fixme)s?\b|\bto[ -]dos?\b[[:space:]]*[:(]|\bunimplemented!\('; ! grep -RInEi "$W" --include='*.rs' src/ crates/ apps/ 2>/dev/null | sed -E "$STRIP" | grep -Eiq "$W" && echo OK` (D-2026-09-27-tray-app-4/-8/-9/-12/-13/-14/-15: `todo`/`fixme` como palavra em qualquer ponto e caixa, `to-do(s):`, `unimplemented!`; referência de issue vale por OCORRÊNCIA — só o marcador referenciado é removido antes da busca)
       **Source:** PROJECT
 
 ### Manual
