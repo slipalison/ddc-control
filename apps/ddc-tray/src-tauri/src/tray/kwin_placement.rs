@@ -4,19 +4,22 @@
 //! interface: each time the popup is mapped, the script moves it next to the
 //! pointer — the icon or menu item it was opened from — inside the work
 //! area of that screen. The script is loaded at start and unloaded when the
-//! app quits; one left by a crash only matches its own process id, and the
-//! next start replaces it.
+//! app quits, through its **Quit** item or a stop signal (SIGTERM, SIGINT,
+//! SIGHUP); one left by a SIGKILL or a crash only matches its own process
+//! id, and the next start replaces it.
 //!
 //! Anywhere else — X11, another desktop, a KWin without scripting — nothing
 //! is loaded and the popup opens where the compositor puts it; a failure is
 //! only a diagnostic line.
 
 use std::ffi::OsStr;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use zbus::Connection;
 
-use crate::diagnose;
+use crate::{diagnose, report};
 
 /// The script, with [`PID_MARK`] where the app's process id goes.
 const SCRIPT: &str = include_str!("../../kwin/anchor.js");
@@ -34,6 +37,15 @@ const KWIN: &str = "org.kde.KWin";
 const SCRIPTING_PATH: &str = "/Scripting";
 const SCRIPTING: &str = "org.kde.kwin.Scripting";
 const SCRIPT_INTERFACE: &str = "org.kde.kwin.Script";
+
+/// How long the app waits for D-Bus while it quits: a KWin that does not
+/// answer must not keep the app from quitting.
+const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// A script the app loaded into KWin, to unload as it quits.
+pub(super) struct LoadedScript {
+    path: PathBuf,
+}
 
 /// Whether the session can take the script: Wayland under KDE Plasma, as
 /// `XDG_SESSION_TYPE` and `XDG_CURRENT_DESKTOP` say.
@@ -62,38 +74,72 @@ pub(super) fn script_path(runtime_dir: Option<&OsStr>) -> Option<PathBuf> {
     dir.is_absolute().then(|| dir.join(SCRIPT_FILE))
 }
 
-/// Loads the script into KWin when the session takes it.
-pub(super) async fn install() {
+/// Loads the script into KWin when the session takes it, and answers what
+/// it loaded.
+pub(super) async fn install() -> Option<LoadedScript> {
     let session_type = std::env::var_os("XDG_SESSION_TYPE");
     let desktop = std::env::var_os("XDG_CURRENT_DESKTOP");
     if !applies(session_type.as_deref(), desktop.as_deref()) {
-        return;
+        return None;
     }
     let Some(path) = script_path(std::env::var_os("XDG_RUNTIME_DIR").as_deref()) else {
         diagnose("popup placement unavailable: no XDG_RUNTIME_DIR to write its script to");
-        return;
+        return None;
     };
     match load(&path).await {
-        Ok(id) => diagnose(&format!("popup placement loaded into KWin as script {id}")),
-        Err(error) => diagnose(&format!("popup placement unavailable: {error}")),
+        Ok(id) => {
+            diagnose(&format!("popup placement loaded into KWin as script {id}"));
+            Some(LoadedScript { path })
+        }
+        Err(error) => {
+            diagnose(&format!("popup placement unavailable: {error}"));
+            None
+        }
     }
 }
 
-/// Unloads the script, if one is loaded under the app's name.
-pub(super) async fn uninstall() {
-    let Ok(connection) = Connection::session().await else {
-        return;
-    };
-    if unload(&connection).await.unwrap_or(false) {
-        diagnose("popup placement unloaded from KWin");
+/// Unloads `script` from KWin and removes its file, as the app quits,
+/// waiting at most [`QUIT_TIMEOUT`] for D-Bus.
+pub(super) async fn uninstall(script: &LoadedScript) {
+    let action = "unload the popup placement from KWin";
+    match tokio::time::timeout(QUIT_TIMEOUT, unload_from_session()).await {
+        Ok(Ok(true)) => diagnose("popup placement unloaded from KWin"),
+        Ok(Ok(false)) => diagnose("popup placement was no longer loaded in KWin"),
+        Ok(Err(error)) => report(action, &error),
+        Err(_) => report(action, &format!("no answer within {QUIT_TIMEOUT:?}")),
     }
-    if let Some(path) = script_path(std::env::var_os("XDG_RUNTIME_DIR").as_deref()) {
-        let _ = std::fs::remove_file(path);
+    discard(&script.path);
+}
+
+/// Removes the script's file, which only KWin reads. A failure is only
+/// reported: the file lies in the user's runtime directory, which the
+/// session empties at logout, and the next start overwrites it.
+fn discard(path: &Path) {
+    if let Err(error) = remove_script(path) {
+        report("remove the popup placement script", &error);
     }
 }
 
+/// Removes the file at `path`; one already gone counts as removed.
+fn remove_script(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Writes the script to `path` and has KWin load and run it; a script KWin
+/// did not take is not left behind.
 async fn load(path: &Path) -> Result<i32, String> {
     std::fs::write(path, script_for(std::process::id())).map_err(|error| error.to_string())?;
+    let loaded = load_written(path).await;
+    if loaded.is_err() {
+        discard(path);
+    }
+    loaded
+}
+
+async fn load_written(path: &Path) -> Result<i32, String> {
     let connection = Connection::session()
         .await
         .map_err(|error| error.to_string())?;
@@ -128,6 +174,10 @@ async fn load(path: &Path) -> Result<i32, String> {
     Ok(id)
 }
 
+async fn unload_from_session() -> zbus::Result<bool> {
+    unload(&Connection::session().await?).await
+}
+
 async fn unload(connection: &Connection) -> zbus::Result<bool> {
     connection
         .call_method(
@@ -145,9 +195,9 @@ async fn unload(connection: &Connection) -> zbus::Result<bool> {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::{PID_MARK, SCRIPT, applies, script_for, script_path};
+    use super::{PID_MARK, SCRIPT, applies, remove_script, script_for, script_path};
 
     fn os(value: &str) -> Option<&OsStr> {
         Some(OsStr::new(value))
@@ -183,6 +233,32 @@ mod tests {
         for runtime_dir in [None, os(""), os("run/user/1000"), os("./tmp")] {
             assert_eq!(script_path(runtime_dir), None, "{runtime_dir:?}");
         }
+    }
+
+    /// A path of its own in the temporary directory, for one test.
+    fn scratch(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("ddc-tray-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn removing_the_script_removes_its_file_and_a_gone_one_is_fine() {
+        let path = scratch("remove-script.js");
+        std::fs::write(&path, "script").unwrap();
+
+        assert!(remove_script(&path).is_ok());
+        assert!(!path.exists());
+        assert!(remove_script(&path).is_ok(), "already gone");
+    }
+
+    #[test]
+    fn a_script_that_cannot_be_removed_is_an_error() {
+        let path = scratch("remove-script-dir");
+        std::fs::create_dir(&path).unwrap();
+
+        let removed = remove_script(&path);
+
+        std::fs::remove_dir(&path).unwrap();
+        assert!(removed.is_err());
     }
 
     #[test]

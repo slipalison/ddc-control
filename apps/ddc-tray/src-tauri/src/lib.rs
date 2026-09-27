@@ -15,6 +15,8 @@ pub mod menu;
 pub mod panel;
 pub mod popup;
 pub mod scroll;
+#[cfg(target_os = "linux")]
+mod stop_signals;
 pub mod tray;
 
 use std::ffi::OsStr;
@@ -114,6 +116,9 @@ pub fn run() -> Result<(), tauri::Error> {
             app.manage(AppState::new(compose_osd()));
             app.manage(PopupGate::new());
             tray::install(app.handle())?;
+            // So the KWin script is unloaded however the app is stopped.
+            #[cfg(target_os = "linux")]
+            stop_signals::quit_on_stop_signals(app.handle());
             Ok(())
         })
         .on_window_event(hide_popup_on_leave)

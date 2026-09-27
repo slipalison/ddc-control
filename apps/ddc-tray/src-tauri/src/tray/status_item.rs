@@ -14,9 +14,9 @@ use ksni::menu::StandardItem;
 use ksni::{Category, Handle, Icon, MenuItem, Orientation, ToolTip, TrayMethods};
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
+use super::kwin_placement::{self, LoadedScript};
 use super::{
-    APP_NAME, TRAY_ID, brightness_changed, kwin_placement, on_main_thread, report_ui,
-    run_menu_action, toggle_popup,
+    APP_NAME, TRAY_ID, brightness_changed, on_main_thread, report_ui, run_menu_action, toggle_popup,
 };
 use crate::commands::{AppState, on_blocking_thread};
 use crate::i18n::Locale;
@@ -39,7 +39,12 @@ struct StatusItem<R: Runtime> {
 /// up after the app, as at login; a D-Bus failure is only reported. On
 /// KDE Plasma under Wayland, also has KWin place the popup.
 pub(super) fn install<R: Runtime>(app: &AppHandle<R>, locale: Locale) -> tauri::Result<()> {
-    tauri::async_runtime::spawn(kwin_placement::install());
+    let placement = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(script) = kwin_placement::install().await {
+            placement.manage(script);
+        }
+    });
     let item = StatusItem {
         app: app.clone(),
         locale,
@@ -59,9 +64,12 @@ pub(super) fn install<R: Runtime>(app: &AppHandle<R>, locale: Locale) -> tauri::
     Ok(())
 }
 
-/// Unloads the popup's placement from KWin; the item goes with the process.
-pub(super) fn uninstall<R: Runtime>(_app: &AppHandle<R>) {
-    tauri::async_runtime::block_on(kwin_placement::uninstall());
+/// Unloads the popup's placement from KWin, when the app loaded it; the
+/// item goes with the process.
+pub(super) fn uninstall<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(script) = app.try_state::<LoadedScript>() {
+        tauri::async_runtime::block_on(kwin_placement::uninstall(&script));
+    }
 }
 
 /// Asks the host to read the tooltip again: it names the monitor selected.

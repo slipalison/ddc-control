@@ -43,6 +43,10 @@ ksni = { version = "0.3.6", default-features = false, features = ["tokio"] }
 # Loads the popup-placement script into KWin on KDE Plasma under Wayland
 # (D-2026-09-27-tray-app-3); already in the tree through ksni.
 zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+# Tauri's runtime, named for two features it already builds with: `signal`,
+# so SIGTERM/SIGINT/SIGHUP quit the app as its Quit item does and the KWin
+# script is unloaded, and `time`, to bound that unload.
+tokio = { version = "1.53.1", default-features = false, features = ["signal", "time"] }
 
 [lints]
 workspace = true
