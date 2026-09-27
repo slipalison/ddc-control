@@ -743,11 +743,11 @@ A demo diverge: o `silent` do `bridge.js` rejeita com `timeout`, então o `two-m
 | `cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` | TOTAL lines **88.70%** (2726 linhas, 308 sem cobertura) |
 
 ## Tests
-- Total: 371 (Rust, `cargo test --workspace --locked`) + 9 ignored (hardware, `DDC_HW_TESTS=1`), medido na iteração 3 (iteração 2: 344 + 9; T-8: 339 + 8)
-- Passing: 371
-- Coverage: 83.98% (`cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`, TOTAL lines, medido na iteração 3; iteração 2: 88.79%; T-8: 88.70%). Sem o filtro (Verify literal do PROJECT): 83.54%.
-- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 124 passing, 0 failing, 0 cancelled (iteração 3; iteração 2: 84; T-8: 83)
-- Playwright (`cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test --reporter=list`): 52 passing, 0 failing, 6 skipped (screenshots sem `SCREENSHOTS=1`), iteração 3 (iteração 2: 36 + 4)
+- Total: 383 (Rust, `cargo test --workspace --locked`) + 9 ignored (hardware, `DDC_HW_TESTS=1`), medido na iteração 4 (iteração 3: 371 + 9; iteração 2: 344 + 9; T-8: 339 + 8)
+- Passing: 383
+- Coverage: 83.22% (`cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`, TOTAL lines, medido na iteração 4; iteração 3: 83.98%; iteração 2: 88.79%; T-8: 88.70%). Sem o filtro (Verify literal do PROJECT): 82.78%.
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 124 passing, 0 failing, 0 cancelled, 0 skipped, 0 todo (iteração 4 = iteração 3; iteração 2: 84; T-8: 83)
+- Playwright (`cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test --reporter=list`): 52 passing, 0 failing, 6 skipped (screenshots sem `SCREENSHOTS=1`), iteração 4 (iteração 2: 36 + 4). Com `SCREENSHOTS=1`, o `screenshots.spec.mjs` roda 6 de 6 (iteração 3: 4 + 2 pulados).
 
 ## Iteração 2 — correções da review
 
@@ -1138,7 +1138,7 @@ Modo fix, cadeia autônoma do `/jdi-issue`. O usuário testou a versão instalad
 - Screenshots regenerados e conferidos (Read): claro, escuro, diálogo, e um novo `tray-popup-list-light.png` (lista aberta). A regeneração é determinística (3 execuções, SHA-1 iguais).
 
 ### C — bandeja Linux via `ksni`
-- `Cargo.toml`: `tray-icon` e `tauri-plugin-positioner` só em `cfg(not(target_os = "linux"))`; `ksni` 0.3.6 (feature `tokio`, o runtime do Tauri) só no Linux. O `Cargo.lock` ganhou só `ksni` e `pastey`. zbus 5.19 (já na árvore via single-instance) resolve tokio/async-io em tempo de execução (`use_tokio()` checa `Handle::try_current()`), então o single-instance continua igual.
+- `Cargo.toml`: `tray-icon` e `tauri-plugin-positioner` só em `cfg(not(target_os = "linux"))`; `ksni` 0.3.6 (feature `tokio`, o runtime do Tauri) só no Linux. O `Cargo.lock` ganhou três crates: `ksni` 0.3.6, `pastey` 0.2.3 e `tokio-macros` 2.7.2 (este vem da feature `macros` do `tokio`, puxada pelo `ksni` com `tokio`; correção da iteração 4, W-4 — a versão anterior desta frase omitia o `tokio-macros`). zbus 5.19 (já na árvore via single-instance) resolve tokio/async-io em tempo de execução (`use_tokio()` checa `Handle::try_current()`), então o single-instance continua igual.
 - `tray.rs` virou a parte comum (toggle, ações do menu, atalhos); `tray/status_item.rs` (Linux) e `tray/notification_area.rs` (Windows, código antigo). Callbacks do ksni: `activate` → `run_on_main_thread(toggle_popup)` (mesmo gate blur↔clique); `scroll` (vertical) → `WheelQueue::push`; quando pede `Start`, um writer roda em `spawn_blocking` (`on_blocking_thread`) e emite `panel-changed` a cada escrita; menu = `menu_entries(locale, Linux)`; `assume_sni_available(true)` (espera um host que suba depois, como no login).
 - `scroll.rs` (Rust puro sobre `MonitorControl`): notch = 120 (o `angleDelta.y` que o Plasma envia, conferido nas strings do `org.kde.plasma.systemtray.so`: `Plasmoid.scroll(..., wheel.angleDelta.y, "vertical")`), ±5% por notch, 0–100%, sem escrita no limite, resto de notch acumulado e zerado ao inverter o sentido; coalescência: um writer por vez, as notches que chegam durante a escrita viram UMA escrita seguinte. 19 testes com `scroll` no nome (limites, `i32::MAX/MIN`, rajada → 1 escrita, notches durante a escrita → 1 escrita seguinte, sem monitor/timeout → nada escrito e o writer para).
 - Tooltip: título "DDC Control" + "‹monitor› · Role para mudar o brilho" (o `AppState` guarda os rótulos do último `list_monitors`; `select_monitor` pede ao host para reler o tooltip).
@@ -1199,9 +1199,112 @@ Modo fix, cadeia autônoma do `/jdi-issue`. O usuário testou a versão instalad
 ### Desvios e observações
 - **Arquivos novos fora do PLAN original** (todos pedidos nesta iteração): `src/dropdown.js`, `src-tauri/src/scroll.rs` (+`scroll/tests.rs`), `src-tauri/src/tray/{status_item,notification_area,kwin_placement}.rs`, `src-tauri/kwin/anchor.js`, `tests/ui/{dropdown,kwin-anchor}.test.mjs`, `tests/e2e/dropdown.spec.mjs`, `docs/screenshots/tray-popup-list-light.png`.
 - **Contrato:** `select_monitor` passou a receber `AppHandle` (para atualizar o tooltip) e `list_monitors` guarda os rótulos no `AppState`; os argumentos vistos pela UI e os goldens não mudaram.
-- **Dependência:** `zbus` virou dependência direta no Linux (para o `loadScript`), sem crate novo no lock (a D-3 pedia "sem pacote novo": nenhum pacote de sistema nem crate novo além de `ksni`/`pastey` da D-2).
+- **Dependência:** `zbus` virou dependência direta no Linux (para o `loadScript`), sem crate novo no lock (a D-3 pedia "sem pacote novo": nenhum pacote de sistema nem crate novo além dos três da D-2: `ksni`, `pastey` e `tokio-macros` — W-4, corrigido na iteração 4).
 - **Cobertura caiu de 88.79% para 83.98%**: a cola nova (callbacks do ksni, D-Bus do KWin) só roda com sessão gráfica; toda a lógica foi extraída e está em 100% (`scroll.rs`) ou testada em JS (`anchor.js`).
 - **GNOME:** a roda segue a convenção do Plasma (120 por notch, positivo = para longe do usuário); a extensão AppIndicator do GNOME manda outras unidades, então lá a roda pode não andar ou andar ao contrário. Não testado; documentado nas Known limitations, sem código especulativo.
 - **SIGTERM** (o smoke encerra assim) deixa o script do KWin carregado; ele só casa com o PID morto e o próximo start o substitui (o `docs/hardware-validation.md` mostra como descarregar à mão). Depois dos meus smokes descarreguei-o (`unloadScript` → `b true`).
 - Ao esconder pelo ícone aparecem duas linhas `popup hidden` (o hide gera um `Focused(false)`, que esconde de novo uma janela já escondida). Inofensivo; mantido.
 - **Instância do usuário:** encerrada (`pkill -x ddc-tray`) antes de cada smoke/sessão e reaberta logo depois com `setsid -f /home/slipalison/.local/bin/ddc-tray`, conforme o protocolo do orquestrador; nada foi instalado nem alterado em `~/.local`. Popups mostrados na tela: só os necessários (smokes `--activate`, sessão de toggle, 2 sessões da ancoragem).
+
+## Iteração 4 — DoD critic + warnings
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 4 do loop. A iter 3 foi aprovada pelo reviewer (APPROVED_PENDING_MANUAL, W-1..W-4), mas o DoD critic achou 8 linhas ocas. O orquestrador reescreveu o CONTEXT.md e travou a D-2026-09-27-tray-app-5 (`9fde585`). Não editei o CONTEXT. As 8 tasks do PLAN continuam `completed`. O trabalho foi: D-5 (monitor simulado + smoke da roda), Gate 7 em runtime, W-2, W-3, W-4 e a observação de acoplamento. W-1 (`cargo audit`) segue com a `ci-crossbuild`, como a review recomendou.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `79f5a6a` | refactor | D-5: fixture do RTK sai de `panel/tests.rs` para o módulo de produção `src-tauri/src/fixture.rs` (`RTK_ID`, `RTK_CAPS`, `COLOR_TEMP`, `rtk_id`, `rtk_info`, `rtk_monitor`); todos os testes importam de lá, sem cópia. Goldens intocados (`git status` limpo em `tests/fixtures`). |
+| `bb4b1ca` | refactor | Item 6 (observação do reviewer): `shortcut_target` sai de `commands.rs` (que importa `tauri`) para `panel.rs`; `scroll.rs` e `tray.rs` não dependem mais do módulo de comandos. Os 3 testes foram junto, e as 3 cópias do monitor "DEL-U2720Q-7" dos testes viraram um helper `dell_monitor(current, max)` em `panel/tests.rs`. |
+| `b943ca5` | feat | D-5: `DDC_TRAY_FAKE=1` (só `1`) → `compose_osd()` monta `SoftwareOsd` sobre `InMemoryMonitorBackend` com `fixture::rtk_monitor()` e SEMPRE avisa no stderr (`ddc-tray: DDC_TRAY_FAKE=1, serving the simulated RTK monitor; no real monitor is touched`); nunca por padrão; `DdcHiMonitorBackend::new` continua único, em `lib.rs`. `BrightnessChange {monitor_id, before, after}` (em `panel.rs`, puro) é devolvido pelo atalho e pela roda; com `DDC_TRAY_DEBUG=1` cada escrita de brilho da bandeja imprime `ddc-tray: brightness <antes> -> <depois>` (valor lido antes → valor lido de volta). |
+| `2686c09` | test | D-5: `smoke-sni.sh --fake` / `--scroll` e `--activate` com "continua mostrado". Detalhes abaixo. Teste Rust prende o texto que o script espera ao `SIMULATION_NOTICE` do app. |
+| `e49de89` | test | Gate 7: `expectNoNativeSelect(page)` em `tests/e2e/support.mjs` (`page.locator('select')` com contagem 0) roda no `open()` (todo estado assentado), antes de cada `expectAccessible()` e no teardown do fixture `page` (fim de todo teste). Também renomeei a chave `only` do teste de fallback do i18n: o Verify novo do `node --test` a lia como teste focado e falhava no HEAD `9fde585`. |
+| `d2fedba` | fix | W-3: `script_path(runtime_dir)` → `None` sem `XDG_RUNTIME_DIR` (ou com caminho vazio/relativo); o script não é carregado e o popup abre onde o compositor quiser. Sem fallback para `/tmp`. 2 testes puros. |
+| `c2ff8aa` | fix | W-2: SIGTERM/SIGINT/SIGHUP → mesmo `app.exit(0)` do "Sair" (`stop_signals.rs`, `tokio::signal::unix` no runtime do Tauri); um 2º sinal durante a saída sai na hora (exit 1). Descarregar o script espera no máximo 2 s pelo D-Bus (`tokio::time::timeout` em conexão + `unloadScript`). Só descarrega o que o app carregou (`LoadedScript` no estado do app), e não chama mais `org.kde.KWin` fora do KDE Wayland. A remoção do arquivo virou `remove_script` (NotFound conta como removido), com falha reportada no stderr e comentário do porquê. Um load recusado pelo KWin não deixa o arquivo para trás. |
+| `e24c130` | docs | README, CHANGELOG e `docs/hardware-validation.md` (passo 6): ciclo de vida do script (Sair/sinais, 2 s, só em `XDG_RUNTIME_DIR`), `DDC_TRAY_FAKE=1`, linha de brilho, flags do smoke, checagem de `<select>` em runtime. |
+| `83b4c59` | test | Achado ao rodar o Verify novo dos screenshots: ele exige `SCREENSHOTS=1` sem nada pulado, mas o spec pulava o diálogo e a lista no tema escuro (`2 skipped` → Verify falhava). Agora todo screenshot sai nos dois temas: 2 PNGs novos (`tray-popup-dialog-dark.png`, `tray-popup-list-dark.png`, conferidos com Read), os 4 antigos idênticos byte a byte (3 regenerações, SHA-1 iguais). README cita os novos. |
+
+### D-5 — monitor simulado e smoke da roda
+- `smoke-sni.sh [--fake] [--activate] [--scroll] <bin>`, opções em qualquer ordem:
+  - `--fake` sobe com `DDC_TRAY_FAKE=1` e exige no stderr o aviso do monitor simulado antes de qualquer outra coisa.
+  - `--scroll` só roda com `--fake` (senão `FAIL: --scroll writes the brightness, so it only runs with --fake`, exit 1 — provado). Chama `org.kde.StatusNotifierItem.Scroll` no item do PRÓPRIO PID: `120 Vertical` → exige `ddc-tray: brightness 75 -> 80` em 5 s; `120 Horizontal` → exige NENHUMA linha `ddc-tray: brightness ` em 1,5 s; `-120 Vertical` → exige `brightness 80 -> 75` (prova que o app seguia vivo e ouvindo durante a janela do horizontal, e o sinal da roda).
+  - `--activate` agora exige, além do `popup shown` em 5 s, nenhum `popup hidden` nos 1,5 s seguintes.
+  - Achado: `busctl` lia `-120` como opção; o script passa `--` antes do verbo.
+- Saída do `--fake --scroll` (binário release limpo):
+  ```text
+  smoke-sni: the app serves the simulated monitor
+  smoke-sni: the app printed 'ddc-tray: brightness 75 -> 80' after a vertical Scroll of +120
+  smoke-sni: a horizontal Scroll wrote nothing within 1.5 s
+  smoke-sni: the app printed 'ddc-tray: brightness 80 -> 75' after a vertical Scroll of -120
+  smoke-sni: OK — PID 796142 registered its tray item, was alive 2 s later, stepped the brightness on a vertical Scroll only and never panicked
+  ```
+
+### Provas negativas (mutações NÃO commitadas, binários em scratchpad, árvore restaurada e release reconstruído limpo depois)
+| Mutação | Comando | Resultado |
+|---|---|---|
+| `orientation == Orientation::Vertical` → `Horizontal` em `status_item.rs` | `smoke-sni.sh --fake --scroll` | `FAIL: no 'ddc-tray: brightness 75 -> 80' on stderr within 5 s of a vertical Scroll of +120`, exit 1 |
+| roda sem checar a orientação (bônus) | `smoke-sni.sh --fake --scroll` | `FAIL: a horizontal Scroll wrote the brightness: 'ddc-tray: brightness 80 -> 85'`, exit 1 |
+| popup que se esconde 0,8 s depois de mostrar (`show_popup` agenda um `hide`) | `smoke-sni.sh --activate` | `the app printed 'ddc-tray: popup shown' after Activate` → `FAIL: the popup was hidden within 1.5 s of 'ddc-tray: popup shown' ('ddc-tray: popup hidden')`, exit 1 |
+| `<select>` criado em runtime (`document.createElement(['sel','ect'].join(''))` no fim do `app.js`), invisível ao grep estático | `npx playwright test` | grep estático do Verify: continua `OK` (não vê); Playwright: **52 failed**, 6 skipped, todos com `Error: native <select> elements on the page` / `locator('select')` |
+| `script_path` volta a cair em `temp_dir()` | `cargo test -p ddc-tray --lib runtime_directory` | `without_a_runtime_directory_no_script_is_written_anywhere ... FAILED` |
+
+### W-2 — prova ao vivo com a MINHA instância (monitor simulado, nunca a do usuário)
+- Instância do usuário encerrada com `pkill -x ddc-tray` antes; em cada rodada só a minha estava viva (`pgrep -xa ddc-tray` → `…/target/release/ddc-tray`).
+- `pkill -TERM -x ddc-tray` (SIGTERM), `kill -INT`, `kill -HUP`:
+  | Sinal | Antes | Saída | Depois | stderr |
+  |---|---|---|---|---|
+  | SIGTERM (`pkill -TERM`) | `isScriptLoaded` `b true`, arquivo com `POPUP_PID = 775623` | exit 0 em 52 ms | `isScriptLoaded` **`b false`**, arquivo removido | `SIGTERM received, quitting` / `popup placement unloaded from KWin` |
+  | SIGINT | `b true` (`POPUP_PID = 775766`) | exit 0 em 23 ms | **`b false`**, arquivo removido | `SIGINT received, quitting` / `popup placement unloaded from KWin` |
+  | SIGHUP | `b true` (`POPUP_PID = 775904`) | exit 0 em 23 ms | **`b false`**, arquivo removido | `SIGHUP received, quitting` / `popup placement unloaded from KWin` |
+- "Sair" pelo menu (`com.canonical.dbusmenu.Event` no id 9 = "Sair") continua igual: `b true` → `b false`, arquivo removido, `popup placement unloaded from KWin`.
+- Timeout: mutante com `unloadScript` que nunca responde (`std::future::pending()` antes da chamada) + SIGTERM → exit 0 em **2026 ms**, `ddc-tray: could not unload the popup placement from KWin: no answer within 2s`, arquivo removido mesmo assim. O script órfão que o mutante deixou foi descarregado à mão (`unloadScript` → `b true`).
+- 2º sinal: mutante com a saída travada 30 s + SIGTERM e outro SIGTERM 1 s depois → exit **1** em 1024 ms, `SIGTERM received, quitting` / `SIGTERM received while quitting, exiting at once`. Órfão descarregado e arquivo removido à mão.
+- Efeito colateral bom: depois dos smokes do Verify final (que encerram com SIGTERM), `isScriptLoaded` = `b false` (na iter 3 ficava `b true` com o PID morto).
+- Teste unitário `a_stop_signal_the_app_listens_to_is_heard_by_name`: registra SIGHUP e manda `kill -HUP` ao próprio processo de teste; 8 execuções seguidas da suíte do crate, 8 verdes.
+
+### Verify do CONTEXT.md e do PROJECT.md (extraídos por script do `.md`, conferidos como substring exata, rodados com `bash` a partir da raiz)
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` (agora 7 `pub fn …<M: MonitorControl + ?Sized>`) | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo + total, 0 fail/cancelled/skipped/todo, nenhum `skip:`/`todo:`/`only:` | `OK` (falhava no HEAD `9fde585` por causa da chave `only`) |
+| C7 | i18n paridade/HTML | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` (PID próprio, popup mostrado e NÃO escondido em 1,5 s) | `OK` (`the popup was still shown 1.5 s later`) |
+| C12 | teste de hardware `#[ignore]` gated, guard vivo | `OK` (não executado — regra) |
+| C13 | Gate 7 (`reuseExistingServer: false`, 10 `critical_paths`, 16/16 dropdown, pulados = screenshots, `locator('select')` no helper) | `OK` (52 passed, 6 skipped) |
+| C14 | nenhum `<select>` em `src/` | `OK` |
+| C15 | `ksni` + ≥3 testes `scroll` + `smoke-sni.sh --fake --scroll` | `OK` (`test result: ok. 20 passed`; smoke `75 -> 80`, horizontal sem escrita, `80 -> 75`) |
+| C16 | TODO/FIXME em todo arquivo versionado do produto | `OK` |
+| C17 | screenshots regenerados sem nada pulado, byte a byte iguais | `OK` (6 passed; falhava no HEAD `9fde585` com `2 skipped`) |
+| P1 | `cargo test --workspace --locked` | `OK` |
+| P2 | cobertura ≥80% (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.78% |
+| P3 | TODO/FIXME em `*.rs` | `OK` |
+
+Os smokes (C11, C15) rodaram com o protocolo do orquestrador: `pkill -x ddc-tray` (instância do usuário, PID 779685) → Verify → `setsid -f /home/slipalison/.local/bin/ddc-tray` (voltou como PID 796385, script do KWin recarregado com o PID dela).
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored (iter 3: 371) |
+| cross-check `ddc-core ddc-adapters ddc-cli` em `x86_64-unknown-linux-gnu` e `x86_64-pc-windows-msvc` | exit 0 / exit 0 (`crates/` não foi tocado nesta iteração) |
+| `node --test` (todos) | 124 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo |
+| Playwright | 52 passed, 6 skipped (screenshots sem `SCREENSHOTS=1`); com `SCREENSHOTS=1`: 6 passed |
+| cobertura (gate, `--fail-under-lines 80`, sem `main.rs`/`build.rs`) | exit 0, TOTAL lines **83.22%** (iter 3: 83.98%). Lógica: `scroll.rs` 100%, `popup.rs` 100%, `fixture.rs` 100%, `panel.rs` 99.31%. Cola: `stop_signals.rs` 62.07% (o `quit_on_stop_signals` só roda com o app), `tray.rs` 57.23%, `commands.rs` 49.32%, `kwin_placement.rs` 45.36%, `lib.rs` 37.75%, `status_item.rs` 23.03% |
+| `Cargo.lock` nesta iteração | só a aresta `ddc-tray → tokio` (nenhum crate novo; as features `signal` e `time` já eram compiladas via `tauri`/`zbus`) |
+
+### Desvios e observações
+- **Arquivos fora do PLAN** (todos pedidos nesta iteração ou consequência direta): `src-tauri/src/fixture.rs`, `src-tauri/src/stop_signals.rs`, `docs/screenshots/tray-popup-{dialog,list}-dark.png`.
+- **Contrato Rust interno:** `panel::set_brightness_percent` e `tray::brightness_shortcut` devolvem `BrightnessChange` (antes `ReadBackDto`/`PanelChangedDto`); entrou `panel::write_brightness`. Nada muda para a UI: o evento `panel-changed` e os goldens são os mesmos.
+- **Além do pedido, pequeno:** o 2º sinal sai na hora (sem ele, depois que o app assume o SIGTERM, uma saída travada só morreria com SIGKILL); o `--scroll` tem um 3º passo (`-120` → `80 -> 75`); um load recusado pelo KWin apaga o arquivo; o helper de teste `dell_monitor` substituiu 3 cópias.
+- **Dois Verify do CONTEXT novo falhavam no HEAD `9fde585` sem mudança de código de produto:** C6 (chave `only` num teste do i18n) e C17 (screenshots pulados no tema escuro). Corrigidos em `e49de89` e `83b4c59`.
+- **Cobertura caiu 0,76 ponto** (83.98% → 83.22%). A cola nova de sinais e de D-Bus só roda com o app de pé (provada ao vivo acima); o que é lógica ficou em funções testadas (`script_path`, `remove_script`, `StopSignals`, `BrightnessChange`, `simulated_osd`).
+- **Incidente de processo, sem efeito no resultado:** na prova negativa do W-3 usei `git checkout` no arquivo que ainda tinha a edição do W-3 não commitada; reapliquei a mesma edição antes do commit `d2fedba`. As mutações seguintes foram feitas só sobre arquivos já commitados.
+- **Instância do usuário:** encerrada e reaberta 3 vezes (sessão das provas do smoke, sessão do W-2, Verify final), sempre com `pkill -x ddc-tray` e `setsid -f /home/slipalison/.local/bin/ddc-tray`; nada em `~/.local` foi tocado. Popups mostrados na tela: 2 `--activate` positivos (conferência e Verify final) e 1 do mutante que se esconde (~0,8 s). Os smokes da roda e as provas de sinais não abrem popup.
+- **Monitor real:** nenhuma escrita. A roda e os atalhos só rodaram com `DDC_TRAY_FAKE=1`; o `--activate` com backend real só lê. O teste de hardware `rtk_qhd_hdr` não foi executado (fica com o orquestrador, como no DoD).
