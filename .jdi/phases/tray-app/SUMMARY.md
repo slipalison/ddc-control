@@ -1308,3 +1308,126 @@ Os smokes (C11, C15) rodaram com o protocolo do orquestrador: `pkill -x ddc-tray
 - **Incidente de processo, sem efeito no resultado:** na prova negativa do W-3 usei `git checkout` no arquivo que ainda tinha a edição do W-3 não commitada; reapliquei a mesma edição antes do commit `d2fedba`. As mutações seguintes foram feitas só sobre arquivos já commitados.
 - **Instância do usuário:** encerrada e reaberta 3 vezes (sessão das provas do smoke, sessão do W-2, Verify final), sempre com `pkill -x ddc-tray` e `setsid -f /home/slipalison/.local/bin/ddc-tray`; nada em `~/.local` foi tocado. Popups mostrados na tela: 2 `--activate` positivos (conferência e Verify final) e 1 do mutante que se esconde (~0,8 s). Os smokes da roda e as provas de sinais não abrem popup.
 - **Monitor real:** nenhuma escrita. A roda e os atalhos só rodaram com `DDC_TRAY_FAKE=1`; o `--activate` com backend real só lê. O teste de hardware `rtk_qhd_hdr` não foi executado (fica com o orquestrador, como no DoD).
+
+## Iteração 5 — lacunas do critic + W-2
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 5 do loop. A iter 4 foi aprovada pelo reviewer (APPROVED_PENDING_MANUAL, com W-1 herdado e W-2), mas o DoD critic demonstrou 2 lacunas de teste: debounce vs throttle e a configuração do axe sem trava. O orquestrador travou a D-2026-09-27-tray-app-6 e endureceu o CONTEXT (`0ec2d08`). Não editei o CONTEXT. As 8 tasks do PLAN continuam `completed`. W-1 (`cargo audit`) segue com a `ci-crossbuild`.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `93dcd83` | test | Item 1: teste `a burst longer than the debounce window writes once, after it ends` em `tests/ui/debounce.test.mjs`, com `mock.timers`. São 20 pushes, um a cada 20 ms (380 ms de rajada, e o teste afirma que ela passa de 4× a janela). Depois de cada tick ele drena as promises (`setImmediate` real) e exige zero escritas. Continua em zero 79 ms depois do último push e, aos 80 ms, exatamente `[[0x10, 95]]` (o último valor). |
+| `4280a59` | fix | Item 2 (D-6): `bridge.js` só cria o demo quando `__TAURI__` está ausente E `isLocalDevServer(location)` (`http:`/`https:` em `localhost`/`127.0.0.1`, qualquer porta). Em qualquer outro caso, um bridge `mode: 'unavailable'` rejeita todo comando com `{ kind: 'backend_unavailable', message: UNAVAILABLE_MESSAGE }`, e a UI mostra o estado de erro que já existia. Há 4 testes `node --test` novos e 1 spec Playwright novo. Os helpers de `bridge-demo.test.mjs` e `contract.test.mjs` passam a usar `new URL('http://localhost:1420/…')` como `location`. |
+| `7482711` | test | Item 3 (W-2): nos 2 testes de `rtk_qhd_hdr.rs`, logo após `if !hardware_enabled() { return; }`, entra `assert!(std::env::var_os("DDC_TRAY_FAKE").is_none(), "{NOT_SIMULATED}")`. A mensagem: `DDC_TRAY_FAKE is set: the app would serve its simulated RTK, and this run would be no evidence of the real monitor; unset it`. |
+| `c37491c` | docs | README (Browser demo, suíte Playwright, testes de hardware), CHANGELOG e `docs/hardware-validation.md` passo 7: o demo só roda em servidor local, e o teste de hardware recusa `DDC_TRAY_FAKE`. |
+
+### 1 — debounce vs throttle
+- Prova negativa: apliquei a mutação do critic (remover `stopTimer(state);` só do `push` de `src/debounce.js`, com o `flush` intacto), sem commitar. O arquivo foi restaurado por cópia (`git diff --quiet` limpo). Resultado:
+  ```text
+  not ok 4 - a burst longer than the debounce window writes once, after it ends
+    error: |-
+      no write 80 ms into the burst
+  # pass 13
+  # fail 1
+  ```
+  O teste novo é o único que falha: os 13 antigos passam com o mutante, que é justamente a lacuna que o critic apontou. O mutante escreve já aos 80 ms da rajada, ou seja, virou throttle.
+
+### 2 — bridge só em dev local (D-2026-09-27-tray-app-6)
+- **`createBridge(win)`:**
+  - Com `__TAURI__.core.invoke`, devolve o bridge `tauri`, como antes.
+  - Com `__TAURI__` ausente (`== null`) e servidor local, devolve o `demo`.
+  - Em qualquer outro caso, devolve o `unavailable`. Isso inclui um `__TAURI__` presente sem `invoke`: a D-6 permite o demo só quando `__TAURI__` está ausente.
+  - Exporta `isLocalDevServer(location)` e `UNAVAILABLE_MESSAGE`.
+- **Bridge `unavailable`:**
+  - Os 7 comandos (`list_monitors`, `select_monitor`, `load_panel`, `load_features`, `probe_features`, `set_feature`, `hide_popup`) rejeitam com `backend_unavailable`.
+  - `onPopupShown`/`onPanelChanged` resolvem com um `unlisten` no-op. Evento não é comando, e rejeitar ali faria o `app.js` mostrar um toast repetindo o erro que o primeiro comando já mostra.
+  - Não expõe `window.__ddcDemo`.
+- **Testes `node --test` novos em `tests/ui/bridge-demo.test.mjs`:**
+  - `outside a local dev server the bridge never falls back to the demo` (título exato do Verify): `tauri://localhost/index.html`, `http://tauri.localhost/index.html`, `https://tauri.localhost/index.html`, `tauri://localhost/?demo=rtk` e `http://tauri.localhost/?demo=two-monitors`, todos sem `__TAURI__`. Exige `mode: 'unavailable'`, nenhum `__ddcDemo` e os 8 chamados (7 comandos, `set_feature` com e sem `confirmed`) rejeitados com exatamente `{ kind: 'backend_unavailable', message: UNAVAILABLE_MESSAGE }`.
+  - `the demo needs http or https on localhost or 127.0.0.1`:
+    - aceitos: `http://localhost:1420/`, `http://localhost/?demo=error`, `https://localhost:8443/`, `http://127.0.0.1:1420/?demo=empty`;
+    - recusados: `tauri://localhost/`, `http(s)://tauri.localhost/`, `file:///…`, `http://192.168.0.10:1420/`, `http://localhost.example.com/`, `http://[::1]:1420/`, `ftp://localhost/`;
+    - `createBridge({})`/`createBridge(undefined)` dão `unavailable`.
+  - `a __TAURI__ without invoke on a dev server is not a demo either`.
+  - `the unavailable bridge accepts listeners that never hear anything`.
+- **Prova no navegador (`tests/e2e/unavailable.spec.mjs`, 2 caminhos × 2 temas = 4 testes):**
+  - O Playwright roteia `http://tauri.localhost/**` (a origem do app no Windows) para os mesmos arquivos de `src/` do servidor da suíte, sob a CSP do app.
+  - Em `/` e `/?demo=rtk`, exige:
+    - o estado `error`, com o heading `error.backend_unavailable` e o detalhe `UNAVAILABLE_MESSAGE`;
+    - "Tentar novamente" visível, painel e botão de energia ocultos;
+    - `typeof window.__ddcDemo === 'undefined'`;
+    - console limpo, nenhum `<select>` e axe sem critical/serious (o `expectAccessible` travado).
+  - Os `critical_paths` continuam no demo em `http://localhost:1420`.
+- **Provas negativas** (mutações sobre o arquivo commitado, restaurado por cópia e `git diff --quiet` limpo):
+  | Mutação em `src/bridge.js` | `node --test bridge-demo` | Playwright `unavailable.spec.mjs` |
+  |---|---|---|
+  | M1: `return demoBridge(…)` sem a condição (o comportamento antigo) | `# fail 3`, incluindo `not ok 1 - outside a local dev server the bridge never falls back to the demo` | **4 failed** (`Expected: "error"` / `Received: "ready"`) |
+  | M2: sem checar o protocolo (`tauri://localhost` vira dev) | `# fail 2`, incluindo o `not ok 1` | — |
+  | M3: sem checar o hostname (`http://tauri.localhost` vira dev) | `# fail 2`, incluindo o `not ok 1` | — |
+
+### 3 — W-2: o teste de hardware recusa o monitor simulado
+- **Com a guarda:** rodei `DDC_HW_TESTS=1 DDC_TRAY_FAKE=1 cargo test -p ddc-tray --locked --test rtk_qhd_hdr -- --ignored --test-threads=1`. Os 2 testes FALHAM em `rtk_qhd_hdr.rs:126` e `:174`, com a mensagem `DDC_TRAY_FAKE is set: …`, antes do `compose_osd()`.
+  - A rodada é segura por construção. A asserção dispara antes de qualquer backend. Mesmo sem ela, com `DDC_TRAY_FAKE=1` o `compose_osd()` retorna o `simulated_osd()` em memória antes de `DdcHiMonitorBackend::new()` (`lib.rs:72-75`).
+  - Sem `DDC_HW_TESTS`, o resultado segue `0 passed; 0 failed; 2 ignored`.
+- **Prova negativa:** tirei as 2 asserções do arquivo commitado e rodei com as mesmas variáveis. Em seguida restaurei o arquivo.
+  - `rtk_qhd_hdr_panel_loads_and_one_safe_brightness_write_is_restored` **passa oco**, com `brightness 75 -> 85 (max 100)` e `restored brightness: … current: 75` em memória: `1 passed; 1 failed`. É exatamente o W-2.
+  - O teste do monitor mudo falha, porque o fixture não tem monitor mudo.
+
+### 4 — axe travado (conferido, sem mudança)
+- `tests/e2e/support.mjs:127` tem literalmente `new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()`, e `:32` tem `const BLOCKING_IMPACTS = new Set(['critical', 'serious']);`.
+- `grep -nE 'disableRules|\.exclude\(|\.include\(|\.options\(|\.disableFrameRules|setLegacyMode' tests/e2e/*.mjs` dá 0 linhas.
+- O `AxeBuilder` só é construído em `support.mjs`, inclusive no spec novo, que usa `expectAccessible`.
+
+### Verify do CONTEXT.md e do PROJECT.md (extraídos por script do `.md`, conferidos como substring exata, rodados com `bash` a partir da raiz)
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test`: título da rajada presente, por módulo e total, 0 fail/cancelled/skipped/todo | `OK` |
+| C7 | i18n paridade/HTML | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` (PID 895841, item `org.kde.StatusNotifierItem-895841-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras) |
+| C12 | teste de hardware `#[ignore]` gated, guard vivo, `var_os("DDC_TRAY_FAKE").is_none()` | `OK` (não executado contra hardware; regra) |
+| C13 | Gate 7 (axe travado, 10 `critical_paths`, dropdown completo, pulados = screenshots) | `OK` |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri == true` | `OK` |
+| C15 | nenhum `<select>` em `src/` | `OK` |
+| C16 | `ksni` + ≥3 testes `scroll` + `smoke-sni.sh --fake --scroll` | `OK` (`75 -> 80` vertical, horizontal sem escrita em 1,5 s, `80 -> 75`) |
+| C17 | TODO/FIXME em todo arquivo versionado do produto | `OK` |
+| C18 | screenshots regenerados sem nada pulado, byte a byte iguais | `OK` (SHA-1 dos 6 PNGs iguais antes e depois) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥80% (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.78% |
+| P3 | TODO/FIXME em `*.rs` | `OK` |
+
+Os smokes (C11, C16) seguiram o protocolo do orquestrador. A instância do usuário (PID 836348) foi encerrada com `pkill -x ddc-tray`, os 2 Verify rodaram, e `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu logo depois (PID 896681). A porta 1420 estava livre antes e depois do C13/C18.
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 (só o aviso future-incompat de `nom v3.2.1`, pré-existente) |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored (igual à iter 4: nenhum teste Rust novo que rode sem hardware) |
+| cross-check `ddc-core ddc-adapters ddc-cli` em `x86_64-pc-windows-msvc` e `x86_64-unknown-linux-gnu` | exit 0 / exit 0 (`crates/` não foi tocado nesta iteração) |
+| `node --test` (todos) | **129 pass** (iter 4: 124; +1 debounce, +4 bridge), 0 fail, 0 cancelled, 0 skipped, 0 todo |
+| Playwright | **56 passed** (iter 4: 52; +4 do `unavailable.spec.mjs`), 6 skipped (screenshots sem `SCREENSHOTS=1`) |
+| cobertura (gate, `--fail-under-lines 80`, sem `main.rs`/`build.rs`) | exit 0, TOTAL lines **83.22%** (igual à iter 4; só mudaram JS, docs e um teste `#[ignore]`) |
+| `Cargo.lock` / `package-lock.json` | intocados |
+
+### Desvios e observações
+- **Arquivos além dos 4 itens:** todos são consequência direta da D-6.
+  - `tests/e2e/unavailable.spec.mjs`: prova no navegador de que a UI mostra o estado de erro.
+  - `tests/ui/contract.test.mjs`: o helper precisava de uma `location` de servidor local.
+  - `playwright.config.mjs`: só o comentário.
+  - README, CHANGELOG e `docs/hardware-validation.md`: a doc precisa refletir o comportamento, que é item Manual do DoD.
+- **Interpretações:**
+  - `__TAURI__` presente sem `invoke` → `unavailable`, não demo (leitura literal de "demo só quando `__TAURI__` ausente").
+  - `[::1]` não conta como local, porque a D-6 lista só `localhost`/`127.0.0.1`.
+  - O teste de hardware recusa `DDC_TRAY_FAKE` com QUALQUER valor, inclusive vazio. É mais estrito que o `switch_on` do app, que só liga com `1`, e segue o texto da D-6 ("recusa rodar com `DDC_TRAY_FAKE` definido").
+- **Mudança de contrato interno:** `createBridge(undefined)`/`createBridge({})` agora devolvem `unavailable`; antes, devolviam o demo. Nenhum chamador de produção faz isso: o `app.js` passa `window`.
+- **Item 4:** nenhuma mudança necessária. As duas linhas literais já estavam lá, e não havia forma proibida.
+- **Instância do usuário:** encerrada e reaberta 1× (só para os smokes C11/C16), com `pkill -x ddc-tray` e `setsid -f`. Nada em `~/.local` foi tocado, e o binário instalado continua sendo o build da iter 3, como a review já notou. Um único popup apareceu na tela (C11).
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` rodou 2× e só com `DDC_TRAY_FAKE=1`: a guarda, que dispara antes de qualquer backend, e o mutante, que usou o monitor em memória. A execução real com `DDC_HW_TESTS=1` segue com o orquestrador (Deferred), agora protegida pela guarda.
