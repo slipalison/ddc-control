@@ -2327,3 +2327,102 @@ Extraídos por script do `.md` e rodados com `bash` a partir da raiz, sem `DDC_H
   - Também não é pego um especificador montado só com variáveis em runtime (`import(base + name)`).
   - Nos dois casos, o pseudo-locale continua julgando os estados que visita.
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
+
+## Iteração 13 (rodada 3) — build de produção do Tauri
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 13 (rodada 3). O trabalho é a linha do DoD critic da iter 12 sobre a linha 11 (CSP). Sem `tauri/custom-protocol`, o `cargo build --release` gerava um build "dev" do Tauri (`tauri::is_dev() == true`), e esse build serve `app.security.devCsp` no lugar de `csp`. A correção segue a D-2026-09-27-tray-app-10. Não editei o CONTEXT: o C8 já tinha o Verify novo do orquestrador. As 8 tasks do PLAN continuam `completed`. O W-1 (`cargo audit`) continua com a `ci-crossbuild`, e o `Cargo.lock` não mudou.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `c181544` | fix | `apps/ddc-tray/src-tauri/Cargo.toml`: a linha `tauri = { version = "2.12.0", features = ["image-png", "custom-protocol"] }` do `[dependencies]`, com um comentário de 2 linhas citando a D-10. |
+| `b1b6389` | test | `apps/ddc-tray/src-tauri/src/lib.rs`: módulo `build_tests` com `the_tray_is_not_a_dev_build`, que faz `assert!(!tauri::is_dev(), "tauri/custom-protocol is off")`. |
+
+- **`Cargo.lock` intocado.** No registry, o `tauri` 2.12.0 tem `custom-protocol = ["tauri-macros/custom-protocol"]`, e o `tauri-macros` 2.7.0 tem `custom-protocol = []`. A feature não traz crate nenhum, e o `--locked` passou sem mudar o lock.
+- **Windows.** A entrada `[target.'cfg(not(target_os = "linux"))'.dependencies] tauri` não repete a feature. O Cargo unifica as features da mesma dependência, e a linha de `[dependencies]` vale para todos os alvos. Isso não foi compilado para Windows aqui: o tray continua fora do cross-check (D-2026-09-26-tray-app-9).
+- **Onde fica o teste.** Ele está em `build_tests`, `#[cfg(test)]` sem `target_os`, e não no `tests`, que só existe no Linux. Assim ele roda em todo sistema. O filtro `is_not_a_dev_build` casa só com ele (`1 passed; … 136 filtered out`).
+- **Nada muda para o popup.** Sem `devUrl` e com `frontendDist` apontando para um diretório, o Tauri 2.12 resolve a URL do app para `tauri://localhost` nos dois modos (`manager/mod.rs`, `get_app_url`). Os assets também já eram embutidos nos dois modos. A única diferença de runtime para este app é a escolha entre `devCsp` e `csp`.
+
+### Provas negativas (mutações não commitadas, todas desfeitas)
+**O teste sem a feature.** Tirei `"custom-protocol"` do `Cargo.toml` no working tree, sobre o HEAD `b1b6389`, e rodei `cargo test -p ddc-tray --locked --lib is_not_a_dev_build`:
+- deu `test build_tests::the_tray_is_not_a_dev_build ... FAILED`, com `panicked at apps/ddc-tray/src-tauri/src/lib.rs:311:9: tauri/custom-protocol is off` e `test result: FAILED. 0 passed; 1 failed`;
+- restaurei com `git checkout`. O mesmo vermelho apareceu antes do `c181544`, quando o teste foi escrito primeiro.
+
+**O Verify do C8, extraído do CONTEXT, sobre o HEAD e 5 mutações.** Cada mutação foi desfeita com `git checkout`/`rm` antes da seguinte.
+
+| Mutação | C8 |
+|---|---|
+| nenhuma (HEAD) | `OK` |
+| **M1:** `features = ["image-png"]`, sem a feature | **reprova** (o `grep` e o teste) |
+| **M2:** `tauri = { … features = ["image-png"] } # "custom-protocol"`. A feature só aparece num comentário da mesma linha | **reprova**. O `grep` do Verify passa sozinho, e quem reprova é o teste (`0 passed; 1 failed`) |
+| **M3:** `app.security.devCsp` com `'unsafe-inline' 'unsafe-eval'` em `tauri.conf.json` | **reprova** (o `jq`) |
+| **M4:** `build.devUrl = "http://localhost:1420"` | **reprova** (o `jq`) |
+| **M5:** arquivo novo `tauri.linux.conf.json` com `devCsp` e `'unsafe-eval'` | **reprova** (o `jq` sobre `tauri.*.conf.json`) |
+
+**Configs.** O único `tauri*.conf.json` versionado é `apps/ddc-tray/src-tauri/tauri.conf.json`, com `devCsp=null` e `devUrl=null` no `jq`. Não há `tauri*.json5` nem `Tauri*.toml`. Fora de `.jdi/`, `git grep -nE 'devCsp|devUrl|dev_csp|dev_url'` só acha os dois comentários desta iteração.
+
+### Prova de runtime: a CSP servida (sonda temporária, não commitada)
+O console do WebKitGTK não chega ao stderr. Por isso a sonda teve duas partes, as duas temporárias:
+- um `src/csp-probe.js`, carregado por um `<script type="module">` a mais no `index.html`. Ele tenta `eval('6*7')`, `new Function(…)()` e um `<script>` inline criado com `textContent`. Também guarda o `originalPolicy` do evento `securitypolicyviolation` e manda tudo por `invoke('select_monitor', { monitorId: 'csp-probe …' })`;
+- um `eprintln!` no `select_monitor` para ids que começam com `csp-probe`.
+
+Cada execução usou o binário `target/release/ddc-tray` com `DDC_TRAY_FAKE=1 DDC_TRAY_DEBUG=1` e seguiu o protocolo da instância do usuário. O relatório chegou com o popup ainda oculto, sem precisar de `Activate`. Depois, a sonda e as mutações foram desfeitas (`git diff --quiet`, só `.idea/`) e o release foi refeito a partir do HEAD antes dos smokes e dos Verify.
+
+| Execução | Build | `origin` | `eval` | `new Function` | inline | Política servida |
+|---|---|---|---|---|---|---|
+| **R1** | HEAD (feature ligada, config commitada) | `tauri://localhost` | **bloqueado** (`EvalError`) | **bloqueado** (`EvalError`) | **bloqueado** | = `app.security.csp` |
+| **R2** | feature ligada + `devCsp` frouxo temporário (`script-src 'self' 'unsafe-inline' 'unsafe-eval'`) | `tauri://localhost` | **bloqueado** | **bloqueado** | **bloqueado** | = `app.security.csp`. O `devCsp` foi ignorado |
+| **R0 (controle)** | feature desligada + o mesmo `devCsp` | `tauri://localhost` | **rodou** | **rodou** | bloqueado | = o `devCsp` |
+
+- **Como comparei a política.** Um script compara as diretivas servidas com as da config, como conjuntos ordenados e sem as fontes `'sha256-…'`. Deu igual nas 3 execuções, sempre com 11 hashes `sha256` que o Tauri acrescenta ao `script-src` para os scripts de init dele. No R1 e no R2 não aparece `unsafe-` em diretiva nenhuma.
+- **O R0 reproduz o achado do critic.** No R0 o inline continuou bloqueado mesmo com `'unsafe-inline'`, porque na CSP3 a presença de hashes no `script-src` anula `'unsafe-inline'`. O `'unsafe-eval'`, por outro lado, valeu.
+- **O popup carrega pelo protocolo customizado.** No R1 a página veio de `tauri://localhost`, o módulo rodou e o IPC respondeu.
+
+### Smokes com o release do HEAD
+- **`smoke-sni.sh --fake --activate`:** `OK` na 1ª execução. PID 2107841, `org.kde.StatusNotifierItem-2107841-1` com dono = o próprio PID, `the app serves the simulated monitor`, `popup shown` após `Activate` e ainda mostrado 1,5 s depois, sem `panicked`.
+- **C11, `--activate` literal do CONTEXT:** backend real, só leituras. `OK` na 1ª execução, sem `tray activated` externo: PID 2118899, `popup shown` e ainda mostrado 1,5 s depois.
+- **C17, `--fake --scroll`:** `OK`. PID 2119351, `brightness 75 -> 80` na vertical, nada na horizontal em 1,5 s, e `80 -> 75`.
+
+### Verify do CONTEXT.md e do PROJECT.md
+Extraídos por script da seção DoD de cada `.md` (19 + 3) e rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS`, `DDC_TRAY_FAKE` nem `DDC_TRAY_DEBUG`.
+
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (153 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n paridade/HTML + scanner + trava de frase | `OK` |
+| C8 | CSP + sem `devCsp`/`devUrl` + `custom-protocol` + `is_not_a_dev_build` | `OK` (`1 passed`) |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` na 1ª execução (PID 2118899) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK`. Numa segunda execução, só para contar: 134 passed, 6 skipped (= screenshots), 0 failed/flaky |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | `OK` |
+| C15 | hash do harness | `OK`: `fd6985f9…8560`, sem mudança. A última mudança do harness continua sendo `c14bb5e` |
+| C16 | nenhum `<select>` em `src/` | `OK` |
+| C17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | `OK` (PID 2119351) |
+| C18 | TODO/FIXME/`todo!` em todo arquivo versionado do produto (`git grep`) | `OK` |
+| C19 | screenshots regenerados, nada pulado, byte a byte iguais | `OK` |
+| P1 | `cargo test --workspace --locked` | `OK`: 384 passed (+1, o teste novo), 0 failed, 9 ignored |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines **82.79 %**, exit 0. Com o gate (`--locked --fail-under-lines 80`, sem `main.rs`/`build.rs`): **83.23 %**, exit 0 |
+| P3 | TODO/FIXME/`todo!` em `*.rs` | `OK` |
+
+- **Cross-check Windows:** `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked --target x86_64-pc-windows-msvc` exit 0. Nenhum desses crates mudou.
+- **Protocolo da instância do usuário:**
+  - antes de cada execução do app (sondas R1, R2 e R0, o `--fake --activate`, o C11 e o C17), `pgrep -xa ddc-tray` mostrava a instância do usuário. Ela foi encerrada com `pkill -x ddc-tray` (nunca `-f`), esperando o processo sair;
+  - logo depois de cada execução, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu;
+  - PIDs do usuário: 2073351 → 2105658 → 2106533 → 2107176 → 2108066 → 2119125 → 2119597, que é a única instância viva no fim. Nada em `~/.local` foi tocado.
+- **Porta 1420:** livre antes e depois do C13/C19 e da contagem do Playwright.
+
+### Desvios e observações
+- **A sonda de runtime precisou de uma linha Rust temporária**, o `eprintln!` no `select_monitor`, porque o console do webview não chega ao stderr.
+  - O binário das sondas diferia do HEAD em `index.html`, `csp-probe.js` e `commands.rs`. O R2 e o R0 mudavam também, de propósito, `tauri.conf.json` e, no R0, o `Cargo.toml`.
+  - Tudo foi desfeito, e o release usado nos smokes e nos Verify foi recompilado do HEAD limpo.
+  - A conclusão sobre a CSP não depende dessas linhas: a política vem da config e da feature.
+- **Nenhum arquivo do harness mudou** (`playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs` e `scripts/smoke-sni.sh`). O C15 passa com o hash congelado.
+- **Nenhuma mudança de README/CHANGELOG.** O comportamento do app não muda: a CSP servida já era a `csp`, porque não havia `devCsp`. Só o build deixou de ser "dev".
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras. As sondas, o `--fake --activate` e o C17 usaram o monitor simulado.
