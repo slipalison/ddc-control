@@ -301,6 +301,17 @@ mod switch_tests {
     }
 }
 
+#[cfg(test)]
+mod build_tests {
+    /// Without `tauri/custom-protocol`, even `cargo build --release` makes a
+    /// Tauri dev build, which serves `app.security.devCsp` in place of `csp`
+    /// (D-2026-09-27-tray-app-10).
+    #[test]
+    fn the_tray_is_not_a_dev_build() {
+        assert!(!tauri::is_dev(), "tauri/custom-protocol is off");
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use std::ffi::OsStr;
