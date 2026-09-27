@@ -1558,3 +1558,153 @@ Modo fix, cadeia autônoma do `/jdi-issue`, iter 6 (rodada 2, depois do AUTO-RES
   - «3/20» (`Todo` em caixa mista) não foi tratado: não fazia parte do pedido, e o CONTEXT não foi editado.
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. Os smokes usaram o backend real só com leituras (C11) e o monitor simulado (C16).
 - **Instância do usuário:** encerrada e reaberta 2× (só para os smokes), com `pkill -x ddc-tray` e `setsid -f`. Nada em `~/.local` foi tocado. O binário instalado continua anterior à iter 5, como a review já notou.
+
+## Iteração 7 (rodada 2) — pseudo-locale
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 7 (rodada 2). A iter 6 foi aprovada pelo reviewer (APPROVED_PENDING_MANUAL, só o W-1 herdado), mas o DoD critic mostrou 2 lacunas:
+- um literal guardado numa `const` ou devolvido por helper passava pelo scanner estático;
+- o harness podia ser enfraquecido.
+
+O orquestrador travou a D-2026-09-27-tray-app-7 e acrescentou as linhas ao CONTEXT (`7758aef`). Não editei o CONTEXT. As 8 tasks do PLAN continuam `completed`. O W-1 (`cargo audit`) segue com a `ci-crossbuild`.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `d32319f` | feat | `?pseudo=1` só com o bridge demo local: `t()` envolve cada texto traduzido em `⟦…⟧`, depois de preencher os placeholders. Chave inexistente continua voltando sem marca, então o `translateOr` segue caindo no nome do core. Testes `node` do pseudo e de `pseudoRequested`. |
+| `3ca5bba` | feat | Dados do monitor e do core sob `translate="no"`. A dica i2c teve o caminho do guia tirado de dentro da frase. |
+| `0263cc0` | test | `tests/e2e/pseudo-locale.spec.mjs`: 13 estados × 2 temas com o título `every visible text is translated or marked as data: …`, mais a prova de que `?pseudo=1` é ignorado na origem do app. |
+| `2e69e82` | docs | README (demo com `pseudo=1` e o que o check lê) e CHANGELOG. |
+
+Depois do `0263cc0`, `playwright.config.mjs`, `tests/e2e/*.mjs` e `tests/ui/*.mjs` não mudaram mais.
+
+### 1 — pseudo-localização em runtime (D-2026-09-27-tray-app-7)
+- **Onde liga:**
+  - `app.js` monta o bridge antes do tradutor;
+  - `pseudo = bridge.mode === 'demo' && pseudoRequested(location.search)`;
+  - `translator(locale, LOCALES, { pseudo })`.
+- **Fora do demo, nunca liga:** na origem do app (`tauri://localhost`, `http://tauri.localhost`) o bridge é `unavailable` e o parâmetro é ignorado.
+- **O que é dado (`translate="no"`):**
+  - o nome do monitor no cabeçalho (`#monitor-name`, só quando mostra o monitor; o título do app continua traduzido);
+  - o valor e as opções do seletor de monitores, exceto a opção "(sem DDC/CI)", que vem de `t()`;
+  - nomes de valor NC sem chave: entradas (`HDMI-1`…) e presets (`sRGB`, `5000 K`…), nos chips, nos dropdowns (valor mostrado e opções) e nos rádios do diálogo;
+  - o nome MCCS do core quando o alias não tem chave (`labelVerbatim`);
+  - os códigos VCP (`.code`, `0x0C`…);
+  - a mensagem técnica do backend (`#message-detail`, fixo no HTML);
+  - o caminho `docs/linux-ddc-setup.md` da dica.
+- **Como a marcação é decidida:** o view-model diz o que é dado, com `verbatim` nas opções, `currentVerbatim` e `labelVerbatim`. O dropdown recebe `verbatim` por opção. O app nunca decide pela presença do marcador.
+- **Números e percentuais** formatados por `t()` (`format.percent`, `format.fraction`, `format.unnamed` "Valor 0x1B", `more.probeSilent`) continuam traduções: o padrão vem do arquivo de locale e sai com o marcador.
+- **Texto real que o spec encontrou** (rodado antes da marcação, em 12 dos 13 estados, 32 pares texto/elemento distintos):
+  - nomes de monitor (`RTK QHD HDR`, `DELL U2723QE`) no cabeçalho e no seletor;
+  - as 7 entradas do RTK;
+  - `sRGB`, `5000 K`, `6500 K`, `7500 K` e `9300 K`;
+  - 9 códigos `0x..`;
+  - as duas mensagens do backend (`no DDC/CI backend could be started (demo)` e o `transport error: …` da TV);
+  - o caminho do guia;
+  - o fragmento `.⟧` da dica i2c.
+
+  Todos eram dados, não literais. Nenhuma tradução estava marcada como dado.
+- **Dica i2c (correção de texto):** antes era "… /dev/i2c-*. Veja {doc}." e o app partia a frase em volta do caminho. Sob pseudo, sobrava um nó `.⟧` sem `⟦`. Agora `hint.i2c` termina em "Guia de configuração:" / "Setup guide:" e o caminho vem depois, em `<code translate="no">`, com `margin-inline-start: 0.3em`. Conferi visualmente em screenshots de rascunho (pt-BR, en e pseudo) no scratchpad.
+- **O spec** (`every visible text is translated or marked as data: …`):
+  - **Estados (13 × 2 temas = 26 ✓, o Verify exige ≥ 16):**
+    - os 5 `critical_paths`: `/ ready`, `rtk ready`, `two monitors ready`, `empty`, `error`;
+    - os diálogos de entrada e de energia abertos;
+    - "Todos os ajustes" aberto e sondado no RTK;
+    - "Todos os ajustes" aberto e sondado no DELL, onde nada responde e aparece `more.probeEmpty`, exatamente o caminho da mutação do critic;
+    - a lista de presets aberta e a lista de monitores aberta;
+    - a TV muda escolhida (estado de erro `transport`);
+    - `loading`, com o relógio da página parado.
+  - **O que cada teste lê:** todo nó de texto não vazio após trim, cujo pai passa em `checkVisibility({ visibilityProperty: true })`, fora de `script`/`style`/`template`/`noscript`.
+  - **O que cada teste exige:**
+    - cada nó contém `⟦` ou tem o `[translate]` mais próximo igual a `no` (semântica do HTML);
+    - nenhum nó sob `translate="no"` contém `⟦`, então marcar tudo como dado não passa;
+    - a mesma regra para `aria-label`, `aria-description`, `aria-roledescription`, `aria-valuetext`, `aria-placeholder`, `title`, `alt`, `placeholder` e `label`, em todos os elementos do documento, visíveis ou não;
+    - nenhum texto gerado por `::before`/`::after`;
+    - `document.title` = `⟦DDC Control⟧`;
+    - ≥ 3 nós lidos e ≥ 3 traduções;
+    - axe em todos os estados, menos o `loading`.
+  - **Contagem lida por estado** (nós visíveis / traduzidos, incluindo atributos / dados):
+    - `loading`: 3 / 10 / 0;
+    - `empty`: 8 / 14 / 1;
+    - `rtk ready`: 20 / 21 / 9;
+    - lista de presets aberta: 27 / 23 / 14;
+    - "Todos os ajustes" sondado no RTK: 53 / 51 / 18.
+  - **Os `reach`** acham elementos e esperam por eles, mas nunca afirmam texto. Quem pega o literal é o check genérico.
+  - **Os marcadores** estão escritos no spec, não importados do produto: um pseudo que deixasse de marcar não redefine o que o teste procura.
+- **`translate="no"` não afeta o visual:** `SCREENSHOTS=1` regenerou os 6 PNGs com SHA-1 idênticos, e `git diff --quiet -- docs/screenshots` ficou limpo.
+- **`translate="no"` não afeta o axe:** os 10 `critical_paths`, os diálogos, o "Todos os ajustes" e os 24 testes pseudo com axe passam.
+
+### Provas negativas (mutações não commitadas, revertidas com `git checkout -- src`, `git status` limpo depois de cada uma)
+"Suíte antiga" = os 66 testes Playwright anteriores (`--grep-invert` dos novos). "`node`" = os 135 testes, inclusive o scanner estático do `i18n-html`.
+
+| Mutação | `node` | Suíte antiga | Spec pseudo |
+|---|---|---|---|
+| M1 (a do critic): `src/app.js` `const note = answering.length === 0 ? 'No other setting answered' : t('more.probeSilent', …)` | 135 pass | **60 passed**, 6 skipped | **2 failed** (DELL sondado × 2 temas): `text "No other setting answered" in <p#probe-note.probe-note> is neither translated nor under translate="no"` |
+| M2 (literal devolvido por helper): `metaText()` devolve `` `${current.manufacturer} · DDC/CI` `` | 135 pass | **60 passed**, 6 skipped (o texto é igual ao pt-BR) | **18 failed** (os 9 estados `ready` × 2): `text "RTK · DDC/CI" in <p#monitor-meta…>` e `"DEL · DDC/CI"` |
+| M3 (helper do view-model): `unnamed()` devolve `` `Valor ${hex(value)}` `` | 135 pass | **60 passed**, 6 skipped | **2 failed**: `text "Valor 0x1B" in <span.chip-label>` |
+| M4 (trapaça): `<body translate="no">` | 135 pass | — | **26 failed**: `… is a translation under translate="no"` (ex.: `⟦DDC Control⟧` no `h1`, `[aria-label] "⟦Monitor⟧"`) |
+| M5 (pseudo desligado): `const pseudo = false && …` | 135 pass | — | **26 failed**: `Expected: "⟦DDC Control⟧"`, `Received: "DDC Control"` |
+| M6 (marcação de dado tirada): sem `label.translate = !option.verbatim` no `dropdown.js` | 135 pass | — | **4 failed** (as 2 listas abertas × 2): `text "sRGB" in <span.dropdown-label>`, `"RTK QHD HDR"`… |
+
+Estabilidade: o spec rodou `--repeat-each=5`, 140/140 passed.
+
+### 2 — harness
+- O coletor de console/pageerror e as chamadas do axe em `tests/e2e/support.mjs` não mudaram. O spec novo só acrescenta chamadas a `expectAccessible` e usa o fixture `page` travado.
+- Em `tests/ui/` só entraram testes: 3 em `i18n-parity` e 1 em `view-model`. Os `deepEqual` do view-model ganharam os campos `verbatim`/`labelVerbatim`/`currentVerbatim`, e o texto novo da dica. Nenhuma asserção saiu.
+- **Hash atual do harness:** `9787e931bc453d5221fd1163d8b238ed913fd04b54933e2e8274436f3ef33288`. São 19 arquivos: `playwright.config.mjs`, 10 em `tests/e2e/` e 8 em `tests/ui/`. É igual ao `HEAD` `0263cc0`. Foi calculado com `cd apps/ddc-tray && sha256sum playwright.config.mjs tests/e2e/*.mjs tests/ui/*.mjs | sha256sum | cut -c1-64`.
+
+### Verify do CONTEXT.md e do PROJECT.md (extraídos por script do `.md`, rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`)
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (135 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n paridade/HTML + scanner | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` (PID 1266125, `org.kde.StatusNotifierItem-1266125-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK`: 88 passed, 6 skipped (= screenshots), 0 failed/flaky; 10/10 `critical_paths`, dropdown 16/16, `dr = 2`, `ps = 26` |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | `OK` |
+| C15 | hash do harness | **falha esperada**: o CONTEXT ainda tem `HARNESS_SHA256_PENDING`; o hash atual está acima |
+| C16 | nenhum `<select>` em `src/` | `OK` |
+| C17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | `OK` (PID 1267334, `75 -> 80` vertical, horizontal sem escrita em 1,5 s, `80 -> 75`) |
+| C18 | TODO/FIXME em todo arquivo versionado do produto | `OK` |
+| C19 | screenshots regenerados, nada pulado, byte a byte iguais | `OK` (SHA-1 dos 6 PNGs iguais antes e depois) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.78 % (gate com exclusões e `--fail-under-lines 80`: 83.22 %) |
+| P3 | TODO/FIXME em `*.rs` | `OK` |
+
+- **Protocolo dos smokes (C11, C17):** um de cada vez. Antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário, encerrada com `pkill -x ddc-tray`. Logo depois, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu. PIDs: 1131592 → 1266367 → 1267586, que é a instância viva no fim. Nada em `~/.local` foi tocado.
+- **Porta 1420:** livre antes e depois do C13/C19.
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 / exit 0 |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored (nenhum `.rs` mudou) |
+| `node --test` (todos) | **135 pass** (iter 6: 131; +3 `i18n-parity`, +1 `view-model`), 0 fail/cancelled/skipped/todo |
+| Playwright | **88 passed** (iter 6: 60; +28 do `pseudo-locale.spec.mjs`), 6 skipped (screenshots sem `SCREENSHOTS=1`) |
+| cobertura (gate) | TOTAL lines **83.22 %** |
+| `Cargo.lock` / `package-lock.json` | intocados |
+
+### Desvios e observações
+- **Estado indisponível sob pseudo: não viável por construção.** A D-7 só liga o pseudo no demo. O estado é coberto de duas formas:
+  - `/?demo=error` renderiza o mesmo estado `error`/`backend_unavailable`: mesmos nós, só muda a mensagem técnica, que é dado;
+  - o teste `?pseudo=1 is ignored at the app origin: no text is wrapped` (2 temas, fora da contagem `ps`) prova que, na origem do app, nenhum texto sai marcado.
+- **`loading` sem axe:** o axe espera timers, e o relógio da página, parado para segurar o estado, não os dispara (o axe estourou os 30 s). O check de texto roda normalmente. Esse estado vai além dos 8 pedidos.
+- **Texto da dica i2c mudou** (en e pt-BR), pelo motivo do item 1. Só aparece nos estados vazio/erro, que não estão nos screenshots versionados.
+- **Rigor além do pedido:**
+  - check inverso (tradução sob `translate="no"` reprova);
+  - `::before`/`::after`;
+  - atributos de todos os elementos, e 4 atributos legíveis a mais;
+  - título do documento;
+  - mínimos de leitura;
+  - regra do `[translate]` mais próximo, em vez de "qualquer ancestral `no`" (equivalente aqui, e mais estrita se houver um `translate="yes"` aninhado).
+- **Comportamento de borda do produto:**
+  - chave inexistente agora volta sem interpolação (nenhuma chave tem `{}`);
+  - um nome do core vazio (`''`) cai em `format.code` em vez de mostrar vazio.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. Os smokes usaram o backend real só com leituras (C11) e o monitor simulado (C17).
