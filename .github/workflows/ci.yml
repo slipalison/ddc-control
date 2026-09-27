@@ -42,8 +42,10 @@ jobs:
       contents: read
     uses: slipalison/github-workflows/.github/workflows/qualidade.yml@afc20cc9f5457d045640df903e0ce9a7df1fb515
     with:
-      # Tauri compiles three times on Windows (clippy, llvm-cov, release) and
-      # a first run has no cache: the template's 20 minutes are not enough.
+      # Tauri compiles three times per Rust job (clippy, llvm-cov, release).
+      # With no cache, the first run took 13 minutes on Windows and 7 on Linux
+      # (run 36341518707), too close to the template's 20 for a slower runner;
+      # the limit is only there to stop a hung job.
       timeout: 60
       # One job per component, in parallel. The names are a contract: the
       # phase's evidence queries the run's jobs by them.
