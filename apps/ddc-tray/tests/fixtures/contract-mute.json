@@ -1,0 +1,12 @@
+{
+  "monitor": {
+    "id": "GSM-LG-TV-SSCR2-01010101",
+    "label": "LG TV SSCR2",
+    "manufacturer": "GSM",
+    "model": "LG TV SSCR2"
+  },
+  "loadPanel": {
+    "kind": "transport",
+    "message": "transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)"
+  }
+}

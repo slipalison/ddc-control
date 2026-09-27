@@ -1,8 +1,8 @@
-# Hardware validation — phase `full-osd-control`
+# Hardware validation
 
-The exact script to validate `ddc-cli` on the dev machine: Linux, the "RTK QHD HDR" monitor (`RTK-RTK-QHD-HDR-01010101`, `/dev/i2c-5`) and an LG TV whose DDC/CI is mute. Run it from the repository root, in order, one command at a time, and compare each result with the expected one.
+The exact script to validate `ddc-cli` (phase `full-osd-control`, steps 0 to 5) and the tray app (phase `tray-app`, [its own section](#tray-app--phase-tray-app)) on the dev machine: Linux, the "RTK QHD HDR" monitor (`RTK-RTK-QHD-HDR-01010101`, `/dev/i2c-5`) and an LG TV whose DDC/CI is mute. Run it from the repository root, in order, one command at a time, and compare each result with the expected one.
 
-Only reads and the few safe, reversible writes of step 3 are allowed. Read [Never run](#never-run) before starting.
+Only reads and the few safe, reversible writes of step 3 and of the tray steps are allowed. Read [Never run](#never-run) and [Never do through the popup](#never-do-through-the-popup) before starting.
 
 ## 0. Build and record the original values
 
@@ -134,3 +134,103 @@ On any monitor, with or without `--yes`, never run a write to:
 - any code outside the [feature catalog](../README.md#feature-catalog), or any code written by number.
 
 `set` accepts the catalog values of `0x1E` and `0xCA` with `--yes` (D-2026-09-26-full-osd-control-10), and that path is tested only against the in-memory backend; this script never exercises it on hardware. Reading any of these codes is fine.
+
+## Tray app — phase `tray-app`
+
+Same machine and monitors. The tray app is single-instance so that one process talks to the monitors: quit any running `ddc-tray` (**Quit** in its tray menu) before steps 6 and 7, and do not run `ddc-cli` while it is up.
+
+### 6. Tray icon smoke test
+
+Needs a desktop session whose tray is a StatusNotifierItem host (KDE Plasma, or GNOME with the AppIndicator extension) and `busctl`. Never `sudo`.
+
+```sh
+cargo build -p ddc-tray --release --locked
+bash apps/ddc-tray/scripts/smoke-sni.sh --activate target/release/ddc-tray
+bash apps/ddc-tray/scripts/smoke-sni.sh --fake --scroll target/release/ddc-tray
+```
+
+Expected: exit 0 each, a few seconds later, with
+
+```text
+smoke-sni: started target/release/ddc-tray as PID <pid>
+smoke-sni: org.kde.StatusNotifierWatcher lists org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem, owned by PID <pid>
+smoke-sni: called org.kde.StatusNotifierItem.Activate on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: the app printed 'ddc-tray: popup shown' after Activate
+smoke-sni: the popup was still shown 1.5 s later
+smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked
+```
+
+and
+
+```text
+smoke-sni: started target/release/ddc-tray as PID <pid> with DDC_TRAY_FAKE=1
+smoke-sni: org.kde.StatusNotifierWatcher lists org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem, owned by PID <pid>
+smoke-sni: the app serves the simulated monitor
+smoke-sni: called org.kde.StatusNotifierItem.Scroll 120 Vertical on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: the app printed 'ddc-tray: brightness 75 -> 80' after a vertical Scroll of +120
+smoke-sni: called org.kde.StatusNotifierItem.Scroll 120 Horizontal on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: a horizontal Scroll wrote nothing within 1.5 s
+smoke-sni: called org.kde.StatusNotifierItem.Scroll -120 Vertical on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: the app printed 'ddc-tray: brightness 80 -> 75' after a vertical Scroll of -120
+smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later, stepped the brightness on a vertical Scroll only and never panicked
+```
+
+The script lists the watcher's items, starts the app with `DDC_TRAY_DEBUG=1`, and waits up to 15 s for a new item whose D-Bus connection belongs to the app's own PID (`GetConnectionUnixProcessID`); the app must then still be alive 2 s later, with no `panicked` on its stderr.
+
+- `--activate` then calls `Activate` on that item, as the tray does on a left click, and requires `ddc-tray: popup shown` on the app's stderr within 5 s and no `ddc-tray: popup hidden` in the 1.5 s after it: the popup appears on screen for a moment. It only reads.
+- `--fake` starts the app with `DDC_TRAY_FAKE=1`: a simulated RTK in memory (brightness 75 of 100), no real monitor touched, which the app must announce on stderr.
+- `--scroll`, only with `--fake` (it writes, and the script refuses it otherwise), calls `Scroll` on the item as the host does for the wheel: one vertical notch (+120) must print `ddc-tray: brightness 75 -> 80` within 5 s, one horizontal notch no brightness line within 1.5 s, and one notch down (−120) `ddc-tray: brightness 80 -> 75`.
+- Without options it stops after the registration checks. It always stops the app on the way out (SIGTERM, SIGKILL after 5 s). On Linux the app replaces itself at launch to turn WebKitGTK's DMA-BUF renderer off (D-2026-09-26-tray-app-10); the PID stays the same, so the check still holds.
+
+Any other outcome is exit 1 with a `smoke-sni: FAIL:` line and the end of the app's stderr: no watcher on the session bus; the app exited before registering (most often another instance was already running); no item owned by that PID within 15 s; the app died within 2 s of registering; the item did not answer `Activate` or `Scroll` (an AppIndicator item, as the tray had until iteration 3, has no such method: `busctl` says "No such method", "Método inexistente" in Portuguese); no `popup shown` line within 5 s of `Activate`, or `popup hidden` within 1.5 s of it; no simulated-monitor notice with `--fake`; a missing brightness line after a vertical notch, or one after a horizontal notch; or `panicked` on its stderr.
+
+The SIGTERM that stops the app quits it as **Quit** does, so its KWin placement script is unloaded (`popup placement unloaded from KWin` on its stderr). Only a SIGKILL or a crash leaves it loaded; it only matches the popup of that dead process, and the next start replaces it. To check: `busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting isScriptLoaded s ddc-tray-anchor` (`b false` once no `ddc-tray` runs); to remove one by hand: the same call with `unloadScript`.
+
+### 7. Tray hardware test
+
+```sh
+ddcutil --bus 5 getvcp 10
+DDC_HW_TESTS=1 cargo test -p ddc-tray --locked -- --ignored rtk_qhd_hdr --test-threads=1 --nocapture
+ddcutil --bus 5 getvcp 10
+```
+
+The command runs two tests. Both go through the app's own composition root (`compose_osd()`: the real backend with the capabilities cache), and neither confirms a write.
+
+`rtk_qhd_hdr_panel_loads_and_one_safe_brightness_write_is_restored`:
+
+1. It lists the monitors and picks the RTK by manufacturer and model.
+2. It loads the RTK's panel, reads only: exactly `0x10 0x12 0x62 0x60 0x14 0xD6`, with 7 input sources, 7 color presets and 3 power modes.
+3. It writes brightness once: the original value +10, or −10 when +10 would pass the maximum, and expects that value read back.
+4. A guard writes the original value back, also when an assertion failed first, and expects both the value read back and a fresh read to equal it.
+
+`rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads`, reads only:
+
+1. It lists the monitors and expects exactly one RTK, plus at least one other monitor (the LG TV).
+2. It loads the panel of every other monitor and expects it to fail with `transport` or `timeout`, as the popup needs to skip a mute monitor.
+3. It loads the RTK's panel and expects the six quick controls.
+
+Expected: `2 passed`, with the timings, the monitors, the panel, `brightness <original> -> <target> (max 100): read back Ok(ReadBackDto { current: <target>, max: 100 })`, `restored brightness: Ok(ReadBackDto { current: <original>, max: 100 })`, `LG TV SSCR2: Err(UiError { kind: Transport, message: "transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)" })` and `RTK panel codes: [10, 12, 62, 60, 14, D6]`; both `ddcutil` reads show the same brightness. On 2026-09-26: `list_monitors` 1.17 s, `load_panel` 0.51 s, the write and the restore about 146 ms each, brightness 100 → 90 → 100. On 2026-09-27 the same, and the TV's `load_panel` failed in 4.83 s, the RTK's loaded in 0.76 s. Without `DDC_HW_TESTS=1` the tests print `skipped: …` and pass without touching a monitor. With `DDC_TRAY_FAKE` set, to any value, both fail at once with `DDC_TRAY_FAKE is set: …`, before any monitor is opened: the simulated monitor has the RTK's id and model, and a run on it would be no evidence of the real one. If the second `ddcutil` read differs from the first, put the value back with `$B -m RTK set brightness <original>` (step 0 builds `$B`).
+
+### 8. The popup by hand (optional)
+
+Start `target/release/ddc-tray` and left-click its tray icon. On the dev machine the LG TV is listed first, and its DDC/CI is mute, so its panel fails: check that the popup opens on the RTK (after about 5 s the first time, while it tries the TV) and that the selector at the top lists the TV as "LG TV SSCR2 (no DDC/CI)". On KDE Plasma under Wayland, check that it opens next to the icon, not in the middle of the screen, and that it has no taskbar entry. Then only:
+
+- left-click the icon again: the popup hides; click it once more: it shows;
+- open the monitor selector and the color preset list, and check that the popup stays open while the list is open and after a pick (the bug of iteration 3); Esc on an open list closes only the list;
+- move brightness, contrast and volume and change the color preset, putting each back to its step 0 value right after;
+- roll the mouse wheel over the icon one notch at a time while the popup shows the RTK: brightness moves 5% per notch and the open popup follows; put brightness back;
+- use the menu's **Brightness** entries (right click) only while the popup shows the RTK (they set the monitor the popup last loaded), then put brightness back;
+- open the input and power dialogs only to read them, and close them with **Cancel** or Esc;
+- open **All settings** and run **Probe hidden settings**, which only read, without changing any entry.
+
+Choose **Quit** in the tray menu when done, and record anything the popup shows that `ddc-cli` reads differently.
+
+### Never do through the popup
+
+On any monitor, never press **Apply** in the confirmation dialog, which means never completing:
+
+- an input switch (the input chips): the screen may go dark, and only the monitor's own buttons bring it back;
+- a power mode change (the power button in the header): the monitor may turn off;
+- a change to any entry tagged **Caution** under **All settings** or among the probed ones: OSD control `0xCA`, auto setup `0x1E`, geometry `0x20`, `0x30` and `0x7E`, the manufacturer-specific `0xE6` and `0xF1`, or any other code the core marks dangerous — the codes of [Never run](#never-run). A **Caution** slider opens the dialog when released: cancel it.
+
+The tray's hardware test never confirms a write, and neither does anyone validating the tray by hand.

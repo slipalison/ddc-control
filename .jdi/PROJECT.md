@@ -47,7 +47,7 @@ ddc-control
       **Verify:** `cargo llvm-cov --workspace --summary-only` → coluna Lines >= 80%
       **Source:** PROJECT
 - [ ] No `TODO`/`FIXME` without linked issue reference
-      **Verify:** `! { grep -RInE 'TODO|FIXME' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vE '#[0-9]+' | grep -q .; }`
+      **Verify:** `export LC_ALL=C.UTF-8; STRIP='s/\b(to[ -]?dos?|fixmes?)\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+\)?//Ig'; W='\b(todo|fixme)s?\b|\bto[ -]dos?\b[[:space:]]*[:(]|\bunimplemented!\('; ! grep -RInEi "$W" --include='*.rs' src/ crates/ apps/ 2>/dev/null | sed -E "$STRIP" | grep -Eiq "$W" && echo OK` (D-2026-09-27-tray-app-4/-8/-9/-12/-13/-14/-15: `todo`/`fixme` como palavra em qualquer ponto e caixa, `to-do(s):`, `unimplemented!`; referência de issue vale por OCORRÊNCIA — só o marcador referenciado é removido antes da busca)
       **Source:** PROJECT
 
 ### Manual
@@ -73,5 +73,17 @@ Applied by `/jdi-bootstrap` to `.opencode/opencode.jsonc`. Other runtimes ignore
 
 ```yaml
 frontend:
-  has_frontend: false   # tray popup Tauri não é web app roteável; phase tray-app pode reverter via D-XX
+  # D-2026-09-26-tray-app-8: o popup do tray roda num navegador comum em modo demo (bridge JS
+  # fake quando `window.__TAURI__` não existe, cenário escolhido por `?demo=`). O Gate 7 roda a
+  # suíte Playwright do próprio app em `apps/ddc-tray`: `npm ci --ignore-scripts && npx playwright test`
+  # (zero erro de console/`pageerror` e zero violação axe critical/serious em cada caminho abaixo).
+  has_frontend: true
+  frontend_url: http://localhost:1420
+  dev_command: python3 -m http.server 1420 --directory apps/ddc-tray/src
+  critical_paths:
+    - /
+    - /?demo=rtk
+    - /?demo=two-monitors
+    - /?demo=empty
+    - /?demo=error
 ```

@@ -1,0 +1,277 @@
+{
+  "monitors": [
+    {
+      "id": "RTK-RTK-QHD-HDR-01010101",
+      "label": "RTK QHD HDR",
+      "manufacturer": "RTK",
+      "model": "RTK QHD HDR"
+    }
+  ],
+  "panel": {
+    "monitorId": "RTK-RTK-QHD-HDR-01010101",
+    "controls": [
+      {
+        "code": 16,
+        "key": "brightness",
+        "dangerous": false,
+        "value": {
+          "kind": "continuous",
+          "current": 75,
+          "max": 100
+        }
+      },
+      {
+        "code": 18,
+        "key": "contrast",
+        "dangerous": false,
+        "value": {
+          "kind": "continuous",
+          "current": 50,
+          "max": 100
+        }
+      },
+      {
+        "code": 98,
+        "key": "volume",
+        "dangerous": false,
+        "value": {
+          "kind": "continuous",
+          "current": 30,
+          "max": 100
+        }
+      },
+      {
+        "code": 96,
+        "key": "input",
+        "dangerous": true,
+        "value": {
+          "kind": "nonContinuous",
+          "current": 15,
+          "options": [
+            {
+              "value": 1,
+              "name": "VGA-1"
+            },
+            {
+              "value": 3,
+              "name": "DVI-1"
+            },
+            {
+              "value": 4,
+              "name": "DVI-2"
+            },
+            {
+              "value": 15,
+              "name": "DisplayPort-1"
+            },
+            {
+              "value": 16,
+              "name": "DisplayPort-2"
+            },
+            {
+              "value": 17,
+              "name": "HDMI-1"
+            },
+            {
+              "value": 18,
+              "name": "HDMI-2"
+            }
+          ]
+        }
+      },
+      {
+        "code": 20,
+        "key": "preset",
+        "dangerous": false,
+        "value": {
+          "kind": "nonContinuous",
+          "current": 1,
+          "options": [
+            {
+              "value": 1,
+              "name": "sRGB"
+            },
+            {
+              "value": 2,
+              "name": "Display Native"
+            },
+            {
+              "value": 4,
+              "name": "5000 K"
+            },
+            {
+              "value": 5,
+              "name": "6500 K"
+            },
+            {
+              "value": 6,
+              "name": "7500 K"
+            },
+            {
+              "value": 8,
+              "name": "9300 K"
+            },
+            {
+              "value": 11,
+              "name": "User 1"
+            }
+          ]
+        }
+      },
+      {
+        "code": 214,
+        "key": "power",
+        "dangerous": true,
+        "value": {
+          "kind": "nonContinuous",
+          "current": 1,
+          "options": [
+            {
+              "value": 1,
+              "name": "On"
+            },
+            {
+              "value": 4,
+              "name": "Off (DPM)"
+            },
+            {
+              "value": 5,
+              "name": "Off (write-only)"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "features": [
+    {
+      "code": 12,
+      "alias": "color-temp",
+      "name": "Color Temperature Request",
+      "dangerous": false,
+      "origin": "caps",
+      "status": "ok",
+      "value": {
+        "kind": "continuous",
+        "current": 70,
+        "max": 100
+      }
+    },
+    {
+      "code": 22,
+      "alias": "red-gain",
+      "name": "Video Gain (Red)",
+      "dangerous": false,
+      "origin": "caps",
+      "status": "ok",
+      "value": {
+        "kind": "continuous",
+        "current": 50,
+        "max": 100
+      }
+    },
+    {
+      "code": 24,
+      "alias": "green-gain",
+      "name": "Video Gain (Green)",
+      "dangerous": false,
+      "origin": "caps",
+      "status": "ok",
+      "value": {
+        "kind": "continuous",
+        "current": 48,
+        "max": 100
+      }
+    },
+    {
+      "code": 26,
+      "alias": "blue-gain",
+      "name": "Video Gain (Blue)",
+      "dangerous": false,
+      "origin": "caps",
+      "status": "ok",
+      "value": {
+        "kind": "continuous",
+        "current": 46,
+        "max": 100
+      }
+    },
+    {
+      "code": 135,
+      "alias": "sharpness",
+      "name": "Sharpness",
+      "dangerous": false,
+      "origin": "caps",
+      "status": "ok",
+      "value": {
+        "kind": "continuous",
+        "current": 5,
+        "max": 10
+      }
+    },
+    {
+      "code": 202,
+      "alias": "osd-lock",
+      "name": "OSD/Button Control",
+      "dangerous": true,
+      "origin": "caps",
+      "status": "ok",
+      "value": {
+        "kind": "nonContinuous",
+        "current": 2,
+        "options": [
+          {
+            "value": 1,
+            "name": "OSD disabled"
+          },
+          {
+            "value": 2,
+            "name": "OSD enabled"
+          }
+        ]
+      }
+    },
+    {
+      "code": 204,
+      "alias": "osd-language",
+      "name": "OSD Language",
+      "dangerous": false,
+      "origin": "caps",
+      "status": "ok",
+      "value": {
+        "kind": "nonContinuous",
+        "current": 2,
+        "options": [
+          {
+            "value": 1,
+            "name": "Chinese (traditional)"
+          },
+          {
+            "value": 2,
+            "name": "English"
+          },
+          {
+            "value": 3,
+            "name": "French"
+          },
+          {
+            "value": 4,
+            "name": "German"
+          },
+          {
+            "value": 6,
+            "name": "Japanese"
+          },
+          {
+            "value": 10,
+            "name": "Spanish"
+          },
+          {
+            "value": 13,
+            "name": "Chinese (simplified)"
+          }
+        ]
+      }
+    }
+  ]
+}

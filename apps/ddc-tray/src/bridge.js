@@ -1,0 +1,282 @@
+// The popup's only way to the monitors (D-2026-09-26-tray-app-4): the Tauri
+// commands when `window.__TAURI__` exists, else an in-memory demo of the same
+// contract, picked by `?demo=rtk|two-monitors|empty|error`, for the browser,
+// the Playwright suite and `node --test`. The demo enforces what the core
+// does to the UI: a dangerous write needs `confirmed`, a value must be one
+// the feature accepts, and the answer is the value read back. `&fail=` makes
+// writes, "all settings" or the probe time out, as the backend does when a
+// monitor stops answering, and has hiding the popup or listening to the
+// tray's events refused, as Tauri refuses a command no capability grants,
+// so the popup's failures can be seen too.
+//
+// The demo runs only on a local dev server (D-2026-09-27-tray-app-6).
+// Inside the app (`tauri://localhost`, `http://tauri.localhost`) a missing
+// `__TAURI__` means the app is broken, and simulated values would pass for
+// the monitor's: there every command fails as `backend_unavailable`.
+
+import { DEMO_MESSAGES, failingCommands, scenarioMonitors, scenarioName } from './demo-data.js';
+
+export const DEMO_LATENCY_MS = 60;
+
+/** A probe reads many silent codes, so the demo makes it visibly slower. */
+const PROBE_LATENCY_FACTOR = 8;
+
+const realTimers = Object.freeze({
+  setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
+});
+
+const DEV_PROTOCOLS = new Set(['http:', 'https:']);
+const DEV_HOSTS = new Set(['localhost', '127.0.0.1']);
+
+/** The command behind `listen` in Tauri's own script. */
+const EVENT_LISTEN = 'plugin:event|listen';
+
+/**
+ * The bridge for `win`: Tauri's when it is there; without `__TAURI__`, the
+ * demo's on a local dev server, else one that refuses every command. The
+ * demo also exposes `win.__ddcDemo` ({ scenario, writes, selected, hides,
+ * emit }): `hides` counts the times the popup asked to be hidden.
+ * @param {object} win the page's `window`
+ * @param {{ latencyMs?: number, timers?: { setTimeout: Function } }} [options]
+ */
+export function createBridge(win, { latencyMs = DEMO_LATENCY_MS, timers = realTimers } = {}) {
+  const tauri = win?.__TAURI__;
+  if (typeof tauri?.core?.invoke === 'function') return tauriBridge(tauri);
+  if (tauri == null && isLocalDevServer(win?.location)) return demoBridge(win, latencyMs, timers);
+  return unavailableBridge();
+}
+
+/**
+ * Whether `location` is a page served by a dev server on this machine:
+ * `http:`/`https:` on `localhost` or `127.0.0.1`, any port.
+ * @param {{ protocol?: string, hostname?: string } | undefined} location
+ */
+export function isLocalDevServer(location) {
+  return DEV_PROTOCOLS.has(location?.protocol) && DEV_HOSTS.has(location?.hostname);
+}
+
+/**
+ * A rejection as the contract's `{ kind, message }`; anything else — a
+ * command the capabilities refuse, say — is kind `unknown`.
+ * @param {unknown} error
+ */
+export function normalizeError(error) {
+  if (typeof error?.kind === 'string') {
+    return { kind: error.kind, message: String(error.message ?? '') };
+  }
+  return { kind: 'unknown', message: error instanceof Error ? error.message : String(error) };
+}
+
+function api(mode, invoke, listen) {
+  return Object.freeze({
+    mode,
+    listMonitors: () => invoke('list_monitors'),
+    selectMonitor: (monitorId) => invoke('select_monitor', { monitorId }),
+    loadPanel: (monitorId) => invoke('load_panel', { monitorId }),
+    loadFeatures: (monitorId) => invoke('load_features', { monitorId }),
+    probeFeatures: (monitorId) => invoke('probe_features', { monitorId }),
+    setFeature: (monitorId, code, value, { confirmed = false } = {}) =>
+      invoke('set_feature', { monitorId, code, value, confirmed }),
+    hidePopup: () => invoke('hide_popup'),
+    onPopupShown: (handler) => listen('popup-shown', handler),
+    onPanelChanged: (handler) => listen('panel-changed', handler),
+  });
+}
+
+// Listening is a command too (`plugin:event|listen`), refused as any other.
+function tauriBridge(tauri) {
+  const invoke = async (command, args) => {
+    try {
+      return await tauri.core.invoke(command, args);
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  };
+  const listen = async (event, handler) => {
+    try {
+      return await tauri.event.listen(event, (message) => handler(message.payload));
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  };
+  return api('tauri', invoke, listen);
+}
+
+// No event ever comes, so listening succeeds and does nothing: the first
+// command already shows the error, and a second message would repeat it.
+// The error has no message: no backend answered, so there is none to show
+// as data, and the kind's text, translated, says what went wrong
+// (D-2026-09-27-tray-app-9).
+function unavailableBridge() {
+  const invoke = async () => {
+    throw uiError('backend_unavailable', '');
+  };
+  const listen = async () => () => {};
+  return api('unavailable', invoke, listen);
+}
+
+function demoBridge(win, latencyMs, timers) {
+  const scenario = scenarioName(win?.location?.search);
+  const monitors = scenarioMonitors(scenario);
+  const fails = failingCommands(win?.location?.search);
+  const listeners = new Map();
+  const demo = { scenario, writes: [], selected: null, hides: 0, emit };
+  if (win) win.__ddcDemo = demo;
+
+  const handlers = {
+    list_monitors: () => monitors.map((monitor) => monitor.info),
+    select_monitor: ({ monitorId }) => {
+      demo.selected = monitorOf(monitors, monitorId).info.id;
+      return null;
+    },
+    load_panel: ({ monitorId }) => panelDto(answering(monitors, monitorId)),
+    load_features: ({ monitorId }) => {
+      const { features } = answering(monitors, monitorId);
+      timeOutIfFailing(fails, 'load_features');
+      return features.map(featureDto);
+    },
+    probe_features: ({ monitorId }) => {
+      const { probe } = answering(monitors, monitorId);
+      timeOutIfFailing(fails, 'probe_features');
+      return probe.map(featureDto);
+    },
+    set_feature: (args) => write(monitors, demo.writes, args, fails),
+    hide_popup: () => {
+      refuseIfFailing(fails, 'hide_popup');
+      demo.hides += 1;
+      return null;
+    },
+  };
+
+  const wait = (ms) => (ms > 0 ? new Promise((done) => timers.setTimeout(done, ms)) : Promise.resolve());
+
+  const invoke = async (command, args = {}) => {
+    await wait(command === 'probe_features' ? latencyMs * PROBE_LATENCY_FACTOR : latencyMs);
+    if (scenario === 'error') {
+      throw uiError('backend_unavailable', DEMO_MESSAGES.noBackend());
+    }
+    if (!Object.hasOwn(handlers, command)) throw uiError('unknown', DEMO_MESSAGES.unknownCommand(command));
+    return copy(handlers[command](args));
+  };
+
+  const listen = async (event, handler) => {
+    refuseIfFailing(fails, EVENT_LISTEN);
+    const handlersOf = listeners.get(event) ?? new Set();
+    listeners.set(event, handlersOf);
+    handlersOf.add(handler);
+    return () => {
+      handlersOf.delete(handler);
+    };
+  };
+
+  function emit(event, payload = null) {
+    for (const handler of listeners.get(event) ?? []) handler(copy(payload));
+  }
+
+  return api('demo', invoke, listen);
+}
+
+// As in the core, a write is checked before the monitor is reached, so a
+// failing one still refuses what the core refuses.
+function write(monitors, writes, { monitorId, code, value, confirmed }, fails) {
+  const entry = writableEntry(answering(monitors, monitorId), code);
+  if (entry.dangerous && confirmed !== true) {
+    throw uiError('needs_confirmation', DEMO_MESSAGES.notConfirmed(hex(code)));
+  }
+  validate(entry, value);
+  timeOutIfFailing(fails, 'set_feature');
+  entry.reading.current = value;
+  writes.push({ monitorId, code, value, confirmed: confirmed === true });
+  return { current: entry.reading.current, max: entry.reading.max };
+}
+
+function monitorOf(monitors, monitorId) {
+  const monitor = monitors.find((candidate) => candidate.info.id === monitorId);
+  if (!monitor) throw uiError('not_found', DEMO_MESSAGES.notFound(monitorId));
+  return monitor;
+}
+
+// A mute monitor is listed, but every DDC/CI transaction with it fails with
+// its error — for `load_panel`, exactly what the Rust side answers.
+function answering(monitors, monitorId) {
+  const monitor = monitorOf(monitors, monitorId);
+  if (monitor.mute) throw uiError(monitor.mute.kind, monitor.mute.message);
+  return monitor;
+}
+
+function writableEntry(monitor, code) {
+  const entry = [...monitor.controls, ...monitor.features, ...monitor.probe].find(
+    (candidate) => candidate.code === code,
+  );
+  if (!entry || entry.status === 'unsupported') {
+    throw uiError('unsupported', DEMO_MESSAGES.unsupported(hex(code)));
+  }
+  if (entry.status === 'unresponsive') throw uiError('timeout', DEMO_MESSAGES.timeout());
+  return entry;
+}
+
+// A command `?fail=` names reaches the monitor, which then does not answer
+// in time: nothing is read and nothing changes.
+function timeOutIfFailing(fails, command) {
+  if (fails.has(command)) throw uiError('timeout', DEMO_MESSAGES.timeout());
+}
+
+// A command of the window `?fail=` names (hiding it, listening to the
+// tray) is refused before it runs, and reaches the popup as the app's
+// bridge hands it such a refusal.
+function refuseIfFailing(fails, command) {
+  if (fails.has(command)) throw normalizeError(DEMO_MESSAGES.refusedByTauri(command));
+}
+
+function validate(entry, value) {
+  if (entry.options && !entry.options.some((option) => option.value === value)) {
+    throw uiError('invalid_value', DEMO_MESSAGES.notAllowed(value, hex(entry.code)));
+  }
+  if (!entry.options && value > entry.reading.max) {
+    throw uiError('invalid_value', DEMO_MESSAGES.aboveMax(value, hex(entry.code), entry.reading.max));
+  }
+}
+
+function panelDto(monitor) {
+  return {
+    monitorId: monitor.info.id,
+    controls: monitor.controls.map((entry) => ({
+      code: entry.code,
+      key: entry.alias,
+      dangerous: entry.dangerous,
+      value: valueDto(entry),
+    })),
+  };
+}
+
+function featureDto(entry) {
+  return {
+    code: entry.code,
+    alias: entry.alias,
+    name: entry.name,
+    dangerous: entry.dangerous,
+    origin: entry.origin,
+    status: entry.status,
+    value: entry.status === 'ok' ? valueDto(entry) : null,
+  };
+}
+
+// A non-continuous value lives in the low byte (SL) of the reading.
+function valueDto(entry) {
+  if (entry.options) {
+    return { kind: 'nonContinuous', current: entry.reading.current & 0xff, options: entry.options };
+  }
+  return { kind: 'continuous', current: entry.reading.current, max: entry.reading.max };
+}
+
+function uiError(kind, message) {
+  return { kind, message };
+}
+
+function hex(code) {
+  return `0x${code.toString(16).toUpperCase().padStart(2, '0')}`;
+}
+
+function copy(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}

@@ -2,7 +2,7 @@
 
 Control everything your monitor's physical OSD offers — brightness, contrast, input source, color preset, volume, power — from software, over DDC/CI, with the same Rust binary on Windows and Linux.
 
-**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`), 3 (`cli`) and 4 (`full-osd-control`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, lists every feature with its current value, probes the ones the capabilities leave out, and reads and writes features by name, with factory resets behind `--yes`. Reads are validated on real hardware; writes pass the same checks and are tested against the in-memory backend, and have not been validated on real hardware yet. The tray app comes next. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
+**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`), 3 (`cli`), 4 (`full-osd-control`) and 5 (`tray-app`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, lists every feature with its current value, probes the ones the capabilities leave out, and reads and writes features by name, with factory resets behind `--yes`; the `ddc-tray` app puts the everyday controls in a popup behind a system-tray icon (see [Tray app](#tray-app)). Reads are validated on real hardware. Writes pass the same checks and are tested against the in-memory backend; on real hardware only the tray's hardware test has written so far, one brightness change on the dev monitor, restored right after. The tray runs on Linux (KDE Plasma); on Windows it has not been built yet. CI and installers come next (phases `ci-crossbuild` and `release-packaging`). See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
 
 ## Install
 
@@ -11,6 +11,8 @@ cargo install --path crates/ddc-cli --locked
 ```
 
 On Linux your user needs access to `/dev/i2c-*` first: see [`docs/linux-ddc-setup.md`](docs/linux-ddc-setup.md). Never run `ddc-cli` with `sudo`.
+
+The tray app has no installer or package yet: build and run it from the repository, as described in [Tray app](#tray-app).
 
 ## Usage
 
@@ -260,6 +262,124 @@ Value names match as described in [Features by name](#features-by-name). A non-c
 - Read back to back, the RTK now and then fails a VCP read three times in a row when the attempts are 50 ms apart (`Expected DDC/CI length bit`). VCP retries therefore wait 200 ms, with which four back-to-back `features --probe` runs had no failing code. The price is that a display with mute DDC/CI takes about 0.4 s, not 0.1 s, to fail a read.
 - OSD items with no VCP code (HDR, overdrive, adaptive sync and the like, where a menu has them) cannot be reached over DDC/CI.
 
+## Tray app
+
+`ddc-tray` (`apps/ddc-tray`) puts a monitor icon in the system tray. Its popup adjusts one monitor at a time: brightness, contrast and volume sliders, the color preset, the input source, the power mode, and an **All settings** section with the other adjustable features. It goes through the same core as `ddc-cli`, with the same write checks, and shares its capabilities cache.
+
+<table>
+  <tr>
+    <th>Light</th>
+    <th>Dark</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/tray-popup-light.png" width="240" alt="The tray popup in the light theme: brightness, contrast and volume sliders, the color preset, the input sources with DisplayPort-1 selected, and All settings"></td>
+    <td><img src="docs/screenshots/tray-popup-dark.png" width="240" alt="The same popup in the dark theme"></td>
+  </tr>
+  <tr>
+    <th>Picking a color preset</th>
+    <th>Confirming an input switch</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/tray-popup-list-light.png" width="240" alt="The color preset list open inside the popup, below its button, with sRGB checked and Native, 5000 K, 6500 K, 7500 K, 9300 K and User 1 below it"></td>
+    <td><img src="docs/screenshots/tray-popup-dialog-light.png" width="240" alt="The confirmation dialog for switching the input to HDMI-1, with Cancel and Apply"></td>
+  </tr>
+</table>
+
+The screenshots come from the [browser demo](#browser-demo) (`?demo=rtk`), taken by the Playwright suite: the values are the demo's, not a live monitor's. The list and the dialog are also taken in the dark theme (`tray-popup-list-dark.png` and `tray-popup-dialog-dark.png`, in the same folder).
+
+### Build and run
+
+```sh
+cargo run -p ddc-tray                         # debug build, from the repository root
+cargo build -p ddc-tray --release --locked    # target/release/ddc-tray
+```
+
+The popup's files (`apps/ddc-tray/src`) are embedded in the binary, so it runs on its own. A second launch only shows the popup of the running one and exits, so a single process talks to the monitors.
+
+On Linux the build needs WebKitGTK and librsvg (Tauri's requirements), plus the libudev headers of the DDC/CI backend:
+
+| Distribution | Packages |
+|---|---|
+| Fedora | `webkit2gtk4.1-devel librsvg2-devel systemd-devel` |
+| Debian/Ubuntu | `libwebkit2gtk-4.1-dev librsvg2-dev libudev-dev pkg-config` |
+
+No AppIndicator library is used on Linux: the tray icon is a StatusNotifierItem spoken over D-Bus in Rust (`ksni`), and Tauri's own tray icon is only built for Windows. Only the Fedora set has been tried (Fedora 44, WebKitGTK 2.54); the Debian/Ubuntu names are the equivalents from Tauri's prerequisites. Since the tray is a workspace member, `cargo build --workspace` needs these packages too. Like `ddc-cli`, the app needs access to `/dev/i2c-*`: see [`docs/linux-ddc-setup.md`](docs/linux-ddc-setup.md). Never run it with `sudo`.
+
+### Using it
+
+- **Linux:** the icon is a StatusNotifierItem of the app's own.
+  - A **left click** shows the popup, or hides it when it is open.
+  - The **mouse wheel** over the icon changes the brightness by 5% of its maximum per notch, up when you roll it away from you, never past 0% or 100%. Notches that arrive while a write runs are added up into one write, so a fast roll does not flood the monitor, and an open popup reloads the new value.
+  - A **right click** opens the menu: **Open panel**, **Brightness 0%**, **25%**, **50%**, **75%**, **100%**, and **Quit**.
+  - The wheel and the brightness entries act on the monitor the popup last loaded (before that, the first monitor listed), which the icon's tooltip names; they run off the main thread, and a failure is only printed to stderr.
+  - **Where the popup opens:** on KDE Plasma under Wayland, next to the pointer, that is next to the icon (or the menu entry), inside the screen's work area, with no taskbar entry. The app loads a small KWin script for this at start, over D-Bus, and unloads it when it quits: through **Quit**, or on SIGTERM, SIGINT or SIGHUP (from `pkill`, the session or systemd, Ctrl+C, a closed terminal), which quit the app the same way; it waits at most 2 s for KWin, so a KWin that does not answer never keeps the app from quitting. Only a SIGKILL or a crash leaves the script loaded; it then matches only the popup of that dead process, and the next start replaces it. The script is written to `$XDG_RUNTIME_DIR`, which only you can write to, and nowhere else: without that directory no script is loaded. Elsewhere the popup opens where the compositor puts it (see [Known limitations](#known-limitations-of-the-tray-app)).
+- **Windows:** a left click on the icon shows the popup above it, or hides it when it is open; a right click opens the menu (**Open panel**, **Quit**). This path has not been built or run yet (see [Known limitations](#known-limitations-of-the-tray-app)).
+- The popup hides when it loses the focus, on Esc and when it is closed. Only **Quit** ends the app, or, on Linux, a SIGTERM, SIGINT or SIGHUP, which quit it the same way (a second one while it quits ends it at once).
+- **Lists** (the monitor selector, the color preset and the lists under **All settings**) open inside the popup, never as a menu window of their own, which took the focus from the popup and closed it. A click, Enter, Space or Alt+↓ opens one; the arrows, Home, End, Page Up and Page Down move; Enter or a click picks; Esc, Tab or a click outside closes it without a change. Esc on an open list only closes the list; the next Esc hides the popup. A list opens below its button, or above it when the popup has more room there, and scrolls when it is taller than that room.
+- Sliders write while they move: 80 ms after the last move, coalesced to the last value, with at most one write in flight per feature, and the final value when released. The popup always shows the value the monitor reads back, not the one asked for; when they differ, the value is highlighted and announced to screen readers ("Brightness: the monitor applied 70%.").
+- **Dangerous changes ask first.** Switching the input, changing the power mode, and any feature the core marks dangerous under **All settings** (OSD lock, for one) open a dialog that says what will happen, with the focus on **Cancel**; Esc cancels. Nothing is sent to the monitor before **Apply**. The core still checks the value; the app confirms a dangerous write only after that dialog.
+- **All settings** loads when it is opened: every read-write feature the capabilities declare besides the quick controls, each with its current value, or a status when it gives none. **Probe hidden settings** reads, once each, the catalogued codes the capabilities leave out (a few seconds, reads only) and adds the ones that answer.
+- **Several monitors:** the monitor's name at the top becomes a selector. On opening, the popup tries the monitor it loaded last, then the others in the system's order, and shows the first whose panel loads; one that fails stays in the selector, marked "(no DDC/CI)", and picking it shows its error with **Try again**. A panel fails when none of its six quick controls can be read, with the error of the first reading: so a monitor listed from its EDID whose DDC/CI is mute (turned off in its menu, or a TV such as the dev machine's LG TV) is skipped: the popup does not open on it, remember it or make it the target of the brightness entries. Trying it costs a few seconds (about 5 s for that TV), so a first opening with it listed first shows the loading state that long; later openings try the monitor loaded last first.
+- **No monitor, or an error:** the popup says so, with **Try again** and the hint to turn DDC/CI on in the monitor's own menu; on Linux it also points to `docs/linux-ddc-setup.md` for `/dev/i2c-*` access. If the DDC/CI backend cannot start at all, the app still runs and the popup reports it.
+- **If the popup cannot listen to the tray's events**, it no longer reloads when it opens or when the wheel or the menu change the brightness, so what it shows may be out of date. It says so ("Something went wrong.", with **Try again**, which reads the monitor again), and that message stays until another failure replaces it.
+- **Language:** English or Brazilian Portuguese, chosen automatically: the menu follows the system's locale and the popup the webview's language. Portuguese gives Brazilian Portuguese; anything else, English.
+
+### Browser demo
+
+Without Tauri, on a local dev server (`http` or `https` on `localhost` or `127.0.0.1`), the popup's bridge answers from an in-memory demo of the same commands, with the core's rules for dangerous writes and allowed values, so the UI runs in any browser:
+
+```sh
+python3 -m http.server 1420 --directory apps/ddc-tray/src
+```
+
+Then open `http://localhost:1420/?demo=<scenario>`:
+
+| Scenario | What it shows |
+|---|---|
+| `rtk` (also `/` and any unknown name) | The dev monitor "RTK QHD HDR", with the values of the Rust contract test |
+| `two-monitors` | An LG TV whose DDC/CI is mute (its panel fails with the transport error the real TV gives, so it is skipped and marked "(no DDC/CI)"), the RTK and a Dell U2723QE |
+| `empty` | No monitor found |
+| `error` | The DDC/CI backend could not start |
+
+Nothing leaves the page; accepted writes are listed in `window.__ddcDemo.writes`.
+
+Add `fail=` to the query to see the popup's failures: `write`, `features` and `probe` (one, or several comma-separated: `?demo=rtk&fail=write,probe`) make changes, **All settings** or **Probe hidden settings** time out with the error the backend gives when a monitor stops answering (`timeout`, "monitor did not respond in time"). The demo still refuses first what the core refuses (an unconfirmed dangerous change, a value out of range), and a change that times out changes nothing. `events` and `hide` have listening to the tray's events and hiding the popup (Esc) refused, as Tauri refuses a command no capability grants ("Command hide_popup not allowed by ACL"), which the popup reads as kind `unknown`.
+
+Add `pseudo=1` to the query (`?demo=rtk&pseudo=1`) for the pseudo-locale: every translated text shows between `⟦` and `⟧`, and what the monitor or the core wrote (monitor names, value names no locale translates such as `HDMI-1` or `sRGB`, VCP codes, the backend's messages) is marked `translate="no"` instead. A text with neither came from no translation key. The pseudo-locale exists only in the demo: inside the app `pseudo=1` is ignored.
+
+Anywhere else without Tauri (inside the app, at `tauri://localhost` or `http://tauri.localhost`, should its API be missing) the demo never starts: every command fails as `backend_unavailable`, with no message (no backend answered), and the popup shows that error's translated text, never simulated values as a monitor's.
+
+### Tests
+
+```sh
+cargo test -p ddc-tray --locked
+node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'
+cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
+```
+
+- `cargo test` covers the presentation, the commands, the menu and the tray shortcuts against the in-memory backend. Its goldens are what the Rust side returns: `apps/ddc-tray/tests/fixtures/contract-rtk.json` for the RTK, and `contract-mute.json` for a mute monitor (the LG TV as listed, and the error its panel fails with); the `node --test` suite checks the demo's RTK and mute TV against the same files.
+- `cargo test` also covers the wheel over the tray icon (`scroll.rs`: notches, limits, one write per burst) and, on Linux, the icon's pixmap and the KWin placement's session check.
+- `cargo test` also checks what the app is built with: the Content-Security-Policy Tauri embeds (`tauri.conf.json` merged with the target's `tauri.<platform>.conf.json`, should one be added) must be exactly the strict one, with no `devCsp`, and the build must not be a Tauri dev build, which would serve `devCsp` instead.
+- That check covers the effective policy of Linux, Windows and macOS alike, each target's config merged as Tauri's build merges it for that target (`the_effective_csp_is_the_strict_policy_on_every_target`, which needs no toolchain of the other targets), and the policy lives only in `tauri.conf.json`: a `tauri.<platform>.conf.json` must not touch `app.security` (D-2026-09-27-tray-app-11), and the test fails one that changes `csp` or sets a `devCsp`.
+- `node --test` covers the UI's plain modules (the bridge and its demo, the slider debounce, the view model, the in-page dropdown's keys, clicks and placement, i18n key parity, no literal text in the HTML or in what the scripts put into the page, no phrase in any string or template of the scripts outside the locale files and the demo's data, no text generated by the stylesheet) and the KWin placement script, run against a fake KWin. It needs no install; it runs on Node 24. `--test-reporter=tap` only fixes the output format for scripts.
+- The Playwright suite (`@playwright/test` 1.63.0 and `@axe-core/playwright` 4.13.0, test-only: nothing of it ships) serves `apps/ddc-tray/src` on port 1420 under the app's CSP, in Chromium, light and dark. In every demo scenario, after a change, **All settings** and a probe that time out, and after listening to the tray or hiding the popup is refused (`fail=`), it checks the expected state, no console error and no axe `critical`/`serious` violation (WCAG 2.1 A/AA), plus keyboard use, a mouse drag of the brightness slider (no write while it moves, then one write of the last value after the release), the confirmation dialog and the monitor fallback; served at the app's Windows origin (`http://tauri.localhost`), the popup must report the backend unavailable instead of running the demo. It needs Playwright's Chromium once: `npx playwright install chromium` (user-level, no `sudo`).
+- `SCREENSHOTS=1 npx playwright test screenshots` rewrites the screenshots above and their dark variants, every one in both themes, none skipped; without the variable those tests are skipped.
+- `DDC_TRAY_DEBUG=1 cargo run -p ddc-tray` prints what the tray and the popup do on stderr (`ddc-tray: tray activated`, `popup shown`, `popup hidden`, `popup placement loaded into KWin as script 1`, and `brightness 75 -> 80` after each brightness write from the wheel or the menu…).
+- `DDC_TRAY_FAKE=1` (only `1`) starts the app on a simulated monitor, for tests that must not touch a real one: the RTK of the contract test (`src-tauri/src/fixture.rs`), held in memory, so no `/dev/i2c-*` is opened and writes change only that memory. The app says so on stderr every time.
+- Tray icon smoke test (`apps/ddc-tray/scripts/smoke-sni.sh`: `--activate` clicks the icon over D-Bus and requires the popup to stay shown; `--fake --scroll` rolls the wheel over the icon against the simulated monitor) and the hardware tests: [`docs/hardware-validation.md`](docs/hardware-validation.md#tray-app--phase-tray-app).
+- The Playwright suite also fails any state of the popup that has a native `<select>`, whose menu is a window of its own and took the focus from the popup.
+- In the pseudo-locale, the Playwright suite reads every visible text, readable attribute (`aria-label`, `title`, `aria-valuetext`…) and generated `::before`/`::after` text of 27 states, in both themes (the demo scenarios, every confirmation dialog: the input's, power's before and after another mode is picked, and the generic one from a dangerous list and from a dangerous slider; **All settings** open, probed, loading, empty and failing, and listing codes the catalog does not name, one of them a slider and two that gave no value; a list whose current value is not one of its choices; a probe in progress and one that timed out, the toast after a change that timed out and after listening to the tray or hiding the popup was refused, the open lists, the mute TV's error, loading). Every toast the scripts show has one of those states: a `node --test` check fails a `showToast` call without a state of its own. Each one must be translated, with no letter left outside its `⟦…⟧`, or marked `translate="no"`, and nothing marked `translate="no"` may be a translation. A literal text fails it even when it reaches the page through a constant or a helper, where the `node --test` scan of `app.js` does not look, and even when it is glued to a translation (`⟦…⟧ (more)`).
+- On the demo, a guard checks every text the page comes to show, whatever wrote it: a text node or a readable attribute that has a letter, that no translation produced and that is not marked `translate="no"` is logged with `console.error` as `ddc-tray: untranslated text: "…" in <element>`. The Playwright suite fails on any console error, so every one of its tests (keyboard, drag, dialogs, failures) checks the texts it shows, not only the pseudo-locale's states; `tests/e2e/text-guard.spec.mjs` checks that the guard runs on the demo and not at the app's origin. Inside the app the guard is off.
+
+### Known limitations of the tray app
+
+- **The popup is anchored to the icon on KDE Plasma under Wayland only.** Wayland lets no app place its own window; on Plasma the app asks KWin to, through a script it loads over D-Bus, placed at the pointer when the popup opens. Elsewhere (GNOME, other Wayland compositors, X11 sessions) it opens where the compositor or the window manager puts it, usually centered. A layer-shell surface (`gtk-layer-shell`) could anchor it on more compositors, but it needs a system library at build and run time, so it was left out. Running the popup through XWayland (`GDK_BACKEND=x11`) was ruled out: it blurs at fractional scales such as 125%. A popup opened by a second launch (from a launcher, say) also opens at the pointer.
+- **GNOME** shows StatusNotifierItems only with the AppIndicator extension; without it there is no icon. The tray has been tried on KDE Plasma (Wayland) only. The wheel follows Plasma's convention (120 per notch, positive away from the user); GNOME's extension is known to send other units, so there the wheel may not step, or may step the other way.
+- **WebKitGTK's DMA-BUF renderer is off on Linux.** On the dev machine (KDE Plasma on Wayland, NVIDIA driver 615, WebKitGTK 2.54) it killed the app with `Error 71 (Protocol error) dispatching to Wayland display` as soon as the popup was shown. So at launch `ddc-tray` replaces itself (same process id, same arguments) with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, unless that variable is already set: a value you set, whatever it is, is kept (D-2026-09-26-tray-app-10). The popup is then drawn without DMA-BUF, a negligible cost for a 360×560 window.
+- **Windows is untested.** The Windows paths (Tauri's tray icon in `tray/notification_area.rs`: left click, anchoring above the icon; `icon.ico`; no console window in release builds) are written but have never been built for Windows: checking the tray for Windows from Linux stops in `tauri-winres`, which needs `llvm-rc`. That module compiles, and its tests pass, only when forced onto a Linux build. The phase `ci-crossbuild` builds it on Windows. DDC/CI through `dxva2` has not been exercised by the tray.
+- **No autostart, profiles or global hotkeys** yet: phase `profiles-hotkeys`.
+- **No installer** yet: bundling is off, and packages (MSI/NSIS, deb/rpm/AppImage) come with phase `release-packaging`. Build it from source.
+
 ## Layout
 
 - `crates/ddc-core` — the hexagon. Domain types (`VcpCode`, `VcpValue`, `MonitorId`, `Feature`, `Risk`, `Confirm`, `ProbedFeature`, `DdcError`), `Capabilities` with its own MCCS capabilities-string parser, the MCCS feature catalog (`domain::mccs_catalog`: one static table of names, kinds, access, risk and value names, and the lookups built on it), the ports `MonitorBackend` (driven) and `MonitorControl` (driving, including the read-only `probe_undeclared_features`), and `SoftwareOsd`, which implements `MonitorControl` on top of any `MonitorBackend`. Depends on `thiserror` only.
@@ -276,10 +396,15 @@ Value names match as described in [Features by name](#features-by-name). A non-c
   - `CachingMonitorBackend`, a decorator for any backend that keeps capabilities strings on disk, one file per monitor id, in a directory its caller passes in. Only successful reads the core can parse are stored, and cache I/O never fails a call. `invalidate` makes reads reach the monitor until one succeeds and replaces the file; until then the file is kept for later runs. `default_cache_dir()` resolves the per-user directory above.
   - `InMemoryMonitorBackend`, a scripted fake the core's use-case tests run against.
 - `crates/ddc-cli` — the `ddc-cli` binary, a driving adapter: clap arguments, monitor selection, text and JSON output, and the exit-code table. `main.rs` is only the composition root that wires `DdcHiMonitorBackend`, `CachingMonitorBackend` and `SoftwareOsd`.
+- `apps/ddc-tray` — the [tray app](#tray-app), a Tauri 2 driving adapter:
+  - `src-tauri/` is the `ddc-tray` crate. `panel.rs` is plain Rust over the `MonitorControl` port: it builds the panel, the "All settings" list and the error kinds the UI shows, with every name and risk taken from the core. `scroll.rs` is the wheel over the icon, also plain Rust over the port. `dto.rs` holds the serde types of the UI contract, `commands.rs` the thin `async` Tauri commands (each DDC/CI call on a blocking thread), `menu.rs` and `i18n.rs` the bilingual menu, and `popup.rs` the show/hide rule for tray clicks. `tray.rs` holds what both icons share; `tray/status_item.rs` is the Linux StatusNotifierItem (`ksni`), `tray/kwin_placement.rs` loads `kwin/anchor.js` into KWin on Plasma under Wayland, and `tray/notification_area.rs` is Tauri's tray icon on Windows. `lib.rs` is the composition root: `compose_osd()` wires `DdcHiMonitorBackend`, `CachingMonitorBackend` and `SoftwareOsd` as the CLI does (or, with `DDC_TRAY_FAKE=1`, `InMemoryMonitorBackend` serving the simulated monitor of `fixture.rs`), and `run()` adds the single-instance plugin (and the positioner on Windows) and, on Linux, `stop_signals.rs`, which quits on SIGTERM, SIGINT and SIGHUP as **Quit** does. `#![forbid(unsafe_code)]`, a strict CSP and capabilities that allow only the app's own commands and events.
+  - `src/` is the popup: static HTML, CSS and ES modules, no bundler and no npm at runtime. `bridge.js` calls the Tauri commands, or the in-memory demo in a plain browser; `dropdown.js` (the in-page lists), `debounce.js`, `view-model.js` and `i18n/` (English and Brazilian Portuguese) hold the logic the tests reach.
+  - `tests/` holds the `node --test` suites (`ui/`), the Playwright suite (`e2e/`) and the contract goldens (`fixtures/`); `scripts/smoke-sni.sh` is the Linux tray smoke test. `package.json` lists only the test tools.
 
 Still to come:
 
-- `apps/ddc-tray` — Tauri 2 tray popup: monitor picker, sliders, input/preset/power, profiles, global hotkeys, phase `tray-app`.
+- CI on Linux and Windows (phase `ci-crossbuild`), then installers and release packages (phase `release-packaging`).
+- Profiles, global hotkeys and autostart (phase `profiles-hotkeys`).
 
 Architecture is locked to Hexagonal (Ports & Adapters) — see `.jdi/PROJECT.md` and `.jdi/decisions/`.
 
@@ -294,6 +419,8 @@ Every write goes through `MonitorControl::set_feature`, and the core — never a
 
 `reset <target> --yes` is `set <code> reset --yes`, the same path with the catalog's only value for the code, `0x01`.
 
+In the tray app the popup's confirmation dialog plays the role of `--yes`: a write is sent as confirmed only after **Apply**, and `Confirm::Yes` is built in one place, `apps/ddc-tray/src-tauri/src/commands.rs`. The brightness entries of the tray menu write brightness only, a safe feature, and never confirm anything.
+
 Reads are never filtered by the capabilities string: monitors answer codes they do not declare (the dev monitor answers `0x62` volume), so `get_feature` always reads and reports `declared_in_capabilities` instead. A capabilities string that cannot be read or parsed does not block reads or writes either: the monitor is treated as declaring no code, the catalog still gives each code its kind and access, and a continuous write reads the feature's maximum first. The failure is remembered per monitor, and only an explicit `capabilities` request asks the monitor again. `probe_undeclared_features` reads each catalogued code the capabilities leave out once and never writes.
 
 ## Dev setup
@@ -307,7 +434,7 @@ cargo install cargo-llvm-cov --locked
 git config core.hooksPath .githooks             # once per clone — see below
 ```
 
-On Linux the real backend needs the libudev headers to build (`systemd-devel` on Fedora, `libudev-dev` and `pkg-config` on Debian/Ubuntu).
+On Linux the real backend needs the libudev headers to build (`systemd-devel` on Fedora, `libudev-dev` and `pkg-config` on Debian/Ubuntu), and the tray app, a workspace member, needs Tauri's system libraries: see [Build and run](#build-and-run). The tray's UI tests need Node.js (24 here) and, for the Playwright suite, `npm`.
 
 Quality gates (the reviewer runs exactly these):
 
@@ -316,9 +443,10 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'
+(cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test)
 ```
 
-Cross-platform checks: the Windows one also proves, through a static assertion, that `DdcHiMonitorBackend` is `Send + Sync` on Windows.
+Cross-platform checks: the Windows one also proves, through a static assertion, that `DdcHiMonitorBackend` is `Send + Sync` on Windows. The tray is left out of the Windows check: from Linux it stops in `tauri-winres`, which needs `llvm-rc`.
 
 ```sh
 cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked --target x86_64-unknown-linux-gnu
@@ -326,10 +454,11 @@ cargo check -p ddc-adapters --locked --features ddc-hi --target x86_64-pc-window
 cargo check -p ddc-cli --locked --target x86_64-pc-windows-msvc
 ```
 
-Hardware tests are read-only, `#[ignore]`d, and do nothing unless `DDC_HW_TESTS=1`. They expect the dev monitor "RTK QHD HDR" to be attached. CI and reviewers never run them.
+Hardware tests are `#[ignore]`d and do nothing unless `DDC_HW_TESTS=1`. They expect the dev monitor "RTK QHD HDR" to be attached. CI and reviewers never run them. The `ddc-adapters` ones only read; of the tray's two, one makes a single safe brightness change and restores it, and the other only reads. The tray's refuse to run with `DDC_TRAY_FAKE` set, whose simulated monitor would pass for the RTK.
 
 ```sh
 DDC_HW_TESTS=1 cargo test -p ddc-adapters --locked --test real_monitor -- --ignored --test-threads=1 --nocapture
+DDC_HW_TESTS=1 cargo test -p ddc-tray --locked -- --ignored rtk_qhd_hdr --test-threads=1 --nocapture
 ```
 
 Linux: load `i2c-dev` and make sure your user can open `/dev/i2c-*` (a udev `uaccess` rule or group `i2c`). Never run the tool with `sudo`. Step by step: [`docs/linux-ddc-setup.md`](docs/linux-ddc-setup.md).

@@ -1,0 +1,54 @@
+[package]
+name = "ddc-tray"
+description = "System-tray driving adapter of ddc-control: a popup to adjust monitor brightness, contrast, volume, input, colour preset and power over DDC/CI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ddc_tray"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ddc-tray"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = "2.7.0"
+
+# Declared here rather than in [workspace.dependencies] so serde and the
+# Tauri runtime stay out of the hexagon's crates (D-2): only this driving
+# adapter serializes DTOs and talks to the webview (D-2026-09-26-tray-app-2).
+[dependencies]
+ddc-core = { workspace = true }
+ddc-adapters = { workspace = true }
+# `custom-protocol` always: without it even `--release` is a Tauri dev
+# build, which serves `devCsp` instead of `csp` (D-2026-09-27-tray-app-10).
+tauri = { version = "2.12.0", features = ["image-png", "custom-protocol"] }
+tauri-plugin-single-instance = "2.5.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sys-locale = "0.3.2"
+
+# Windows: Tauri's tray icon, whose left click toggles the popup anchored
+# above it by the positioner.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tauri = { version = "2.12.0", features = ["tray-icon", "image-png"] }
+tauri-plugin-positioner = { version = "2.4.0", features = ["tray-icon"] }
+
+# Linux: a StatusNotifierItem of the app's own, in pure Rust over zbus, that
+# hears the left click and the wheel — the AppIndicator behind Tauri's tray
+# icon only shows a menu there (D-2026-09-27-tray-app-2). Tokio is the
+# runtime Tauri already runs on.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3.6", default-features = false, features = ["tokio"] }
+# Loads the popup-placement script into KWin on KDE Plasma under Wayland
+# (D-2026-09-27-tray-app-3); already in the tree through ksni.
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+# Tauri's runtime, named for two features it already builds with: `signal`,
+# so SIGTERM/SIGINT/SIGHUP quit the app as its Quit item does and the KWin
+# script is unloaded, and `time`, to bound that unload.
+tokio = { version = "1.53.1", default-features = false, features = ["signal", "time"] }
+
+[lints]
+workspace = true
