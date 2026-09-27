@@ -1,6 +1,6 @@
 # Phase 3: Review  (slug: cli)
 
-**Verdict:** APPROVED_PENDING_MANUAL
+**Verdict:** APPROVED_WITH_WARNINGS
 
 _Iter 3: re-verify depois do fix round de warnings (`/jdi-issue` Step 6)._
 - **Escopo:** commits `42e74d7..HEAD` na branch `phase/cli`, com foco no delta `97561c1..HEAD` (`3b48fce`, `6293e17`, `705e1e3`, `ed1a2af`, `62da5d0`, `f6a8585`).
@@ -166,8 +166,8 @@ _Iter 3: re-verify depois do fix round de warnings (`/jdi-issue` Step 6)._
 | 1 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | exit 0: 194 passed, 0 failed, 6 ignored (hardware). Saída do Gate 2 reaproveitada |
 | 2 | Coverage >= 80% of lines | PROJECT | Auto | PASS | TOTAL Lines 96.75% (1386 linhas, 45 perdidas). `--fail-under-lines 80` com exit 0 (saída do Gate 3 reaproveitada) |
 | 3 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | Verify exit 0, nenhum hit |
-| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: em `705e1e3`, `## [Unreleased]` (`CHANGELOG.md:8`) ganhou a recusa 0x01 → `UnsupportedFeature` sem retry (no Linux; no Windows não) e a frase "A code the monitor refuses as unsupported exits 4, not 6". Ainda não há heading `## [x.y.z]`: nenhuma release foi cortada |
-| 5 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: linha 4 da tabela de exit codes (`README.md:82`); parágrafo novo "exit 4 vs 6", com os códigos que o RTK recusa e a ressalva do Windows (`:86`); bullet Retries (`:113`); "about 1.6 s longer" (`:99`). Conferir a frase "dxva2 keeps that reply to itself" contra W-6, e o panic em 0x7E (W-7), que não está em Known limitations |
+| 4 | CHANGELOG.md updated with entry per release | PROJECT | Manual | CONFIRMED | suggested: em `705e1e3`, `## [Unreleased]` (`CHANGELOG.md:8`) ganhou a recusa 0x01 → `UnsupportedFeature` sem retry (no Linux; no Windows não) e a frase "A code the monitor refuses as unsupported exits 4, not 6". Ainda não há heading `## [x.y.z]`: nenhuma release foi cortada |
+| 5 | README accurately describes current behavior | PROJECT | Manual | CONFIRMED | suggested: linha 4 da tabela de exit codes (`README.md:82`); parágrafo novo "exit 4 vs 6", com os códigos que o RTK recusa e a ressalva do Windows (`:86`); bullet Retries (`:113`); "about 1.6 s longer" (`:99`). Conferir a frase "dxva2 keeps that reply to itself" contra W-6, e o panic em 0x7E (W-7), que não está em Known limitations |
 | 6 | `crates/ddc-cli` no workspace com clap derive; serde só em `ddc-cli` (D-2) | CONTEXT | Auto | PASS | Verify imprimiu `OK`. Os novos dev-deps `ddc`/`ddc-i2c` não trazem serde para `ddc-adapters/Cargo.toml` |
 | 7 | Teste `caching_backend_reads_capabilities_from_disk_without_calling_wrapped_backend_after_first_fetch` | CONTEXT | Auto | PASS | `test result: ok. 1 passed; 0 failed` |
 | 8 | Teste `caching_backend_never_persists_failures_and_refresh_forces_a_fresh_overwrite` | CONTEXT | Auto | PASS | `test result: ok. 1 passed; 0 failed` |
@@ -206,3 +206,14 @@ Run `/jdi-confirm-dod cli` to confirm each manual item with evidence. Without th
 Forçado pelo `/jdi-issue` na re-verificação pós fix round W-4: 0 linhas hollow (critic retornou `[]`).
 
 **Verdict:** APPROVED
+
+## DoD Manual Confirmations
+
+- [x] CHANGELOG.md updated with entry per release
+      **Confirmed at:** 2026-09-27T15:34:08Z
+      **By:** alison amorim
+      **Evidence:** PR #5, landed via PR #6 (2628f8c) revisado e mergeado pelo mantenedor; a entrada da phase está em `## [Unreleased]` do CHANGELOG.md. Nenhuma versão foi lançada ainda: o heading `## [versão]` passa a ser cortado pelo fluxo de release (phase `release-packaging`). Confirmado pelo usuário em 2026-09-27.
+- [x] README accurately describes current behavior
+      **Confirmed at:** 2026-09-27T15:34:08Z
+      **By:** alison amorim
+      **Evidence:** diff do README revisado no PR #5, landed via PR #6 (2628f8c) e mergeado na `main`. Confirmado pelo usuário em 2026-09-27.
