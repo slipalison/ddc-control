@@ -210,6 +210,19 @@ test('scripts never parse markup, set a style attribute or evaluate code', () =>
   }
 });
 
+// A text a style generates reaches no key either, in any state, visited
+// by the pseudo-locale spec or not.
+test('no style writes a text: every content of styles.css is empty', () => {
+  const css = source('styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const contents = [...css.matchAll(/[{;]\s*content\s*:\s*([^;}]*)/g)].map(([, value]) => value.trim());
+
+  assert.ok(contents.length >= 1, 'the content declarations were read');
+  assert.deepEqual(
+    contents.filter((value) => !['""', "''", 'none', 'normal'].includes(value)),
+    [],
+  );
+});
+
 test('a slider fill is set as a custom property, the one style the script touches', () => {
   const styleWrites = [...app.matchAll(/\.style\.(\w+)/g)].map(([, member]) => member);
 
@@ -571,3 +584,186 @@ function endOfLine(code, start) {
   const end = code.indexOf('\n', start);
   return end < 0 ? code.length : end;
 }
+
+// ---------------------------------------- natural language in the scripts
+//
+// D-2026-09-27-tray-app-9. The scan above follows a text to the places it
+// enters the page, and the pseudo-locale spec only sees the states it
+// renders: a sentence parked in a const, picked by a ternary or handed
+// through a sink neither knows gets past both. So no string or template
+// literal of the popup's scripts may hold a phrase — two or more words of
+// two or more letters, apart by whitespace — whatever it is for, but in
+// the locale files (`i18n/`: the texts themselves) and in `demo-data.js`
+// (the demo's monitors and backend, written out as the core and Tauri
+// answer). A template is read with `${}` where each expression was, each
+// literal inside an expression on its own; literals joined with `+` are
+// read as one, a plain operand between two of them as `${}`; escapes are
+// read as the characters they stand for.
+
+/** Paths under `src/` whose literals are texts or data by design. */
+const isLanguageFile = (path) => path.startsWith('i18n/') || path === 'demo-data.js';
+
+/**
+ * Literals with two words that are not language, by file, each with why.
+ * An entry names one literal exactly (as read: `${}` for an expression),
+ * and must still be in its file.
+ */
+const NOT_LANGUAGE = [
+  { file: 'app.js', literal: 'slider has-icon', why: 'the class names of a slider with an icon (className)' },
+  { file: 'app.js', literal: 'feature-row is-silent', why: 'the class names of a feature with no value (className)' },
+  { file: 'icons.js', literal: 'icon icon-${}', why: "the class names of an icon's svg (its class attribute)" },
+];
+
+const WORD = /\p{L}{2,}/u;
+const ESCAPED = /\\(?:u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2})|(\r\n|[\s\S]))/g;
+const SINGLE_ESCAPES = { n: '\n', t: '\t', r: '\r', v: '\v', f: '\f', b: '\b', 0: '\0' };
+
+/** Whether `text` has two or more whitespace-separated words of two or more letters. */
+function isPhrase(text) {
+  return text.split(/\s+/u).filter((chunk) => WORD.test(chunk)).length >= 2;
+}
+
+/** A literal's source text as the characters it stands for. */
+function cooked(raw) {
+  return raw.replace(ESCAPED, (escape, braced, unicode, byte, other) => {
+    const code = braced ?? unicode ?? byte;
+    if (code !== undefined) return String.fromCodePoint(Number.parseInt(code, 16));
+    if (/^[\r\n\u2028\u2029]/.test(other)) return '';
+    return SINGLE_ESCAPES[other] ?? other;
+  });
+}
+
+const isLiteral = (token) => token?.kind === 'string' || token?.kind === 'template';
+
+/** Where a plain operand (`a`, `a.b`, `a?.b(c)`, `a[0]`, `1`) that starts at `start` ends, or -1. */
+function operandEnd(tokens, start) {
+  let index = start;
+  if (!['word', 'number'].includes(tokens[index]?.kind)) return -1;
+  index += 1;
+  for (;;) {
+    const text = tokens[index]?.text;
+    if ((text === '.' || text === '?.') && tokens[index + 1]?.kind === 'word') index += 2;
+    else if ((text === '(' || text === '[') && tokens[index]?.kind === 'punct') index = closing(tokens, index) + 1;
+    else return index;
+  }
+}
+
+/**
+ * Every literal text of `tokens` as `{ at, text }`: a literal, or a chain
+ * of them joined with `+`, and, on their own, the literals inside each
+ * template's expressions.
+ */
+function literalChains(tokens) {
+  const chains = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!isLiteral(token)) continue;
+    const parts = [token];
+    let next = index + 1;
+    for (;;) {
+      if (tokens[next]?.text !== '+') break;
+      if (isLiteral(tokens[next + 1])) {
+        parts.push(tokens[next + 1]);
+        next += 2;
+        continue;
+      }
+      const end = operandEnd(tokens, next + 1);
+      if (end < 0 || tokens[end]?.text !== '+' || !isLiteral(tokens[end + 1])) break;
+      parts.push(null, tokens[end + 1]);
+      next = end + 2;
+    }
+    chains.push({ at: token.at, text: parts.map((part) => (part ? cooked(part.text) : '${}')).join('') });
+    for (const part of parts) {
+      for (const expression of part?.expressions ?? []) chains.push(...literalChains(expression));
+    }
+    index = next - 1;
+  }
+  return chains;
+}
+
+/** The phrases among the literals of `code`, as `{ line, literal }`, and how many literals were read. */
+function phrasesIn(code) {
+  const chains = literalChains(tokenize(code).tokens);
+  const phrases = chains
+    .filter(({ text }) => isPhrase(text))
+    .map(({ at, text }) => ({ line: lineOf(code, at), literal: text }));
+  return { phrases, read: chains.length };
+}
+
+/** The popup's scripts under `src/`, by path relative to it: `[path, source]`. */
+function popupScripts() {
+  const root = new URL('../../src/', import.meta.url);
+  return readdirSync(root, { recursive: true })
+    .map((path) => String(path).replaceAll('\\', '/'))
+    .filter((path) => /\.[cm]?js$/.test(path))
+    .sort()
+    .map((path) => [path, readFileSync(new URL(path, root), 'utf8')]);
+}
+
+test('no natural-language literal outside the locale files', () => {
+  const scripts = popupScripts();
+  const scanned = scripts.filter(([path]) => !isLanguageFile(path));
+  const skipped = scripts.filter(([path]) => isLanguageFile(path)).map(([path]) => path);
+
+  assert.deepEqual(skipped, ['demo-data.js', 'i18n/en.js', 'i18n/index.js', 'i18n/pt-BR.js'], 'files left out');
+  const names = scanned.map(([path]) => path);
+  for (const expected of ['app.js', 'bridge.js', 'debounce.js', 'dropdown.js', 'icons.js', 'view-model.js']) {
+    assert.ok(names.includes(expected), `${expected} was read`);
+  }
+  const found = [];
+  const allowed = new Set();
+  let read = 0;
+  for (const [path, code] of scanned) {
+    const scan = phrasesIn(code);
+    read += scan.read;
+    for (const { line, literal } of scan.phrases) {
+      const entry = NOT_LANGUAGE.find((candidate) => candidate.file === path && candidate.literal === literal);
+      if (entry) allowed.add(entry);
+      else found.push(`${path}:${line} ${JSON.stringify(literal)}`);
+    }
+  }
+
+  assert.ok(read >= 500, `only ${read} literals read`);
+  assert.deepEqual(found, [], 'phrases a translation never reaches');
+  assert.deepEqual(
+    NOT_LANGUAGE.filter((entry) => !allowed.has(entry)).map(({ file, literal }) => `${file} ${literal}`),
+    [],
+    'allowed literals no longer there',
+  );
+});
+
+test('the phrase scan reads every literal form, and only literals', () => {
+  const code = [
+    "const note = input ? t('confirm.recover.input') : 'Some monitors only undo this from their own buttons.';",
+    "setText(ui.probeNote, t('more.probeEmpty') + ' (nothing else to try)');",
+    'const suffix = `Updated ${count} monitors`;',
+    'const nested = `${busy ? `Saving ${what} now` : t(`value.${slug}`)}`;',
+    "const glued = 'Try' + ' again';",
+    "const around = 'Wait ' + delay.seconds + ' seconds';",
+    "const escaped = 'Hidden\\u0020text' + \"\\x20\";",
+    "const contraction = \"It's broken\";",
+    "const oneWord = 'Brightness';",
+    "const key = t('confirm.body.generic', { feature: label, to: 'x' });",
+    "const pair = ['0 0 24 24', 'M15.25 15.25 19.75 19.75', 'a b c'];",
+    "// const inComment = 'In a comment';",
+    '/* const inBlock = "In a block"; */',
+    'const regex = /Some words here/u;',
+    'const gap = `${first}${second}`;',
+  ].join('\n');
+
+  const { phrases } = phrasesIn(code);
+
+  assert.deepEqual(
+    phrases.map(({ line, literal }) => `${line} ${JSON.stringify(literal)}`),
+    [
+      '1 "Some monitors only undo this from their own buttons."',
+      '2 " (nothing else to try)"',
+      '3 "Updated ${} monitors"',
+      '4 "Saving ${} now"',
+      '5 "Try again"',
+      '6 "Wait ${} seconds"',
+      '7 "Hidden text "',
+      '8 "It\'s broken"',
+    ],
+  );
+});
