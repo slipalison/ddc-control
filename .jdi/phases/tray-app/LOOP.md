@@ -1,7 +1,7 @@
 ---
 phase_slug: tray-app
 phase_position: 5
-iter: 3
+iter: 4
 total_resets: 1
 status: running
 max_iter_per_round: 5
@@ -27,3 +27,4 @@ created_at: 2026-09-26T21:35:52-03:00
 - iter 7 (round 2, 2): APPROVED_PENDING_MANUAL (3 warns: W-1 audit, W-2 pseudo check not strict, W-3 copy space), hash=ad5affd909b4, commit=5919fb0, ts=2026-09-27T04:37:48-03:00 — critic não rodado: W-2 era a lacuna que ele acharia; rodada de warnings (iter 8) disparada antes
 - iter 8 (round 2, 3): APPROVED_PENDING_MANUAL (1 warn: W-1), hash=63e2479e211c, commit=8382d9c, ts=2026-09-27T04:59:20-03:00
 - iter 8 aggregate after DoD critic: BLOCKED (critic: 3 rows — failure-state texts outside pseudo states; lowercase todo / todo!()), ts=2026-09-27T04:59:20-03:00
+- iter 9 (round 2, 4): APPROVED_PENDING_MANUAL (2 warns: W-1 audit, W-2 two toasts outside pseudo states), hash=40e2da24aa72, commit=19f86b3, ts=2026-09-27T05:23:32-03:00 — critic não rodado: W-2 é a classe que ele acharia; rodada de warnings (iter 10) disparada
