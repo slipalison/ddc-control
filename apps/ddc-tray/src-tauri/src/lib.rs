@@ -31,6 +31,10 @@ use crate::popup::PopupGate;
 /// Label of the popup window in `tauri.conf.json`.
 const POPUP: &str = "popup";
 
+/// WebKitGTK's switch that turns its DMA-BUF renderer off.
+#[cfg(target_os = "linux")]
+const DMABUF_SWITCH: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+
 /// Builds the core over the real DDC/CI backend, with the on-disk
 /// capabilities cache the CLI also uses (D-2026-09-26-tray-app-3). Without
 /// a cache directory the core reads the capabilities from the monitor, as
@@ -95,18 +99,26 @@ pub fn run() -> Result<(), tauri::Error> {
 fn restart_without_dmabuf_renderer() {
     use std::os::unix::process::CommandExt;
 
-    const SWITCH: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
-    if std::env::var_os(SWITCH).is_some() {
+    let current = std::env::var_os(DMABUF_SWITCH);
+    let Some(value) = dmabuf_switch_to_set(current.as_deref()) else {
         return;
-    }
+    };
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
     let error = std::process::Command::new(exe)
         .args(std::env::args_os().skip(1))
-        .env(SWITCH, "1")
+        .env(DMABUF_SWITCH, value)
         .exec();
     report("restart with the DMA-BUF renderer off", &error);
+}
+
+/// The value to restart with, given the switch's `current` one: `1` when
+/// it is unset, else none — whatever the user set, even an empty or
+/// non-UTF-8 value, is kept (D-2026-09-26-tray-app-10).
+#[cfg(target_os = "linux")]
+fn dmabuf_switch_to_set(current: Option<&std::ffi::OsStr>) -> Option<&'static str> {
+    current.is_none().then_some("1")
 }
 
 /// Shows and focuses the popup, and tells the UI to revalidate what it
@@ -155,4 +167,30 @@ fn hide<R: Runtime>(window: &Window<R>) {
 /// and the user has nothing to act on.
 pub(crate) fn report(action: &str, error: &dyn Display) {
     eprintln!("ddc-tray: could not {action}: {error}");
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    use super::dmabuf_switch_to_set;
+
+    #[test]
+    fn an_unset_switch_restarts_with_the_dmabuf_renderer_off() {
+        assert_eq!(dmabuf_switch_to_set(None), Some("1"));
+    }
+
+    #[test]
+    fn a_switch_the_user_set_is_kept_whatever_its_value() {
+        let values = [
+            OsStr::new("1"),
+            OsStr::new("0"),
+            OsStr::new(""),
+            OsStr::from_bytes(b"\xFF"),
+        ];
+        for value in values {
+            assert_eq!(dmabuf_switch_to_set(Some(value)), None, "{value:?}");
+        }
+    }
 }
