@@ -1,7 +1,7 @@
 ---
 phase_slug: tray-app
 phase_position: 5
-iter: 3
+iter: 4
 total_resets: 0
 status: running
 max_iter_per_round: 5
@@ -17,3 +17,5 @@ created_at: 2026-09-26T21:35:52-03:00
 - iter 2 aggregate after DoD critic: BLOCKED (critic: 13 rows objective hollow — Verify commands; code OK). Usuário testou a versão instalada e reportou: (1) abrir um select fecha o painel; (2) pediu o painel direto no ícone da bandeja — entram na iter 3, ts=2026-09-27T00:44:34-03:00
 - iter 3: APPROVED_PENDING_MANUAL (4 warns), hash=2af798678662, commit=0b02ca7, ts=2026-09-27T01:56:10-03:00
 - iter 3 aggregate after DoD critic: BLOCKED (critic: 8 rows objective hollow — Verify + 2 need code seams: fake-backend smoke for wheel/activate, runtime no-select assertion), ts=2026-09-27T01:56:10-03:00
+- iter 4: APPROVED_PENDING_MANUAL (2 warns), hash=61a03cbb125e, commit=c725c2e, ts=2026-09-27T02:51:51-03:00
+- iter 4 aggregate after DoD critic: BLOCKED (critic: 2 rows objective hollow — debounce vs throttle test gap, axe config not locked), ts=2026-09-27T02:51:51-03:00
