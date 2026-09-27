@@ -118,6 +118,8 @@ const model = {
   power: null,
   features: 'idle',
   probing: false,
+  /** Whether the toast tells a failure no later load or write mends. */
+  toastLasts: false,
 };
 
 // One lane per monitor and code: a slider burst becomes one write of its
@@ -198,6 +200,9 @@ async function listen() {
     await bridge.onPanelChanged(panelChanged);
   } catch (error) {
     showToast(errorText(error, t));
+    // The popup starts hidden, and its first load would hide this before
+    // anyone saw it; without the tray's events, what it shows may go stale.
+    model.toastLasts = true;
   }
 }
 
@@ -391,13 +396,15 @@ function paintMessage(status) {
 }
 
 function showToast(text) {
+  model.toastLasts = false;
   ui.toastText.textContent = text;
   ui.toast.hidden = false;
   announce(text);
 }
 
+// A load or a write that works mends what the toast tells, unless it lasts.
 function hideToast() {
-  ui.toast.hidden = true;
+  if (!model.toastLasts) ui.toast.hidden = true;
 }
 
 function announce(text) {
