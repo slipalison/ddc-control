@@ -1854,7 +1854,7 @@ Depois do `2a8b59d`, `playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs
 - **Por que variante do `bridge.js`, e não o relógio pausado:** o axe espera timers (é por isso que o estado `loading` antigo não tem axe). Com o comando segurado e o relógio andando, os 3 estados de espera também passam pelo axe. É o mesmo mecanismo de `slider`/`dropdown`/`confirm` (`serve(route, { patch })`), e o spec exige que a linha remendada ainda exista no `bridge.js` (`the demo line this state patches`).
 - O estado vazio só existe por variante: nenhum monitor do demo deixa de declarar ajustes, e criar um mudaria cenários presos aos goldens.
 - `reach` só espera elementos (o toast visível, `data-kind` do status, `aria-disabled` da sondagem). Julgar o texto continua sendo só do check.
-- **Produto atual:** 21 estados × 2 temas + `loading` × 2 + origem do app × 2 = 42/42. Os estados novos não acharam texto real fora das marcas, então `app.js` não mudou. Estabilidade: os estados novos com `--repeat-each=5` deram 70/70.
+- **Produto atual:** 19 estados em `STATES` + `loading` = 20 estados × 2 temas = 40 (`ps = 40`), mais a origem do app × 2 = 42/42. (Conta corrigida na iter 10: aqui dizia "21 estados × 2 temas + `loading` × 2 + origem × 2", que somaria 46, como o reviewer notou.) Os estados novos não acharam texto real fora das marcas, então `app.js` não mudou. Estabilidade: os estados novos com `--repeat-each=5` deram 70/70.
 
 ### Caminhos de falha no Gate 7 (`tests/e2e/scenarios.spec.mjs`, locale pt-BR real)
 - **Escrita de brilho e troca de preset** (`fail=write`): toast e announcer = `t('error.timeout')`, com "Tentar de novo" no toast. O slider volta a `75`/`75%`, e o preset a `0x01`/`sRGB`.
@@ -1938,4 +1938,152 @@ Depois do `2a8b59d`, `playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs
 - **Limites de desenho que seguem (registrados nas iters 7/8):**
   - um literal colado a um *dado* sob `translate="no"` não é checado;
   - um literal passado como parâmetro de `t()` sai dentro das marcas, e é coberto pelas asserções exatas dos cenários. Os textos de falha não têm parâmetros.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
+
+## Iteração 10 (rodada 2) — todos os toasts cobertos
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 10 (rodada 2, rodada de warnings). A iter 9 saiu APPROVED_PENDING_MANUAL com o W-2: os toasts de `app.js:200` (falha do `listen()`) e `app.js:207` (falha do `hidePopup()` no Esc) não apareciam em nenhum estado do pseudo-locale, e o mutante do reviewer (literal colado nos dois) passava em todos os gates. O W-1 (`cargo audit`) fica com a `ci-crossbuild`. Não editei o CONTEXT: o C15 ainda tem o hash da iter 9, e o novo está abaixo. As 8 tasks do PLAN continuam `completed`.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `2e2c76d` | feat | `fail=events` e `fail=hide` no demo, e o `listen` do bridge Tauri passa a devolver `{ kind, message }`; testes `node --test` |
+| `d3e54a6` | fix | o toast da falha do `listen()` não é mais escondido pelo carregamento seguinte (bug achado pelos testes novos, ver abaixo) |
+| `2d19645` | test | 2 estados novos no pseudo-locale (com axe) + `TOAST_STATES` |
+| `b278478` | test | 2 caminhos novos no Gate 7 (`scenarios.spec.mjs`, locale real): texto exato, console limpo, axe |
+| `1988f50` | test | trava estrutural `tests/ui/toast-states.test.mjs` |
+| `0244b91` | docs | README e CHANGELOG: `fail=events,hide`, o toast que persiste e os 22 estados |
+
+Depois do `1988f50`, `playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs` e `scripts/smoke-sni.sh` não mudaram mais.
+
+### `fail=events` e `fail=hide` no demo (`src/demo-data.js`, `src/bridge.js`)
+- `FAILURES` ganhou `events: 'plugin:event|listen'` e `hide: 'hide_popup'`. O `listen` do demo e o `hide_popup` do demo rejeitam quando marcados. O resto do demo continua respondendo, e com `hide` o `__ddcDemo.hides` fica em 0.
+- **`{kind, message}` reais.** Esses dois comandos não passam pelo core, e o `hide_popup` em Rust nunca devolve erro (`commands.rs:233`). O único jeito de rejeitarem no app é o próprio Tauri recusar a chamada IPC. Em build release, o Tauri 2.12 rejeita com a string `Command {cmd} not allowed by ACL` (`tauri-2.12.0/src/webview/mod.rs:2112`). O `listen` do JS é o comando `plugin:event|listen` (`scripts/bundle.global.js`). O `normalizeError` do bridge transforma essa string em `{ kind: 'unknown', message }`, e é isso que o demo devolve:
+  - `{ kind: 'unknown', message: 'Command hide_popup not allowed by ACL' }`;
+  - `{ kind: 'unknown', message: 'Command plugin:event|listen not allowed by ACL' }`.
+  - O popup mostra `t('error.unknown')`, porque o `ErrorKind` do Rust não tem (nem precisa ter) um kind para uma recusa que nunca chega ao comando.
+- **Bridge Tauri:** o `listen` repassava a rejeição crua (uma string). Agora passa pelo `normalizeError`, como todo `invoke` já passava. O texto na tela não muda, porque uma string também caía em `error.unknown`. A diferença é que o objeto que o popup recebe segue o contrato `{ kind, message }`, e o demo fica idêntico ao app.
+- **Testes novos (4):**
+  - `fail=events`: as duas inscrições são recusadas, nenhum evento chega e os comandos seguem respondendo;
+  - `fail=hide`: o Esc é recusado, nada é escondido e o resto funciona;
+  - "the demo's refusals are what the app's bridge makes of Tauri's": compara o demo com um bridge Tauri cujo `invoke`/`listen` rejeitam com as strings do Tauri;
+  - o `listen` do Tauri recusado vira `{ kind, message }`.
+  - O teste de parsing do `fail=` ganhou as duas palavras. `hide` saiu da lista de palavras desconhecidas; `hidden`, `listen` e `hide_popup` continuam desconhecidas.
+  - "outside a local dev server…" ganhou `tauri://localhost/?fail=events,hide` (continua tudo `backend_unavailable`), e o bridge indisponível segue aceitando listeners com `fail=events`.
+  - Com o `src/` da iter 9 (via `git stash` só do `src/`, restaurado em seguida), os 5 testes afetados reprovam.
+
+### Bug achado: a falha do `listen()` sumia antes de alguém vê-la (`d3e54a6`)
+- **O que a sonda mostrou** (script descartável no scratchpad, servidor na porta 1499): com `fail=events`, o toast aparecia no estado `loading` e ficava `hidden` assim que o painel carregava. O `showLoaded` chama `hideToast()`.
+- **No app real é pior:** o popup começa oculto (D-5). O `listen()` falha no start, e o primeiro carregamento, também no start, esconde o toast antes de o usuário abrir o popup. Sem `popup-shown` e `panel-changed`, nada mais recarrega o painel, que passa a mostrar os valores lidos no start sem aviso nenhum.
+- **Correção mínima em `app.js`:** `model.toastLasts`. O `listen()` marca o toast dele como duradouro. O `hideToast()` (chamado por carregamentos e escritas bem-sucedidos) não esconde um toast duradouro. O `showToast()` limpa a marca, então outra falha substitui o aviso, e depois dela tudo volta ao normal. O "Tentar de novo" continua lendo o monitor de novo (`refresh`). Nenhuma chamada `showToast(` nova foi criada.
+- **Prova de que o teste reproduz o bug:** com os specs novos e o `app.js` sem a correção (via `git stash` só do `app.js`, antes do commit), os 4 testes de `events` reprovaram (pseudo × 2, cenário × 2), com `expect(locator).toBeVisible()`, `Expected: visible`, `Received: hidden`. Os 4 de `hide` passaram. Com a correção, os 8 passam.
+
+### Pseudo-locale (`tests/e2e/pseudo-locale.spec.mjs`)
+| Estado | Como chega |
+|---|---|
+| `rtk after listening to the tray was refused` | `fail=events`; o toast já está visível no `ready` |
+| `rtk after hiding the popup was refused` | `fail=hide`, Esc |
+
+- **`TOAST_STATES`:** um item por menção a `showToast` em `src/`, fora a definição. Cada item tem a forma `{ site: 'arquivo › função', state }`, e os sítios de hoje são `app.js › listen`, `app.js › hideOnEscape`, `app.js › writeFailed` e `app.js › probe`. Cada estado listado passa por `toastShows` no loop, antes do check. Um teste do próprio spec (`every toast state is a state checked here, and each has its own`) exige que cada estado exista em `STATES` e que não haja estado repetido.
+- `textsOf`/`judge`, os mínimos de leitura, o teste `loading`, o da origem do app e o `support.mjs` não mudaram.
+- **Contagem:** 21 estados em `STATES` + `loading` = 22 × 2 temas = 44 (`ps = 44`). Somando a origem do app × 2 e o teste de `TOAST_STATES` × 2, o spec tem 48/48.
+
+### Gate 7 (`tests/e2e/scenarios.spec.mjs`, locale pt-BR real)
+- **`fail=events`:** depois de um carregamento que funciona (clique em "Atualizar", esperando o fim com `loadEnds`), o toast e o announcer ainda dizem exatamente `t('error.unknown')`, com "Tentar de novo". O painel está `ready`, com brilho `75`.
+- **`fail=hide`:** depois do Esc, o popup continua `ready`, com o mesmo texto exato no toast e no announcer, e `hides` fica em 0.
+- Os dois terminam com `writes` vazio, axe e o coletor de console, nos 2 temas (4 testes). Os títulos (`/?demo=rtk&fail=… after …`) não casam com `› <path> settles`, então o `n = 10` do C13 não muda.
+
+### Trava estrutural (`tests/ui/toast-states.test.mjs`)
+- **`every toast call site has a pseudo-locale state`:**
+  - lê todo script de `src/` (recursivo) e acha cada menção `\bshowToast\b` que não seja a própria declaração;
+  - atribui cada menção à última `function` declarada antes dela, ou a `(module)`;
+  - exige que a lista ordenada dessas menções seja igual aos `site` de `TOAST_STATES`, lido do spec como texto (importar o spec rodaria o Playwright). Toda linha do bloco precisa ser uma entrada literal `{ site: '…', state: '…' }`, senão reprova;
+  - exige que cada `state` seja um `name:` de `STATES` e que não haja estado repetido.
+  - Como a comparação é de multiconjunto, qualquer menção a mais reprova: chamada nova, segunda chamada numa função já listada, alias ou chamada em outro script.
+- **`only showToast writes the toast's text`:** `toastText` só aparece no mapa `ui` e dentro de `showToast`, e `'toast-text'` só uma vez, em `app.js`. Assim um toast escrito direto no DOM também não escapa.
+
+### Provas negativas (mutações não commitadas)
+- **Onde rodaram:** as mutações da trava e o mutante do reviewer rodaram numa cópia descartável de `apps/ddc-tray` no scratchpad (`src/`, `tests/` e a config copiados; `node_modules` e `src-tauri` por symlink). `src/` foi recopiado antes de cada mutação, e a cópia foi apagada no fim.
+- **Specs da iter 9:** entraram como `old-*`, via `git show 19f86b3:…`.
+- **Via `git stash` no repo:** as duas provas "reprova sem a mudança" (a do bridge demo e a do bug) rodaram com `git stash` no repo, restaurado logo em seguida, antes dos commits.
+- "`node`" = `i18n-html` + `view-model` (41 testes, com o scanner estático).
+
+| Mutação | Resultado |
+|---|---|
+| **M-a (pedida):** `showToast(t('x'));` num sítio novo (`refresh()`, antes de `showState('empty')`) | trava **reprova**: `+ 'app.js › refresh'` |
+| M-b: segunda chamada `else showToast(t('x'))` em `probe()` | trava **reprova**: `+ 'app.js › probe'` a mais |
+| M-c: alias `const tell = showToast;` no módulo | trava **reprova** (menção a mais) |
+| M-d: `export function oops(t) { showToast(t('x')); }` em `dropdown.js` | trava **reprova**: `+ 'dropdown.js › oops'` |
+| M-e: `ui.toastText.textContent = t('x')` em `end()` | 2º teste **reprova**: `+ 'app.js › end'` |
+| M-f: `document.getElementById('toast-text').textContent = t('x')` | 2º teste **reprova** (2 ocorrências de `toast-text`) |
+| S-1 a S-4, no spec: estado inexistente em `TOAST_STATES`, entrada calculada (`state: PROBE_STATE`), dois sítios num estado só, sítio removido da lista | trava **reprova** nos 4 |
+| **Mutante do reviewer, nos dois sítios:** `const EVENTS_OFF = ' Changes made from the tray will not show here.'`, com `showToast(errorText(error, t) + EVENTS_OFF)` em `listen` e no Esc | `node` 41 pass. Pseudo novo: **4 failed** / 44 passed (`events` e `hide` × 2 temas), `has text outside the marks: " Changes made from the tray will not show here."` no `#toast-text` e no `#announcer`. Cenários novos: **4 failed** / 24 passed (`Expected: "Algo deu errado."`, `Received: "Algo deu errado. Changes made from the tray will not show here."`). Pseudo antigo (19f86b3): **42 passed**. Cenários antigos: **24 passed** |
+| Mutante do reviewer só em `listen` | pseudo novo **2 failed**, cenários novos **2 failed** |
+| Mutante do reviewer só no Esc | pseudo novo **2 failed**, cenários novos **2 failed** |
+| Correção revertida (`app.js` sem `toastLasts`) | **4 failed** (`events`: pseudo × 2 e cenário × 2), `Received: hidden` |
+
+- Resumo: o mutante que passava por tudo na iter 9 agora reprova no pseudo-locale e nos cenários de texto exato, em cada um dos dois sítios. E um `showToast(` novo sem estado reprova no `node --test` (C6), antes de qualquer navegador.
+
+### Harness
+- **Mudaram nesta iteração:**
+  - `tests/ui/bridge-demo.test.mjs`;
+  - `tests/e2e/pseudo-locale.spec.mjs`;
+  - `tests/e2e/scenarios.spec.mjs`;
+  - `tests/ui/toast-states.test.mjs`, que é novo.
+- **Nada foi enfraquecido:** só entram testes, estados e asserções. `support.mjs`, `playwright.config.mjs` e `scripts/smoke-sni.sh` não mudaram.
+- **Hash novo do harness:** `c3976dbfdd2a37fb40ccbd2fb4e01c68049658d9d2dee5ed6fb49582aac037e2`, sobre 21 arquivos (eram 20; entrou o `toast-states.test.mjs`). A última mudança no harness é `1988f50`. Calculado com `cd apps/ddc-tray && sha256sum playwright.config.mjs tests/e2e/*.mjs tests/ui/*.mjs scripts/smoke-sni.sh | sha256sum | cut -c1-64`.
+
+### Verify do CONTEXT.md e do PROJECT.md
+Extraídos por script do `.md` e rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`.
+
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (147 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n paridade/HTML + scanner | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` (PID 1658579, `org.kde.StatusNotifierItem-1658579-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK`: 120 passed, 6 skipped (= screenshots), 0 failed/flaky; `n = 10`, `dd = dl = 16`, `sk = sl = 6`, `dr = 2`, `ps = 44` (eram 40); caminhos `fail=` 12/12; pseudo-locale 48/48 |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | `OK` |
+| C15 | hash do harness | **não rodado, como pedido.** O CONTEXT tem o hash da iter 9 (`b911f1d7…6e87`); o novo está acima |
+| C16 | nenhum `<select>` em `src/` | `OK` |
+| C17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | `OK` (PID 1666329, `75 -> 80` na vertical, nada na horizontal em 1,5 s, `80 -> 75`) |
+| C18 | TODO/FIXME/`todo!` em todo arquivo versionado do produto | `OK` |
+| C19 | screenshots regenerados, nada pulado, byte a byte iguais | `OK` (SHA-1 dos 6 PNGs inalterados) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.78 % (gate com exclusões e `--fail-under-lines 80`: 83.22 %, exit 0) |
+| P3 | TODO/FIXME/`todo!` em `*.rs` | `OK` |
+
+- **Protocolo dos smokes (C11, C17):** um de cada vez.
+  - Antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário. Ela foi encerrada com `pkill -x ddc-tray` (nunca `-f`), esperando o processo sair.
+  - Logo depois de cada smoke, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu.
+  - PIDs do usuário: 1596918 → 1658807 → 1666583, que é a única instância viva no fim. Nada em `~/.local` foi tocado.
+- **Porta 1420:** livre antes e depois do C13/C19. A sonda usou a 1499, encerrada em seguida.
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 / exit 0 |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored (nenhum `.rs` mudou) |
+| `node --test` (todos) | **147 pass** (eram 141), 0 fail/cancelled/skipped/todo |
+| Playwright | **120 passed** (eram 110), 6 skipped (screenshots sem `SCREENSHOTS=1`) |
+| cobertura (gate) | TOTAL lines **83.22 %** |
+| `Cargo.lock` / `package.json` / `package-lock.json` | intocados |
+
+### Desvios e observações
+- **Correção de produto não pedida (`d3e54a6`):** o `fail=events` mostrou um bug real, descrito acima, e a regra do doer é que bugfix começa por teste que reprova. A mudança é mínima (`toastLasts`), só muda o comportamento quando o `listen()` falha, e não cria nenhum `showToast(` novo.
+- **`listen` do bridge Tauri normalizado:** não estava na lista. Entrou porque sem ele o `{kind, message}` do demo não seria o que o app real entrega ao popup (seria uma string crua).
+- **Kind `unknown`, e não um kind do `ErrorKind` do Rust:** a recusa acontece na camada IPC do Tauri, antes de qualquer comando do app. `unknown` é o kind que o próprio bridge define para "um comando que as capabilities recusam" (doc do `normalizeError`).
+- **Sítios em `TOAST_STATES`:** são `arquivo › função` (`listen`, `hideOnEscape`, `writeFailed`, `probe`), e não os apelidos `listen`/`hide`/`write`/`probe` da sugestão. A trava deriva o sítio do código, então o nome é o da função.
+- **Travas além da pedida:** `only showToast writes the toast's text` (node) e `every toast state is a state checked here, and each has its own` (Playwright, 2 testes, fora do `ps`).
+- **README/CHANGELOG (`0244b91`)** não estavam na lista. Entraram porque o DoD manual #24 pede o README fiel ao comportamento atual (o `fail=` novo, o toast que persiste, 22 estados).
+- **Texto do toast:** a falha do `listen()` e a do Esc mostram o genérico "Algo deu errado." (`error.unknown`). Um texto próprio ("as mudanças feitas pela bandeja não vão aparecer aqui") exigiria chaves i18n novas e ficou fora do escopo. Fica como sugestão para uma issue.
+- **Contagem da iter 9 corrigida** no próprio texto da iter 9 (20 estados × 2 = 40, mais a origem × 2 = 42, e não "21 × 2 + …").
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
