@@ -33,14 +33,14 @@ jobs:
   versao:
     permissions:
       contents: read
-    uses: slipalison/github-workflows/.github/workflows/versao.yml@afc20cc9f5457d045640df903e0ce9a7df1fb515
+    uses: slipalison/github-workflows/.github/workflows/versao.yml@9e91d1ac9604aa581ac17438c54d75a2fcc213fa
     with:
       versao_inicial: "0.1.0"
 
   qualidade:
     permissions:
       contents: read
-    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@afc20cc9f5457d045640df903e0ce9a7df1fb515
+    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@9e91d1ac9604aa581ac17438c54d75a2fcc213fa
     with:
       # Tauri compiles three times per Rust job (clippy, llvm-cov, release).
       # With no cache, the first run took 13 minutes on Windows and 7 on Linux
