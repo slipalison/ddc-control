@@ -6,9 +6,11 @@ import en from '../../src/i18n/en.js';
 import ptBR from '../../src/i18n/pt-BR.js';
 import {
   LOCALES,
+  PSEUDO_MARKS,
   detectLocale,
   errorKey,
   featureKey,
+  pseudoRequested,
   resolveLocale,
   t,
   translateOr,
@@ -154,4 +156,45 @@ test('translateOr gives the fallback only when no locale has the key', () => {
 
   assert.equal(translateOr(pt, valueKey('Off (DPM)'), 'Off (DPM)'), 'Em espera (DPM)');
   assert.equal(translateOr(pt, valueKey('HDMI-1'), 'HDMI-1'), 'HDMI-1');
+});
+
+// The pseudo-locale (D-2026-09-27-tray-app-7): every translated text comes
+// out between ⟦ and ⟧, so a text on the page without them came from no key.
+test('the pseudo-locale wraps each whole translated text, placeholders filled in', () => {
+  const pseudo = translator('pt-BR', LOCALES, { pseudo: true });
+
+  assert.deepEqual(PSEUDO_MARKS, ['⟦', '⟧']);
+  assert.equal(pseudo('feature.brightness'), '⟦Brilho⟧');
+  assert.equal(pseudo('format.fraction', { current: 3, max: 10 }), '⟦3 de 10⟧');
+  assert.equal(pseudo('header.silent', { label: 'LG TV SSCR2' }), '⟦LG TV SSCR2 (sem DDC/CI)⟧');
+  assert.equal(translator('pt-BR', LOCALES, { pseudo: false })('feature.brightness'), 'Brilho');
+  assert.equal(translator('pt-BR')('feature.brightness'), 'Brilho');
+});
+
+test('under the pseudo-locale a key no locale has is still answered unmarked, as the fallback', () => {
+  const dictionaries = { en: { greet: 'Hello' }, 'pt-BR': {} };
+  const pseudo = translator('pt-BR', dictionaries, { pseudo: true });
+
+  assert.equal(pseudo('greet'), '⟦Hello⟧');
+  assert.equal(pseudo('nowhere'), 'nowhere');
+  const real = translator('pt-BR', LOCALES, { pseudo: true });
+  assert.equal(translateOr(real, valueKey('Off (DPM)'), 'Off (DPM)'), '⟦Em espera (DPM)⟧');
+  assert.equal(translateOr(real, valueKey('HDMI-1'), 'HDMI-1'), 'HDMI-1');
+});
+
+test('only pseudo=1 in the query asks for the pseudo-locale', () => {
+  const cases = [
+    ['?pseudo=1', true],
+    ['?demo=rtk&pseudo=1', true],
+    ['pseudo=1', true],
+    ['?pseudo=0', false],
+    ['?pseudo=true', false],
+    ['?pseudo', false],
+    ['?demo=rtk', false],
+    ['', false],
+    [undefined, false],
+  ];
+  for (const [search, expected] of cases) {
+    assert.equal(pseudoRequested(search), expected, `pseudoRequested(${JSON.stringify(search)})`);
+  }
 });

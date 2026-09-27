@@ -1,6 +1,10 @@
 // Every text the popup shows comes from a key (D-2026-09-26-tray-app-6):
 // the locale's text, else the English one, else the key itself, so a
 // missing text is visible instead of blank.
+//
+// The pseudo-locale (D-2026-09-27-tray-app-7) wraps every translated text
+// in PSEUDO_MARKS, placeholders filled in: a text on the page without the
+// marks came from no key, unless it is the monitor's own data.
 
 import en from './en.js';
 import ptBR from './pt-BR.js';
@@ -33,17 +37,36 @@ export function detectLocale(nav) {
   return resolveLocale(nav?.languages?.length ? nav.languages : nav?.language);
 }
 
+/** What the pseudo-locale puts before and after every translated text. */
+export const PSEUDO_MARKS = Object.freeze(['⟦', '⟧']);
+
 /**
  * A `t(key, params)` bound to `locale`. `{name}` placeholders take
- * `params.name`; one without a param stays as written.
+ * `params.name`; one without a param stays as written. With `pseudo`, each
+ * text comes wrapped in PSEUDO_MARKS; a key no locale has is still answered
+ * as is, unmarked.
  * @param {string} locale
  * @param {Record<string, Record<string, string>>} [dictionaries]
+ * @param {{ pseudo?: boolean }} [options]
  * @returns {(key: string, params?: Record<string, unknown>) => string}
  */
-export function translator(locale, dictionaries = LOCALES) {
+export function translator(locale, dictionaries = LOCALES, { pseudo = false } = {}) {
   const texts = dictionaries[locale] ?? {};
   const fallback = dictionaries[DEFAULT_LOCALE] ?? {};
-  return (key, params = {}) => interpolate(texts[key] ?? fallback[key] ?? key, params);
+  const [before, after] = pseudo ? PSEUDO_MARKS : ['', ''];
+  return (key, params = {}) => {
+    const text = texts[key] ?? fallback[key];
+    return text === undefined ? key : `${before}${interpolate(text, params)}${after}`;
+  };
+}
+
+/**
+ * Whether the page's query (`location.search`) asks for the pseudo-locale:
+ * `pseudo=1`. The caller decides where it may apply.
+ * @param {string | undefined} search
+ */
+export function pseudoRequested(search) {
+  return new URLSearchParams(search ?? '').get('pseudo') === '1';
 }
 
 /**

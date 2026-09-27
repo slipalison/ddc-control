@@ -13,7 +13,7 @@ import { createBridge } from './bridge.js';
 import { createWriteQueue } from './debounce.js';
 import { createDropdown } from './dropdown.js';
 import { createIcon } from './icons.js';
-import { detectLocale, translator } from './i18n/index.js';
+import { LOCALES, detectLocale, pseudoRequested, translator } from './i18n/index.js';
 import {
   confirmView,
   controlView,
@@ -39,10 +39,13 @@ const CONTROL_ICONS = Object.freeze({
   power: 'power',
 });
 
-const locale = detectLocale(navigator);
-const t = translator(locale);
-const platform = detectPlatform(navigator);
 const bridge = createBridge(window);
+const locale = detectLocale(navigator);
+// `?pseudo=1` checks the texts of the demo only (D-2026-09-27-tray-app-7):
+// inside the app it is never on.
+const pseudo = bridge.mode === 'demo' && pseudoRequested(window.location.search);
+const t = translator(locale, LOCALES, { pseudo });
+const platform = detectPlatform(navigator);
 const storage = storageOf(window);
 
 const byId = (id) => document.getElementById(id);
