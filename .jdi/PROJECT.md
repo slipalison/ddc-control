@@ -47,7 +47,7 @@ ddc-control
       **Verify:** `cargo llvm-cov --workspace --summary-only` → coluna Lines >= 80%
       **Source:** PROJECT
 - [ ] No `TODO`/`FIXME` without linked issue reference
-      **Verify:** `! grep -RInE '\b(TODO|FIXME)\b' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vE '\b(TODO|FIXME)\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && echo OK` (D-2026-09-27-tray-app-4: referência de issue colada ao marcador)
+      **Verify:** `! grep -RInE '\b(TODO|FIXME)\b|\b(todo|unimplemented)!\(' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vE '\b(TODO|FIXME)\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && ! grep -RInEi '(//|/\*|^[[:space:]]*\*)[[:space:]]*(todo|fixme)\b' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vEi '\b(todo|fixme)\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && echo OK` (D-2026-09-27-tray-app-4 + D-2026-09-27-tray-app-8: referência de issue colada ao marcador; `todo!`/`unimplemented!` e marcadores de comentário em qualquer caixa)
       **Source:** PROJECT
 
 ### Manual
