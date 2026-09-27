@@ -77,7 +77,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
     - O doer roda com `DDC_HW_TESTS=1 … --nocapture` e registra a saída no SUMMARY.
 - **Dependencies:** T-2
 - **Test:** Verify da CONTEXT de `DdcHiMonitorBackend::new`, single-instance e hardware + `cargo test -p ddc-tray --locked`
-- **Status:** pending
+- **Status:** completed
 
 #### T-4: Módulos JS puros (bridge demo, i18n, debounce, view-model) + `node --test`
 - **Specialist:** jdi-doer-ddc-control
