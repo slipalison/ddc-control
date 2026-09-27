@@ -6,8 +6,10 @@
 # not reach the affected code, and the event that must trigger a re-check.
 # Nothing else in `[advisories]` may hide a finding: no `severity_threshold`,
 # no `informational_warnings` override, no `--ignore` on the command line.
-# To re-evaluate, delete an entry and run `cargo audit`: it must fail and name
-# the advisory, or the entry is stale and stays deleted.
+# To re-evaluate, delete an entry and run `cargo audit`. It must still name
+# the advisory: the vulnerability fails the run, while the unmaintained and
+# unsound ones only print a warning (exit 0). An advisory no longer named
+# means the entry is stale, and it stays deleted.
 
 [advisories]
 ignore = [
