@@ -386,7 +386,8 @@ function paintMessage(status) {
   setText(ui.messageTip, empty || mute ? t('hint.ddc') : null);
   setText(ui.messageDetail, status.detail);
   ui.messageHint.hidden = !status.hint;
-  if (status.hint) ui.messageHint.replaceChildren(status.hint.text, verbatim('code', '', status.hint.doc));
+  // The space is text, not a margin: a copied hint keeps it.
+  if (status.hint) ui.messageHint.replaceChildren(status.hint.text, ' ', verbatim('code', '', status.hint.doc));
 }
 
 function showToast(text) {

@@ -54,11 +54,27 @@ async function showsPickerOnRtk(page) {
   await expect(page.locator('#message')).toBeHidden();
 }
 
+/** What copying all of `locator` gives: its text as the page selects it. */
+function copiedText(locator) {
+  return locator.evaluate((node) => {
+    const selection = getSelection();
+    selection.selectAllChildren(node);
+    const text = selection.toString();
+    selection.removeAllRanges();
+    return text;
+  });
+}
+
 // On Linux the empty and unavailable states also point at the i2c guide.
+// The space before its path is text, so a copied hint keeps it.
 async function showsI2cHintOnLinux(page) {
   const hint = page.locator('#message-hint');
-  if (process.platform === 'linux') await expect(hint.locator('code')).toHaveText(I2C_DOC);
-  else await expect(hint).toBeHidden();
+  if (process.platform !== 'linux') {
+    await expect(hint).toBeHidden();
+    return;
+  }
+  await expect(hint.locator('code')).toHaveText(I2C_DOC);
+  expect(await copiedText(hint), 'the hint as copied').toBe(`${t('hint.i2c')} ${I2C_DOC}`);
 }
 
 async function showsEmpty(page) {

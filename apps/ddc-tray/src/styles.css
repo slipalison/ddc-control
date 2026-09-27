@@ -1115,7 +1115,6 @@ input {
 }
 
 .message-hint code {
-  margin-inline-start: 0.3em;
   color: var(--accent-text);
   font: 11.5px var(--font-mono);
   overflow-wrap: anywhere;
