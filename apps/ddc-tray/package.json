@@ -1,0 +1,13 @@
+{
+  "name": "ddc-tray-ui",
+  "private": true,
+  "description": "Browser validation of the ddc-tray popup in demo mode (Gate 7). Nothing here ships: the popup has no npm runtime.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0"
+  }
+}
