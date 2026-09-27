@@ -2426,3 +2426,152 @@ Extraídos por script da seção DoD de cada `.md` (19 + 3) e rodados com `bash`
 - **Nenhum arquivo do harness mudou** (`playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs` e `scripts/smoke-sni.sh`). O C15 passa com o hash congelado.
 - **Nenhuma mudança de README/CHANGELOG.** O comportamento do app não muda: a CSP servida já era a `csp`, porque não havia `devCsp`. Só o build deixou de ser "dev".
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras. As sondas, o `--fake --activate` e o C17 usaram o monitor simulado.
+
+## Iteração 14 (rodada 3) — CSP efetiva + guarda de tradução
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 14 (rodada 3). O trabalho são as duas linhas do DoD critic da iter 13, pela D-2026-09-27-tray-app-11:
+- **C8:** um `tauri.linux.conf.json` com `"csp": null` apagava a CSP efetiva;
+- **C7:** um "Saved" literal, via ternário em `showReadBack`, passava em tudo.
+
+Não editei o CONTEXT: o C7 e o C8 já tinham os Verify novos do orquestrador. As 8 tasks do PLAN continuam `completed`. O W-1 (`cargo audit`) segue com a `ci-crossbuild`, e o `Cargo.lock` não mudou.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `b77a644` | test | `lib.rs`: `pub(crate) fn context()` com o único `tauri::generate_context!()` do crate, usado por `run()`. Novo `build_tests::the_effective_csp_is_the_strict_policy`, que compara `context().config().app.security.csp` (via `to_string()`) com a política estrita literal e exige `dev_csp == None` |
+| `4f9b75d` | fix | `build.rs`: `cargo::rerun-if-changed=.`, explicado abaixo |
+| `3ac492c` | feat | `src/i18n/guard.js` (guarda pura), a ligação no `app.js` e 4 testes `node --test` no `i18n-html.test.mjs`, entre eles o de título exato `a text no translation produced is reported by the dev guard` |
+| `35200a3` | test | `tests/e2e/text-guard.spec.mjs`: a guarda está viva no demo e desligada na origem do app |
+| `525d581` | docs | README (seção Tests do tray) e CHANGELOG |
+
+### 1. CSP efetiva (Rust)
+- **O teste.** `the_effective_csp_is_the_strict_policy` lê a config que o Tauri embute: `tauri.conf.json` mesclado por RFC 7396 com o `tauri.<plataforma>.conf.json` do alvo e com o `TAURI_CONFIG` do build, se houver.
+  - A comparação é por string exata, `Some("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")`.
+  - O teste também exige `dev_csp == None`.
+  - O filtro `--lib the_effective_csp_is_the_strict_policy` casa só com ele: `1 passed; … 137 filtered out`.
+- **Um só `generate_context!`.** `run()` passou a fazer `.build(context())`. O C10 continua `OK`: o `.plugin(single_instance)` segue como 1ª chamada do builder.
+- **Achado: o build incremental não via um arquivo de plataforma novo.** O `tauri-build` manda o Cargo reexecutar o build script só pelos arquivos de config que existiam na última execução (`tauri-build-2.7.0/src/lib.rs:677-681`). O `generate_context!` não rastreia arquivo nenhum.
+  - Criei o `tauri.linux.conf.json` com `csp: null` sobre o `target/` existente, e o teste **passou**. Nada recompilou.
+  - É o mesmo `target/` que o reviewer usa, então o Verify do C8 continuaria `OK` com o mutante.
+  - **Correção:** o `build.rs` agora emite `cargo::rerun-if-changed=.`, o diretório do crate, que o Cargo varre recursivamente. Um arquivo novo reexecuta o build script e recompila o crate.
+  - **Custo medido:** `cargo test -p ddc-tray --no-run` sem mudança leva 0,18 s e não compila nada, então não há reexecução perpétua. O `tauri-build` escreve `gen/` com `write_if_changed`. Depois de tocar um `.rs`, leva 1,65 s, contra 4,28 s antes.
+
+**Provas negativas (mutações não commitadas, cada uma desfeita antes da seguinte, sobre o `target/` incremental):**
+
+| Mutação | Teste | C8 literal |
+|---|---|---|
+| nenhuma (HEAD) | `1 passed` | `OK` |
+| **M-a (a do critic):** `tauri.linux.conf.json` = `{"app":{"security":{"csp":null}}}` | **FAILED**, `left: None` | **reprova** |
+| M-b: o mesmo arquivo com `csp` frouxa (`'unsafe-inline' 'unsafe-eval'`) | **FAILED** | **reprova** |
+| M-c: o mesmo arquivo com `devCsp` frouxo | **FAILED**, `left: Some(Policy("default-src 'self' 'unsafe-eval'"))` | **reprova** |
+| M-d: `csp` como mapa de diretivas (`script-src 'self' 'unsafe-inline'`) | **FAILED** | **reprova** |
+| M-e: sem arquivo, `TAURI_CONFIG='{"app":{"security":{"csp":null}}}'` no build | **FAILED** | — (o Verify roda sem a variável) |
+| M-a antes do `4f9b75d` (sem o `rerun-if-changed`) | passava, porque nada recompilou | — |
+
+Depois de desfazer tudo, o teste volta a `1 passed` e `git status` só mostra `.idea/`.
+
+### 2. Guarda de tradução em runtime (D-11)
+- **Módulo puro `src/i18n/guard.js`.** `textGuard({ enabled, report })` devolve `{ enabled, track, check, watch }`:
+  - `track(tr)` embrulha o translator e registra cada texto que ele responde. Uma chave que nenhum locale tem volta como a própria chave e não é registrada, então aparece como não traduzida;
+  - `check(text, element)` reporta um texto que tem letra (`\p{L}`), não foi registrado e cujo elemento não está sob `translate="no"`. Para isso usa a propriedade `element.translate`, o modo de tradução herdado calculado pelo navegador;
+  - a mensagem é `console.error('ddc-tray: untranslated text: "<texto>" in <tag#id.classes>')`.
+  - **Desligada** (`enabled: false`), `track` devolve o próprio translator (mesma referência), `check` nunca reporta e `watch` não cria observer. Custo zero no app.
+- **Ligação no `app.js`:**
+  - `const demo = bridge.mode === 'demo'`, `textGuard({ enabled: demo })` e `t = guard.track(translator(…))`. O `pseudo` usa o mesmo `demo`. O demo só existe em servidor local, pela D-6;
+  - `start()` começa com `guard.watch(document, window.MutationObserver)`.
+- **Desvio de forma: um único `MutationObserver` no lugar de uma checagem em cada sink.**
+  - **O que ele observa:** `childList`, `subtree`, `characterData` e `attributes`, com `attributeFilter` = os 13 atributos legíveis. É a mesma lista do scanner estático, travada por teste.
+  - **Por que ele cobre mais que os sinks:** cobre `setText`, `announce`, `showToast`, o texto de `element()`, os `textContent`/`setAttribute` diretos e também qualquer sink futuro. Nenhum helper precisa lembrar de chamar a guarda.
+  - **Quando checa:** no fim da tarefa que escreveu, via microtask. Assim um nó recebe o texto e logo depois o `translate="no"` (o caminho de dado atual, `markVerbatim(element(…))`, e o `shown` do dropdown) sem falso positivo. Nenhum helper de dado precisou mudar de ordem.
+  - **Limite:** um texto trocado dentro da mesma tarefa, que nunca é pintado nem anunciado, não é checado.
+  - `writtenTexts(records)` é puro. Um nó que já saiu da página no momento da checagem não conta.
+- **Exceção no scanner de frases:** uma entrada em `NOT_LANGUAGE` para o literal `'ddc-tray: untranslated text:'` de `i18n/guard.js`.
+  - Motivo registrado: "the dev guard's console error (D-11): a developer reads it, the popup never shows it".
+  - É exato, e o teste reprova se o literal sumir. É o único afrouxamento do harness nesta iteração (ver Harness).
+- **O produto passou limpo.** Com a guarda ligada, a suíte Playwright inteira ficou verde antes de qualquer teste novo (134 passed, 6 skipped): nenhum texto real foi acusado e `src/` não precisou de correção.
+
+**Testes `node --test` novos** (`i18n-html.test.mjs`, 21 → 25; total 153 → 157):
+- `a text no translation produced is reported by the dev guard` (título exato):
+  - **registra:** `t()` normal, com parâmetros e em pseudo-locale;
+  - **reporta:** o literal `Saved`, uma tradução com literal colado (`Aplicar now`) e uma chave inexistente, com as 3 mensagens exatas;
+  - **ignora:** o dado sob `translate="no"` e os textos sem letra `75%`, ` `, `20 · 40` e `—`;
+  - **desligada:** `track(tr) === tr`, nenhum report e nenhum observer criado.
+- `the dev guard reads each text a change leaves on the page, whatever wrote it`: `writtenTexts` sobre um texto adicionado, um subárvore com atributos e texto, `characterData`, um atributo guardado e um não guardado, e um nó já desconectado.
+- `the dev guard checks the page it watches, then every change to it`: `watch` varre a página existente, observa com as opções exatas (`OBSERVED`), reporta o que o callback recebe e desconecta.
+- `the dev guard watches every readable attribute the static scan reads`: a lista da guarda é a mesma do scanner.
+- **Mutantes da guarda:** 8, todos mortos.
+  - não registrar;
+  - não ignorar dado;
+  - sem teste de letra;
+  - sempre ligada;
+  - registrar chaves;
+  - sem atributos;
+  - contar nó desconectado;
+  - sem a varredura inicial.
+
+**Spec Playwright novo** (`tests/e2e/text-guard.spec.mjs`, 2 testes × 2 temas):
+- **Página própria.** Cada teste usa `context.newPage()`, servida como a do fixture: mesmos arquivos e CSP pelo `serve`. A página do fixture reprovaria pelo erro provocado de propósito, e o coletor de `support.mjs` não é tocado.
+- **No demo** (`/?demo=rtk`, `ready`):
+  - uma tradução no announcer, um dado em `#message-detail` e `75%` no toast não geram nada;
+  - depois, `Saved` no announcer, `title="Reload"` e um `<p>Done</p>` adicionado geram exatamente 3 reports.
+- **Na origem do app** (`http://tauri.localhost`), os mesmos literais geram 0 reports e `__ddcDemo` fica indefinido.
+- **Suíte inteira:** 138 passed, 6 skipped (= screenshots), 0 failed/flaky.
+
+### Provas negativas no Playwright (mutações não commitadas, restauradas com `git checkout`)
+| Mutação | `node --test` | Playwright |
+|---|---|---|
+| **Critic iter 13** em `showReadBack`: `const kept = view.current === sent.value; if (!kept) entry.widget.flag(); const spoken = kept ? 'Saved' : t('announce.readBack', …); announce(spoken);` sobre o `app.js` **anterior à guarda** (`4f9b75d`, sem o spec novo) | — | **134 passed**: o critic tinha razão |
+| O mesmo mutante no HEAD | 157 pass (o scanner estático não vê) | **18 failed** (9 testes × 2 temas: `confirm` ×4, `dropdown` ×3, `keyboard`, `slider` drag), todos pelo coletor: `console.error: ddc-tray: untranslated text: "Saved" in <p#announcer.visually-hidden>` |
+| **Toast da iter 8:** `const NOT_APPLIED = ' The monitor kept its previous value.'` e `showToast(errorText(error, t) + NOT_APPLIED)` em `writeFailed` | **1 fail** (`no natural-language literal outside the locale files`) | **8 failed** (pseudo e cenários `fail=write` × 2 temas). Os 8 reprovam **também** pelo coletor: `untranslated text: "O monitor não respondeu a tempo. The monitor kept its previous value." in <span#toast-text.toast-text>`, idem em `<p#announcer…>`, e a versão `⟦…⟧ The monitor…` no pseudo-locale. Além disso reprovam pelas checagens anteriores (texto exato / `textsOf`) |
+
+### Harness
+- **O que mudou:** só `tests/ui/i18n-html.test.mjs` (+183: imports, a entrada `NOT_LANGUAGE` e os 4 testes) e `tests/e2e/text-guard.spec.mjs` (novo, +86). O `git diff --stat 3a462ae HEAD` desses caminhos dá **+269/−0**.
+- **O que não mudou:** `support.mjs` (coletor, axe, `expectNoNativeSelect`), `playwright.config.mjs`, `scripts/smoke-sni.sh` e os demais specs e testes.
+- **Hash novo do harness:** `ba730a001c8e265bc125ddc24f8f21373269844baf46137fb3593910d5d3c001`, sobre 22 arquivos. Calculado com `cd apps/ddc-tray && sha256sum playwright.config.mjs tests/e2e/*.mjs tests/ui/*.mjs scripts/smoke-sni.sh | sha256sum | cut -c1-64`. Depois do `35200a3`, esses arquivos não mudam mais.
+
+### Verify do CONTEXT.md e do PROJECT.md
+Extraídos por script da seção DoD de cada `.md` (19 + 3) e rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS`, `DDC_TRAY_FAKE` e `DDC_TRAY_DEBUG`. No `bash`, `grep` é `/usr/bin/grep`.
+
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` (inclui `build.rs`) | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (157 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n + scanner + trava de frase + título da guarda | `OK` |
+| C8 | CSP + `custom-protocol` + `is_not_a_dev_build` + `the_effective_csp_is_the_strict_policy` | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` (backend real, só leituras) | `OK` na 1ª execução (PID 2345089) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK` (138 passed, 6 skipped) |
+| C14 | bridge nunca cai no demo fora de servidor local | `OK` |
+| C15 | hash do harness | **reprova, como esperado**: o CONTEXT ainda tem `fd6985f9…8560`. Hash novo acima, para o orquestrador refixar |
+| C16 | nenhum `<select>` | `OK` |
+| C17 | `ksni` + `scroll` + smoke `--fake --scroll` | `OK` (PID 2345692: `75 -> 80`, nada na horizontal, `80 -> 75`) |
+| C18 | TODO/FIXME em arquivo versionado do produto | `OK` |
+| C19 | screenshots regenerados e byte a byte iguais | `OK` |
+| P1 | `cargo test --workspace --locked` | `OK`: 385 passed (+1, o teste novo), 0 failed, 9 ignored |
+| P2 | cobertura (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines **82.88 %**, exit 0. Gate (`--locked --fail-under-lines 80`, sem `main.rs`/`build.rs`): **83.31 %**, exit 0 |
+| P3 | TODO/FIXME/`todo!` em `*.rs` | `OK` |
+
+- **Porta 1420:** livre antes e depois do C13/C19.
+- **Protocolo da instância do usuário:**
+  - antes do C11 e do C17, `pgrep -xa ddc-tray` mostrou a instância. Ela foi encerrada com `pkill -x ddc-tray` (nunca `-f`), esperando o processo sair;
+  - logo depois de cada smoke, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu;
+  - PIDs: 2222251 → 2345333 → 2346029, a única instância viva no fim. Nada em `~/.local` foi tocado.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17, o simulado.
+
+### Desvios e observações
+- **`build.rs` (`4f9b75d`) não estava no pedido.** Sem ele, a prova negativa pedida falhava no build incremental: o teste passava com o arquivo de plataforma novo. Era um furo real do C8 no `target/` do reviewer.
+- **A guarda é um observer do documento, não uma chamada em cada sink.** O efeito observável é o pedido: todo sink listado emite o `console.error` com o texto e o elemento. Ela cobre ainda escritas diretas e sinks futuros, e não exigiu reordenar os caminhos de dado.
+- **Exceção nova no `NOT_LANGUAGE`:** a mensagem de console da guarda, literal exato em `i18n/guard.js`.
+- **Lacunas restantes, para o orquestrador decidir (nenhuma afeta o HEAD):**
+  - **Corpo do teste não travado.** O corpo de `the_effective_csp_is_the_strict_policy` fica em `lib.rs`, fora do manifesto do harness: um corpo vazio passaria no C8. Sugestão: travar no C8 algo como `grep -qF 'super::context()' $c/src/lib.rs && grep -qF "assert_eq!(csp.as_deref(), Some(STRICT_CSP));" $c/src/lib.rs`.
+  - **Coincidência de valor.** A guarda compara valores: um literal idêntico a uma tradução do locale em uso (pt-BR na suíte, ex. `'Aplicar'`) não é acusado. O scanner de frases e o pseudo-locale continuam valendo.
+  - **Sinks de dado.** Um texto sob `translate="no"` é aceito como dado, qualquer que seja a origem. É o desenho da D-7/D-11.
+  - **CSP por código.** Ela ainda poderia ser trocada em código (`on_web_resource_request`, protocolo customizado). Hoje não há nenhum, e o teste só olha a config.
+  - **Windows.** Um `tauri.windows.conf.json` só é checado quando o teste roda no Windows (`ci-crossbuild`).
+- **Binário instalado.** O `/home/slipalison/.local/bin/ddc-tray` continua anterior ao `c181544`. Reinstalá-lo fica com o orquestrador ou o usuário.
