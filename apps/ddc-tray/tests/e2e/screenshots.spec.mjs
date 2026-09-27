@@ -1,7 +1,7 @@
-// The popup's pictures for the README and the PR reviewer, in each theme
-// (plan A-7): only with SCREENSHOTS=1, so a Gate 7 run never rewrites the
-// committed files. English, like the README; motion off, so a frame never
-// catches a transition.
+// The popup's pictures for the README and the PR reviewer, every one in
+// each theme (plan A-7): only with SCREENSHOTS=1, so a Gate 7 run never
+// rewrites the committed files, and then none is skipped. English, like the
+// README; motion off, so a frame never catches a transition.
 
 import { fileURLToPath } from 'node:url';
 import { expect, open, test } from './support.mjs';
@@ -32,7 +32,6 @@ test('the RTK popup', async ({ page }, testInfo) => {
 });
 
 test('the RTK popup asking before switching the input', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'light', 'one dialog picture is enough for the README');
   await open(page, '/?demo=rtk');
   await settled(page);
 
@@ -46,7 +45,6 @@ test('the RTK popup asking before switching the input', async ({ page }, testInf
 });
 
 test('the RTK popup with the color preset list open', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'light', 'one list picture is enough for the README');
   await open(page, '/?demo=rtk');
   await settled(page);
 

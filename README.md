@@ -285,7 +285,7 @@ Value names match as described in [Features by name](#features-by-name). A non-c
   </tr>
 </table>
 
-The screenshots come from the [browser demo](#browser-demo) (`?demo=rtk`), taken by the Playwright suite: the values are the demo's, not a live monitor's.
+The screenshots come from the [browser demo](#browser-demo) (`?demo=rtk`), taken by the Playwright suite: the values are the demo's, not a live monitor's. The list and the dialog are also taken in the dark theme (`tray-popup-list-dark.png` and `tray-popup-dialog-dark.png`, in the same folder).
 
 ### Build and run
 
@@ -354,7 +354,7 @@ cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
 - `cargo test` also covers the wheel over the tray icon (`scroll.rs`: notches, limits, one write per burst) and, on Linux, the icon's pixmap and the KWin placement's session check.
 - `node --test` covers the UI's plain modules (the bridge and its demo, the slider debounce, the view model, the in-page dropdown's keys, clicks and placement, i18n key parity, no literal text in the HTML) and the KWin placement script, run against a fake KWin. It needs no install; it runs on Node 24. `--test-reporter=tap` only fixes the output format for scripts.
 - The Playwright suite (`@playwright/test` 1.63.0 and `@axe-core/playwright` 4.13.0, test-only: nothing of it ships) serves `apps/ddc-tray/src` on port 1420 under the app's CSP, in Chromium, light and dark. In every demo scenario it checks the expected state, no console error and no axe `critical`/`serious` violation (WCAG 2.1 A/AA), plus keyboard use, the confirmation dialog and the monitor fallback. It needs Playwright's Chromium once: `npx playwright install chromium` (user-level, no `sudo`).
-- `SCREENSHOTS=1 npx playwright test screenshots` rewrites the screenshots above; without the variable those tests are skipped.
+- `SCREENSHOTS=1 npx playwright test screenshots` rewrites the screenshots above and their dark variants, every one in both themes, none skipped; without the variable those tests are skipped.
 - `DDC_TRAY_DEBUG=1 cargo run -p ddc-tray` prints what the tray and the popup do on stderr (`ddc-tray: tray activated`, `popup shown`, `popup hidden`, `popup placement loaded into KWin as script 1`, and `brightness 75 -> 80` after each brightness write from the wheel or the menu…).
 - `DDC_TRAY_FAKE=1` (only `1`) starts the app on a simulated monitor, for tests that must not touch a real one: the RTK of the contract test (`src-tauri/src/fixture.rs`), held in memory, so no `/dev/i2c-*` is opened and writes change only that memory. The app says so on stderr every time.
 - Tray icon smoke test (`apps/ddc-tray/scripts/smoke-sni.sh`: `--activate` clicks the icon over D-Bus and requires the popup to stay shown; `--fake --scroll` rolls the wheel over the icon against the simulated monitor) and the hardware tests: [`docs/hardware-validation.md`](docs/hardware-validation.md#tray-app--phase-tray-app).
