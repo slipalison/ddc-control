@@ -56,7 +56,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
   - **Golden:** `{monitors, panel, features}` do fake RTK em `serde_json` == `contract-rtk.json` (diff no erro; regenerar só de propósito).
 - **Dependencies:** T-1
 - **Test:** Verify da CONTEXT de `panel.rs` + `cargo test -p ddc-tray --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3 (parallel-eligible)
 
