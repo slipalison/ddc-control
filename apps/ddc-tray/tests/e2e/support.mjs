@@ -99,6 +99,11 @@ export function selectedMonitor(page) {
   return page.evaluate(() => window.__ddcDemo.selected);
 }
 
+/** How many times the popup asked to be hidden (`hide_popup`). */
+export function hides(page) {
+  return page.evaluate(() => window.__ddcDemo.hides);
+}
+
 /**
  * Axe on the page as it is now, with the WCAG 2.0 A/AA and 2.1 AA rules:
  * a critical or serious violation fails the test; moderate and minor ones
@@ -137,7 +142,33 @@ export function inputChip(page, name) {
 }
 
 export function monitorPicker(page) {
-  return page.getByRole('combobox', { name: t('header.monitor'), exact: true });
+  return dropdown(page, t('header.monitor'));
+}
+
+/** An in-page dropdown (D-2026-09-27-tray-app-1) by its label. */
+export function dropdown(page, name) {
+  return page.getByRole('combobox', { name, exact: true });
+}
+
+/** The list of a dropdown, open or not. */
+export function listOf(combobox) {
+  return combobox.locator('xpath=..').getByRole('listbox', { includeHidden: true });
+}
+
+/** The options of a dropdown, open or not, in order. */
+export function optionsOf(combobox) {
+  return listOf(combobox).locator('[role="option"]');
+}
+
+/** Opens a dropdown with a click and clicks its option named `name`. */
+export async function pick(combobox, name) {
+  await combobox.click();
+  await listOf(combobox).getByRole('option', { name, exact: true }).click();
+}
+
+/** Asserts the value a dropdown shows, as the string of its value. */
+export async function expectPicked(combobox, value) {
+  await expect(combobox).toHaveAttribute('data-value', String(value));
 }
 
 export function powerButton(page) {

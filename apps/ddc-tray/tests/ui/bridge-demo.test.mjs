@@ -39,6 +39,17 @@ test('without Tauri the bridge runs the demo, RTK by default', async () => {
   );
 });
 
+test('the demo counts the times the popup asked to be hidden', async () => {
+  const { win, bridge } = demo();
+  assert.equal(win.__ddcDemo.hides, 0);
+
+  assert.equal(await bridge.hidePopup(), null);
+  await bridge.hidePopup();
+
+  assert.equal(win.__ddcDemo.hides, 2);
+  assert.deepEqual(win.__ddcDemo.writes, []);
+});
+
 test('?demo= picks a scenario and falls back to rtk when unknown', () => {
   assert.deepEqual(SCENARIOS, ['rtk', 'two-monitors', 'empty', 'error']);
   assert.equal(scenarioName('?demo=two-monitors'), 'two-monitors');

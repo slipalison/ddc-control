@@ -6,11 +6,14 @@ import {
   MONITORS,
   cancelButton,
   confirmDialog,
+  dropdown,
   expect,
   expectAccessible,
+  expectPicked,
   inputChip,
   monitorPicker,
   open,
+  optionsOf,
   powerButton,
   retryButton,
   slider,
@@ -34,7 +37,8 @@ async function showsRtkPanel(page) {
   }
   await expect(page.getByRole('radiogroup').getByRole('radio')).toHaveCount(7);
   await expect(inputChip(page, 'DisplayPort-1')).toBeChecked();
-  await expect(page.getByLabel(t('feature.preset'), { exact: true })).toHaveValue(String(0x01));
+  await expectPicked(dropdown(page, t('feature.preset')), 0x01);
+  await expect(dropdown(page, t('feature.preset'))).toHaveText('sRGB');
   await expect(powerButton(page)).toBeVisible();
   await expect(monitorPicker(page)).toBeHidden();
   await expect(page.locator('#message')).toBeHidden();
@@ -42,8 +46,9 @@ async function showsRtkPanel(page) {
 
 async function showsPickerOnRtk(page) {
   await expect(monitorPicker(page)).toBeVisible();
-  await expect(monitorPicker(page)).toHaveValue(MONITORS.rtk);
-  await expect(monitorPicker(page).locator('option')).toHaveCount(3);
+  await expectPicked(monitorPicker(page), MONITORS.rtk);
+  await expect(monitorPicker(page)).toHaveText('RTK QHD HDR');
+  await expect(optionsOf(monitorPicker(page))).toHaveCount(3);
   await expect(slider(page, 'brightness')).toHaveValue('75');
   await expect(inputChip(page, 'DisplayPort-1')).toBeChecked();
   await expect(page.locator('#message')).toBeHidden();

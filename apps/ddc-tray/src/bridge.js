@@ -18,7 +18,8 @@ const realTimers = Object.freeze({
 
 /**
  * The bridge for `win`: Tauri's when it is there, else the demo's, which
- * also exposes `win.__ddcDemo` ({ scenario, writes, selected, emit }).
+ * also exposes `win.__ddcDemo` ({ scenario, writes, selected, hides, emit }):
+ * `hides` counts the times the popup asked to be hidden.
  * @param {object} win the page's `window`
  * @param {{ latencyMs?: number, timers?: { setTimeout: Function } }} [options]
  */
@@ -72,7 +73,7 @@ function demoBridge(win, latencyMs, timers) {
   const scenario = scenarioName(win?.location?.search);
   const monitors = scenarioMonitors(scenario);
   const listeners = new Map();
-  const demo = { scenario, writes: [], selected: null, emit };
+  const demo = { scenario, writes: [], selected: null, hides: 0, emit };
   if (win) win.__ddcDemo = demo;
 
   const handlers = {
@@ -85,7 +86,10 @@ function demoBridge(win, latencyMs, timers) {
     load_features: ({ monitorId }) => answering(monitors, monitorId).features.map(featureDto),
     probe_features: ({ monitorId }) => answering(monitors, monitorId).probe.map(featureDto),
     set_feature: (args) => write(monitors, demo.writes, args),
-    hide_popup: () => null,
+    hide_popup: () => {
+      demo.hides += 1;
+      return null;
+    },
   };
 
   const wait = (ms) => (ms > 0 ? new Promise((done) => timers.setTimeout(done, ms)) : Promise.resolve());

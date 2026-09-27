@@ -16,7 +16,13 @@ const source = (path) => readFileSync(new URL(`../../src/${path}`, import.meta.u
 const html = source('index.html');
 const app = source('app.js');
 const viewModel = source('view-model.js');
-const scripts = { 'app.js': app, 'view-model.js': viewModel, 'icons.js': source('icons.js') };
+const dropdown = source('dropdown.js');
+const scripts = {
+  'app.js': app,
+  'view-model.js': viewModel,
+  'icons.js': source('icons.js'),
+  'dropdown.js': dropdown,
+};
 
 /** Attributes a person reads or hears: they may only come from keys. */
 const READABLE_ATTRIBUTES = [
@@ -135,6 +141,25 @@ test('a slider fill is set as a custom property, the one style the script touche
 
   assert.deepEqual([...new Set(styleWrites)], ['setProperty']);
   assert.match(app, /style\.setProperty\('--fill'/);
+});
+
+test('the dropdown only sets its --dropdown-* custom properties, never a literal text', () => {
+  const styleWrites = [...dropdown.matchAll(/\.style\.(\w+)\(([^,]*)/g)].map(([, member, name]) => [member, name]);
+
+  assert.ok(styleWrites.length > 0, 'the dropdown places its list');
+  assert.deepEqual(
+    styleWrites.filter(([member, name]) => member !== 'setProperty' || name !== '`--dropdown-${name}`'),
+    [],
+  );
+  assert.deepEqual([...dropdown.matchAll(/\.textContent\s*=\s*(['"`])/g)].map(([match]) => match), []);
+  assert.deepEqual(literalKeys(dropdown), [], 'its texts come from the caller');
+});
+
+test('no script builds a native select element', () => {
+  for (const [name, code] of Object.entries(scripts)) {
+    assert.doesNotMatch(code, /createElement\(\s*['"]select['"]|HTMLSelectElement/, name);
+  }
+  assert.doesNotMatch(html, /<select\b/i);
 });
 
 test('every icon the page and the app ask for exists', () => {

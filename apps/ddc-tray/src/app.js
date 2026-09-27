@@ -5,9 +5,13 @@
 // waits for the in-app dialog before the bridge sees it. Under the strict
 // CSP (D-2026-09-26-tray-app-7) no markup is parsed from strings and no
 // inline style is set — a slider's fill is the custom property `--fill`.
+// Lists are in-page dropdowns, never a native select element: its menu is
+// a window of its own, and the popup hid on losing the focus to it
+// (D-2026-09-27-tray-app-1).
 
 import { createBridge } from './bridge.js';
 import { createWriteQueue } from './debounce.js';
+import { createDropdown } from './dropdown.js';
 import { createIcon } from './icons.js';
 import { detectLocale, translator } from './i18n/index.js';
 import {
@@ -48,8 +52,6 @@ const ui = {
   monitorName: byId('monitor-name'),
   monitorMeta: byId('monitor-meta'),
   title: byId('title'),
-  pickerChevron: byId('picker-chevron'),
-  monitorSelect: byId('monitor-select'),
   power: byId('power'),
   refresh: byId('refresh'),
   content: byId('content'),
@@ -122,9 +124,22 @@ const writes = createWriteQueue({
   onError: writeFailed,
 });
 
+// Every list stays inside the popup's window.
+const appBounds = () => ui.app.getBoundingClientRect();
+
+const monitorDropdown = createDropdown({
+  id: 'monitor-picker',
+  label: t('header.monitor'),
+  className: 'title-picker',
+  onChange: (monitorId) => void openMonitor(monitorId),
+  bounds: appBounds,
+});
+
 start();
 
 function start() {
+  monitorDropdown.node.hidden = true;
+  ui.title.append(monitorDropdown.node);
   translatePage(document);
   mountIcons(document);
   wire();
@@ -157,7 +172,6 @@ function wire() {
   ui.power.addEventListener('click', () => void changePower(model.power));
   ui.retry.addEventListener('click', () => void (model.retry ?? refresh)());
   ui.toastRetry.addEventListener('click', () => void refresh());
-  ui.monitorSelect.addEventListener('change', () => void openMonitor(ui.monitorSelect.value));
   ui.inputChips.addEventListener('keydown', moveChipFocus);
   ui.more.addEventListener('toggle', () => {
     if (ui.more.open && model.features === 'idle') void loadFeatures();
@@ -332,13 +346,12 @@ function paintHeader() {
   const current = shown ? picker.current : null;
   const choosing = shown && picker.selectable;
   ui.monitorName.textContent = current?.label ?? t('app.title');
+  // With a choice, the name is the picker's button.
   ui.title.classList.toggle('is-picker', choosing);
-  ui.pickerChevron.hidden = !choosing;
-  ui.monitorSelect.hidden = !choosing;
-  // The select, laid transparent over the name, is what assistive
-  // technology reads; the name under it is only drawn.
-  ui.monitorName.setAttribute('aria-hidden', String(choosing));
+  ui.monitorName.hidden = choosing;
+  monitorDropdown.node.hidden = !choosing;
   if (choosing) paintPicker(picker);
+  else monitorDropdown.close();
   ui.monitorMeta.textContent = metaText(current);
 }
 
@@ -350,11 +363,11 @@ function metaText(current) {
 }
 
 function paintPicker(picker) {
-  const options = picker.options.map(({ id, label, silent }) =>
-    option(id, silent ? t('header.silent', { label }) : label),
-  );
-  ui.monitorSelect.replaceChildren(...options);
-  ui.monitorSelect.value = model.selectedId;
+  const options = picker.options.map(({ id, label, silent }) => ({
+    value: id,
+    label: silent ? t('header.silent', { label }) : label,
+  }));
+  monitorDropdown.update({ options, value: model.selectedId });
 }
 
 function paintMessage(status) {
@@ -564,40 +577,37 @@ function selectRow(entry, view) {
   const id = `control-${view.code}`;
   const node = element('div', 'row');
   const text = element('div', 'row-text');
-  const label = element('label', 'row-label', view.label);
-  label.htmlFor = id;
+  const label = element('span', 'row-label', view.label);
+  label.id = `${id}-label`;
   text.append(label);
-  const widget = selectWidget(entry, id);
+  const widget = selectWidget(entry, id, label.id);
   node.append(tile(CONTROL_ICONS[view.key] ?? 'sliders'), text, widget.node);
   return { ...widget, node };
 }
 
-function selectWidget(entry, id) {
-  const node = element('div', 'select');
-  const select = element('select');
-  select.id = id;
-  const chevron = element('span', 'select-chevron');
-  chevron.append(createIcon('chevron'));
-  node.append(select, chevron);
-  select.addEventListener('change', () => void requestChange(entry, Number(select.value)));
-  return { node, update: (next) => paintSelect(select, next), flag: () => flash(node) };
+function selectWidget(entry, id, labelId) {
+  const dropdown = createDropdown({
+    id,
+    labelledBy: labelId,
+    className: 'select',
+    onChange: (value) => void requestChange(entry, value),
+    bounds: appBounds,
+  });
+  return {
+    node: dropdown.node,
+    update: (next) => paintSelect(dropdown, next),
+    flag: () => flash(dropdown.button),
+  };
 }
 
-// A current value outside the list shows as a disabled choice, so the
-// select never silently displays another value.
-function paintSelect(select, view) {
-  const options = view.options.map(({ value, label }) => option(value, label));
+// A current value outside the list shows as a choice that cannot be
+// picked, so the dropdown never silently displays another value.
+function paintSelect(dropdown, view) {
+  const options = view.options.map(({ value, label }) => ({ value, label }));
   if (!view.options.some((choice) => choice.selected)) {
-    const current = option(view.current, view.currentLabel);
-    current.disabled = true;
-    options.unshift(current);
+    options.unshift({ value: view.current, label: view.currentLabel, disabled: true });
   }
-  const signature = JSON.stringify(options.map((item) => [item.value, item.textContent, item.disabled]));
-  if (select.dataset.signature !== signature) {
-    select.replaceChildren(...options);
-    select.dataset.signature = signature;
-  }
-  select.value = String(view.current);
+  dropdown.update({ options, value: view.current });
 }
 
 // Power lives in the header, as a button that always opens the dialog.
@@ -802,10 +812,10 @@ function featureWidget(entry, view) {
   if (view.widget === 'slider') return sliderWidget(entry, view, { id, marks });
   const node = element('div', 'slider');
   const head = element('div', 'slider-head');
-  const label = element('label', 'slider-label', view.label);
-  label.htmlFor = id;
+  const label = element('span', 'slider-label', view.label);
+  label.id = `${id}-label`;
   head.append(label, ...marks);
-  const widget = selectWidget(entry, id);
+  const widget = selectWidget(entry, id, label.id);
   node.append(head, widget.node);
   return { ...widget, node };
 }
@@ -863,12 +873,6 @@ function element(tag, className = '', text = null) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== null) node.textContent = text;
-  return node;
-}
-
-function option(value, label) {
-  const node = element('option', '', label);
-  node.value = String(value);
   return node;
 }
 

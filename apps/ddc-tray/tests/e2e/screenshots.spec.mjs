@@ -44,3 +44,17 @@ test('the RTK popup asking before switching the input', async ({ page }, testInf
     animations: 'disabled',
   });
 });
+
+test('the RTK popup with the color preset list open', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'light', 'one list picture is enough for the README');
+  await open(page, '/?demo=rtk');
+  await settled(page);
+
+  await page.getByRole('combobox', { name: 'Color preset', exact: true }).click();
+  await expect(page.getByRole('listbox', { name: 'Color preset', exact: true })).toBeVisible();
+
+  await page.screenshot({
+    path: shotPath(`tray-popup-list-${testInfo.project.name}`),
+    animations: 'disabled',
+  });
+});
