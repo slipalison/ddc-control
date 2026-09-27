@@ -162,7 +162,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
   - **CHANGELOG** `[Unreleased]` → Added: o tray app. **`docs/hardware-validation.md`:** seção do tray com o smoke SNI, o teste `DDC_HW_TESTS=1 … rtk_qhd_hdr` e o que nunca fazer pelo popup (entrada, energia, `dangerous`).
 - **Dependencies:** T-5, T-7
 - **Test:** `grep -q 'has_frontend: true' .jdi/PROJECT.md && grep -q 'cargo run -p ddc-tray' README.md && grep -q 'tray-popup-light.png' README.md && grep -q '^## \[Unreleased\]' CHANGELOG.md`
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - 8 tasks em 6 waves; W3 (T-3 ‖ T-4) e W4 (T-5 ‖ T-6) são paralelizáveis; speedup ≈ 1.3x. Tipos: T-1 `build`; T-2 a T-6 `feat`; T-7 `test`; T-8 `docs`.

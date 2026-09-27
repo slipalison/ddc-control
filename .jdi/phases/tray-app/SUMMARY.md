@@ -1,7 +1,7 @@
 # Phase 5: Tray app — Summary  (slug: tray-app)
 
-**Status:** partial
-**Tasks:** 7/8 complete, 0 blocked
+**Status:** complete
+**Tasks:** 8/8 complete, 0 blocked
 
 ## Executed tasks
 - T-1: scaffold do crate `ddc-tray` (lib `ddc_tray` + bin `ddc-tray`) no workspace, com a config Tauri, a capability mínima, o `icon.svg` próprio, o conjunto de ícones gerado e o `tray.png`. Commits `e91a453` (build) e `4c93104` (docs).
@@ -11,6 +11,7 @@
 - T-5: bandeja com `tray.png`, tooltip e menu nativo bilíngue (`i18n.rs` + `menu.rs` puros), clique esquerdo no Windows alternando o popup ancorado pelo positioner com o gate de `popup.rs`, atalhos de brilho Safe em thread bloqueante com `panel-changed`, "Sair" → `app.exit(0)`, e `scripts/smoke-sni.sh`, que passa no KDE Wayland e falha nos 7 casos provocados. 26 testes novos. Commit `380a691` (feat).
 - T-6: UI do popup em cartões Fluent com o gradiente do ícone: sliders, predefinição, entrada em chips, energia no cabeçalho, "Todos os ajustes" sob demanda com sondagem, diálogo `<dialog>` para todo `dangerous`, estados carregando/vazio/erro, claro/escuro, e o fallback de monitor pedido pelo orquestrador (lembra o último que respondeu e pula os mudos). 83 testes JS (+20). Commit `6e1273c` (feat).
 - T-7: suíte Playwright do popup em `apps/ddc-tray/` (Gate 7): 18 testes × 2 temas = 36 verdes, com a CSP do Tauri injetada, console limpo e axe critical/serious `toEqual([])`, mais os screenshots claro/escuro (e o diálogo claro) em `docs/screenshots/`. O Verify do Gate 7 deu OK 3× seguidas. Commit `e677dd1` (test).
+- T-8: bloco `frontend:` do PROJECT ligado (D-2026-09-26-tray-app-8), README (status na fase 5, seção "Tray app" com os 3 screenshots, build, deps Linux, uso, demo, testes, Known limitations), CHANGELOG `[Unreleased]` → Added e os passos 6–8 do tray em `docs/hardware-validation.md`. Achado: com o backend real, um monitor mudo carrega como painel vazio (a demo o pula); documentado como limitação, a correção de código fica com o orquestrador. Commit `c22aef0` (docs).
 
 ## Blocked tasks
 - nenhuma
@@ -657,9 +658,93 @@ Depois de reverter: `cmp` idêntico às cópias e `# pass 83`, `# fail 0`.
 | Verify `node --test` e i18n da CONTEXT (`--test-reporter=tap`) | OK: `# pass 83`, `# fail 0` |
 | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked` | limpos; 339 passed, 0 failed, 8 ignored (hardware) |
 
+## T-8 — Docs: bloco `frontend:` do PROJECT (D-8), README, CHANGELOG, roteiro de hardware
+
+### O que foi feito
+- **`.jdi/PROJECT.md`**: só o bloco `frontend:` mudou. `has_frontend: true`, `frontend_url: http://localhost:1420`, `dev_command: python3 -m http.server 1420 --directory apps/ddc-tray/src`, `critical_paths` = `/`, `/?demo=rtk`, `/?demo=two-monitors`, `/?demo=empty` e `/?demo=error`. Um comentário cita a D-2026-09-26-tray-app-8 e diz que o Gate 7 roda a suíte `apps/ddc-tray` (`npm ci --ignore-scripts && npx playwright test`). O bloco foi conferido com `yaml.safe_load`.
+- **`README.md`** (en):
+  - status na fase 5, com a ressalva de que a única escrita em hardware até aqui é a do teste do tray (brilho 100 → 90 → 100 na T-3);
+  - seção **Tray app**:
+    - os 3 screenshots (claro, escuro e o diálogo) numa tabela HTML com `width="240"`, avisando que são da demo;
+    - **Build and run** (`cargo run -p ddc-tray` e o build release), com as deps Linux por distro (Fedora `webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel systemd-devel`; Debian/Ubuntu `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libudev-dev pkg-config`) e o link do `/dev/i2c` → `docs/linux-ddc-setup.md`;
+    - **Using it**: o menu no Linux, os cliques no Windows, o debounce, o read-back, a confirmação de todo `dangerous`, "All settings" e a sondagem, o seletor com o fallback, os estados, en/pt-BR;
+    - **Browser demo**: os 4 cenários do `?demo=`;
+    - **Tests**: `cargo test`, `node --test` e Playwright, mais `SCREENSHOTS=1`;
+    - **Known limitations of the tray app**: sem clique e sem posicionamento no Linux/Wayland, GNOME só com a extensão AppIndicator, DMA-BUF desligado (D-2026-09-26-tray-app-10; valor do usuário respeitado), monitor mudo = painel vazio (achado abaixo), Windows nunca compilado (D-2026-09-26-tray-app-9), sem autostart/perfis/hotkeys (`profiles-hotkeys`) e sem instalador (`release-packaging`);
+  - **Layout** com `apps/ddc-tray` (`src-tauri/`, `src/`, `tests/`), e o "Still to come" passa a ser CI, pacotes e `profiles-hotkeys`;
+  - **Monitor-write safety** ganhou um parágrafo: o diálogo faz o papel do `--yes`, e `Confirm::Yes` só existe em `commands.rs`;
+  - **Dev setup** ganhou:
+    - as deps do Tauri, porque `cargo build --workspace` agora as exige;
+    - a linha do Playwright nos quality gates;
+    - o motivo de o tray ficar fora do check Windows;
+    - o comando de hardware do tray.
+- **`CHANGELOG.md`**: um item `ddc-tray` em `[Unreleased]` → Added, com sub-itens:
+  - popup e controles;
+  - debounce e read-back;
+  - confirmação;
+  - vários monitores;
+  - menu por plataforma;
+  - i18n, tema, teclado, CSP, capabilities e single-instance;
+  - DMA-BUF;
+  - demo, Playwright/axe, `node --test`, golden, smoke SNI e o teste de hardware.
+- **`docs/hardware-validation.md`**: título generalizado ("Hardware validation"), e a introdução aponta para a seção nova.
+  - **Tray app — phase `tray-app`**: sair do tray antes dos passos 6 e 7.
+  - **6. smoke SNI**: comando, as 3 linhas esperadas (formato conferido no script) e os casos de FAIL.
+  - **7. teste de hardware**: com `ddcutil --bus 5 getvcp 10` antes e depois, os 4 passos do teste (conferidos no código) e os números da T-3.
+  - **8. o popup à mão** (opcional): só escritas Safe desfeitas, atalhos só com o RTK carregado, diálogos só com Cancelar, "All settings" e a sondagem só para ler.
+  - **Never do through the popup**: nunca Aplicar entrada, energia ou qualquer entrada **Caution** (`0xCA`, `0x1E`, `0x20`, `0x30`, `0x7E`, `0xE6`, `0xF1`…).
+
+### Conferido no código antes de afirmar
+- Menu, rótulos e cliques: `menu.rs`, `i18n.rs` e `tray.rs` (`show_menu_on_left_click(false)`, `Click{Left,Up}`, `Position::TrayCenter`, erro de ancoragem logado só no Windows).
+- Re-exec DMA-BUF (`var_os(...).is_some()` → qualquer valor do usuário é mantido) e single-instance: `lib.rs`.
+- Textos em inglês: `src/i18n/en.js`. Fallback de monitor: `app.js` (`refresh`/`firstAnswering`/`showLoaded`). Cancelar restaura o widget: `requestChange`.
+- Deps Linux: pacotes `rpm -q` instalados (`webkit2gtk4.1-devel`, `libappindicator-gtk3-devel`, `librsvg2-devel`, `systemd-devel`). O `ldd` do release linka webkit2gtk-4.1, gtk-3, soup-3, javascriptcoregtk e udev; `libxdo-devel` não está instalado e não faz falta. Os nomes Debian/Ubuntu não foram testados, e o README diz isso.
+- Linhas do smoke: `echo`s de `smoke-sni.sh`. Passos do teste de hardware: `tests/rtk_qhd_hdr.rs`.
+
+### Achado (fora do escopo da T-8; nenhum código foi tocado)
+**Com o backend real, um monitor com DDC/CI mudo não é pulado.** `panel::load_panel` descarta cada controle cuja leitura falha e só devolve erro em `MonitorNotFound`. Um monitor listado mas mudo, como a LG TV do dev (que responde `Transport`, exit 6 no CLI), devolve `Ok` com 0 controles. Então, no `app.js`, o `firstAnswering` o aceita como "respondeu":
+- o popup pode abrir nele com o painel vazio (no dev a TV vem 1ª na lista);
+- o `select_monitor` o torna alvo dos atalhos de brilho;
+- ele fica lembrado para a próxima abertura.
+
+A demo diverge: o `silent` do `bridge.js` rejeita com `timeout`, então o `two-monitors` e o `fallback.spec` provam um caminho que o app real não percorre. Nenhum teste Rust cobre o caso "todos os controles falham".
+
+- **Prova** (teste temporário em `panel/tests.rs`, com os 6 códigos rápidos em `Transport`; o arquivo foi restaurado da cópia e `git status` ficou limpo):
+  ```
+  T8 PROBE load_panel(mute TV) = Ok(PanelDto { monitor_id: "GSM-LG-TV-SSCR2-01010101", controls: [] })
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 92 filtered out
+  ```
+- **Correção proposta ao orquestrador** (fora do `files_modified` da T-8, por isso não foi feita):
+  - em `load_panel`, quando nenhum controle é lido, devolver `ui_error` da 1ª falha (`timeout`/`transport`), em vez de `Ok` vazio;
+  - um teste Rust com um fake mudo;
+  - retirar do README e do `docs/hardware-validation.md` (passo 8) a limitação "A monitor whose DDC/CI is mute opens as an empty panel".
+
+  A demo e o golden não mudam.
+- **Documentação honesta enquanto isso:** o README não afirma que o app real pula a TV. A demo afirma ("skipped and marked (no DDC/CI)"), porque é o que ela faz.
+
+### Desvios do plano
+- O screenshot do diálogo entrou no README (pedido "se couber"), e a tabela usa HTML para os 3 caberem lado a lado.
+- O heading "Known limitations of the tray app" tem nome próprio para não colidir com a âncora do "Known limitations" do CLI.
+- Além do pedido:
+  - o passo 8 (popup à mão) no roteiro de hardware;
+  - o parágrafo em "Monitor-write safety";
+  - a linha do Playwright nos quality gates;
+  - o título do roteiro generalizado.
+- Um único commit de docs: o hook aceitou `.jdi/PROJECT.md` com README/CHANGELOG/docs, porque nada disso é código.
+
+### Verificação
+| Comando | Resultado |
+|---|---|
+| Test do plano (`grep -q 'has_frontend: true' … && grep -q '^## \[Unreleased\]' CHANGELOG.md`) | `PLAN TEST: OK` |
+| `yaml.safe_load` do bloco `frontend:` | `{'has_frontend': True, 'frontend_url': 'http://localhost:1420', …, 'critical_paths': ['/', '/?demo=rtk', '/?demo=two-monitors', '/?demo=empty', '/?demo=error']}` |
+| `cargo test --workspace --locked` | 339 passed, 0 failed, 8 ignored (hardware) |
+| `node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'` | `# tests 83`, `# pass 83`, `# fail 0` |
+| `cd apps/ddc-tray && npm ci --ignore-scripts … && npx playwright test --reporter=list` | `36 passed`, `4 skipped` (5,7 s) |
+| `cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` | TOTAL lines **88.70%** (2726 linhas, 308 sem cobertura) |
+
 ## Tests
-- Total: 339
+- Total: 339 (Rust, `cargo test --workspace --locked`) + 8 ignored (hardware, `DDC_HW_TESTS=1`)
 - Passing: 339
-- Coverage: 88.70% (`cargo llvm-cov --summary-only`, TOTAL lines; medido na T-5, e nem a T-6 nem a T-7 tocam Rust)
-- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 83 passing, 0 failing (medido na T-7)
-- Playwright (`cd apps/ddc-tray && npx playwright test --reporter=list`): 36 passing, 0 failing, 4 skipped (screenshots sem `SCREENSHOTS=1`), estável em 3 execuções + `--repeat-each=5`
+- Coverage: 88.70% (`cargo llvm-cov --workspace --locked --summary-only --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'`, TOTAL lines, medido na T-8)
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 83 passing, 0 failing (medido na T-8)
+- Playwright (`cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test --reporter=list`): 36 passing, 0 failing, 4 skipped (screenshots sem `SCREENSHOTS=1`), medido na T-8
