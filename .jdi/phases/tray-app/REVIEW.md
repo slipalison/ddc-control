@@ -84,3 +84,9 @@ Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Witho
 ## Nota do orquestrador (pós-review, antes do critic)
 
 W-4 era dos `Verify:` de TODO (orquestrador): D-2026-09-27-tray-app-14 fixa `LC_ALL=C.UTF-8` e alinha o plural na linha da phase (única exclusão por padrão exato: a linha `.jdi/todos.md` do `.gitignore`). OK em três locales; mutantes reprovam. W-3 (rebase) fica para o ship.
+
+## DoD Critic (enhanced)
+
+- DoD row «18 (TODO repo-wide)»: o `pt-BR.js` inteiro era excluído do grep sem distinção de caixa; `// todo: check that "sondar" reads well to users before the release` (e `// Todo:`, `/* @todo */`, `// To do:`) nesse arquivo passava. Corrigido pelo orquestrador (emenda da D-14): comentários do `pt-BR.js` passam a ser checados; strings portuguesas continuam isentas.
+
+**Verdict:** BLOCKED

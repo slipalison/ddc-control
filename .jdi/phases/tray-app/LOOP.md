@@ -16,3 +16,5 @@ created_at: 2026-09-27T10:29:21-03:00
 - iter 1 aggregate after DoD critic: BLOCKED (critic: 2 rows — TODO/FIXME word mid-comment without colon; code has none), ts=2026-09-27T10:56:02-03:00
 - iter 2: doer no-op (nenhum código a mudar; só o Verify de TODO revisado pelo orquestrador, D-13), ts=2026-09-27T10:56:08-03:00
 - iter 2: APPROVED_PENDING_MANUAL (W-1 audit, W-3 rebase before PR, W-4 TODO verify locale → fixed by orchestrator D-14), hash=c047f601c548, commit=f1e40bd, ts=2026-09-27T11:03:11-03:00
+- iter 2 aggregate after DoD critic: BLOCKED (critic: 1 row — pt-BR.js comments exempted from the TODO word rule), ts=2026-09-27T11:14:32-03:00
+- iter 3: doer no-op (nenhum código a mudar; só o Verify de TODO revisado pelo orquestrador, emenda da D-14), ts=2026-09-27T11:14:32-03:00
