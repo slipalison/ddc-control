@@ -47,7 +47,7 @@ ddc-control
       **Verify:** `cargo llvm-cov --workspace --summary-only` → coluna Lines >= 80%
       **Source:** PROJECT
 - [ ] No `TODO`/`FIXME` without linked issue reference
-      **Verify:** `! { grep -RInE 'TODO|FIXME' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vE '#[0-9]+' | grep -q .; }`
+      **Verify:** `! grep -RInE '\b(TODO|FIXME)\b' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vE '\b(TODO|FIXME)\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && echo OK` (D-2026-09-27-tray-app-4: referência de issue colada ao marcador)
       **Source:** PROJECT
 
 ### Manual
