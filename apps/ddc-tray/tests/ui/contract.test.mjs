@@ -43,15 +43,18 @@ test('the default demo is the golden RTK scenario', async () => {
   });
 });
 
-test('two-monitors keeps the golden RTK and shapes the second monitor like the contract', async () => {
+test('two-monitors keeps the golden RTK and shapes the other monitor like the contract', async () => {
   const bridge = demo('?demo=two-monitors');
-  const [rtk, other] = await bridge.listMonitors();
+  const monitors = await bridge.listMonitors();
+  const rtk = monitors.find((monitor) => monitor.id === golden.monitors[0].id);
+  const other = monitors.find((monitor) => monitor.id.startsWith('DEL-'));
   const { panel, features } = await snapshot(bridge, other.id);
   const [goldenControl] = golden.panel.controls;
   const goldenContinuous = golden.panel.controls.find((c) => c.value.kind === 'continuous').value;
   const goldenChoice = golden.panel.controls.find((c) => c.value.kind === 'nonContinuous').value;
 
   assert.deepStrictEqual(rtk, golden.monitors[0]);
+  for (const monitor of monitors) assert.deepEqual(keys(monitor), keys(golden.monitors[0]));
   assert.deepStrictEqual((await snapshot(bridge, rtk.id)).panel, golden.panel);
   assert.deepEqual(keys(other), keys(golden.monitors[0]));
   assert.deepEqual(keys(panel), keys(golden.panel));

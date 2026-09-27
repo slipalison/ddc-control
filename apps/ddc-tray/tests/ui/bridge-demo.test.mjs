@@ -6,6 +6,7 @@ import { SCENARIOS, scenarioName } from '../../src/demo-data.js';
 
 const RTK = 'RTK-RTK-QHD-HDR-01010101';
 const DELL = 'DEL-DELL-U2723QE-7X9K2L3';
+const TV = 'GSM-LG-TV-SSCR2-01010101';
 const INPUT = 0x60;
 const BRIGHTNESS = 0x10;
 const POWER = 0xd6;
@@ -47,7 +48,7 @@ test('?demo= picks a scenario and falls back to rtk when unknown', () => {
   assert.equal(scenarioName(undefined), 'rtk');
 });
 
-test('two-monitors lists both; the second has no volume and an unnamed input', async () => {
+test('two-monitors lists a silent TV first, then both monitors; the DELL has no volume and an unnamed input', async () => {
   const { bridge } = demo('?demo=two-monitors');
 
   const monitors = await bridge.listMonitors();
@@ -56,6 +57,7 @@ test('two-monitors lists both; the second has no volume and an unnamed input', a
   assert.deepEqual(
     monitors.map(({ id, label }) => [id, label]),
     [
+      [TV, 'LG TV SSCR2'],
       [RTK, 'RTK QHD HDR'],
       [DELL, 'DELL U2723QE'],
     ],
@@ -73,6 +75,19 @@ test('two-monitors lists both; the second has no volume and an unnamed input', a
       { value: 0x1b, name: null },
     ],
   });
+});
+
+test('the silent TV is listed but every DDC/CI call to it times out', async () => {
+  const { win, bridge } = demo('?demo=two-monitors');
+  const timeout = { kind: 'timeout', message: 'monitor did not respond in time' };
+
+  assert.deepEqual(await rejection(bridge.loadPanel(TV)), timeout);
+  assert.deepEqual(await rejection(bridge.loadFeatures(TV)), timeout);
+  assert.deepEqual(await rejection(bridge.probeFeatures(TV)), timeout);
+  assert.deepEqual(await rejection(bridge.setFeature(TV, BRIGHTNESS, 10)), timeout);
+  assert.equal(await bridge.selectMonitor(TV), null);
+  assert.deepEqual(win.__ddcDemo.writes, []);
+  assert.equal((await bridge.loadPanel(RTK)).monitorId, RTK);
 });
 
 test('empty lists no monitor', async () => {

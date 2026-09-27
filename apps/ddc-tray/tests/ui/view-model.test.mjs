@@ -5,16 +5,21 @@ import { readFileSync } from 'node:fs';
 import { translator } from '../../src/i18n/index.js';
 import {
   I2C_DOC,
+  LAST_MONITOR_KEY,
   confirmView,
   controlView,
   detectPlatform,
   errorText,
   featureView,
   featuresView,
+  firstAnswering,
+  monitorOrder,
   monitorPicker,
   panelView,
-  pickMonitor,
+  recallMonitor,
+  rememberMonitor,
   statusView,
+  storageOf,
   withReadBack,
 } from '../../src/view-model.js';
 
@@ -296,22 +301,147 @@ test('the platform comes from what the webview reports', () => {
   }
 });
 
-test('the picked monitor survives while listed, and the picker appears with a choice', () => {
+test('the picker appears only with a choice and marks the selected monitor', () => {
   const monitors = [
     { id: 'a', label: 'RTK QHD HDR' },
     { id: 'b', label: 'DELL U2723QE' },
   ];
 
-  assert.equal(pickMonitor(monitors, 'b'), 'b');
-  assert.equal(pickMonitor(monitors, 'gone'), 'a');
-  assert.equal(pickMonitor([], 'a'), null);
   assert.deepEqual(monitorPicker(monitors, 'b'), {
     selectable: true,
     current: { id: 'b', label: 'DELL U2723QE' },
     options: [
-      { id: 'a', label: 'RTK QHD HDR', selected: false },
-      { id: 'b', label: 'DELL U2723QE', selected: true },
+      { id: 'a', label: 'RTK QHD HDR', selected: false, silent: false },
+      { id: 'b', label: 'DELL U2723QE', selected: true, silent: false },
     ],
   });
   assert.equal(monitorPicker(monitors.slice(0, 1), 'a').selectable, false);
+});
+
+const TV = 'GSM-LG-TV-SSCR2-01010101';
+const RTK = 'RTK-RTK-QHD-HDR-01010101';
+const DELL = 'DEL-DELL-U2723QE-7X9K2L3';
+const listed = [TV, RTK, DELL].map((id) => ({ id, label: id }));
+
+test('a monitor that did not answer stays in the picker, marked silent', () => {
+  const picker = monitorPicker(listed, RTK, new Set([TV]));
+
+  assert.deepEqual(
+    picker.options.map(({ id, selected, silent }) => [id, selected, silent]),
+    [
+      [TV, false, true],
+      [RTK, true, false],
+      [DELL, false, false],
+    ],
+  );
+});
+
+test('monitors are tried from the remembered one, then in the order listed', () => {
+  assert.deepEqual(monitorOrder(listed, DELL), [DELL, TV, RTK]);
+  assert.deepEqual(monitorOrder(listed, TV), [TV, RTK, DELL]);
+  assert.deepEqual(monitorOrder(listed, 'unplugged'), [TV, RTK, DELL]);
+  assert.deepEqual(monitorOrder(listed, null), [TV, RTK, DELL]);
+  assert.deepEqual(monitorOrder([], RTK), []);
+});
+
+// A load that answers for `answering` ids and times out for the others,
+// recording the order it was asked in.
+function loader(answering) {
+  const asked = [];
+  const load = async (id) => {
+    asked.push(id);
+    if (answering.includes(id)) return { monitorId: id };
+    throw { kind: 'timeout', message: `${id} did not respond in time` };
+  };
+  return { asked, load };
+}
+
+test('the first monitor that answers is shown, after the silent ones before it', async () => {
+  const { asked, load } = loader([RTK, DELL]);
+
+  const found = await firstAnswering([TV, RTK, DELL], load);
+
+  assert.equal(found.monitorId, RTK);
+  assert.deepEqual(found.panel, { monitorId: RTK });
+  assert.deepEqual(asked, [TV, RTK]);
+  assert.deepEqual([...found.failures.keys()], [TV]);
+  assert.equal(found.failures.get(TV).kind, 'timeout');
+});
+
+test('the remembered monitor answers first and nothing else is read', async () => {
+  const { asked, load } = loader([TV, RTK, DELL]);
+
+  const found = await firstAnswering(monitorOrder(listed, DELL), load);
+
+  assert.equal(found.monitorId, DELL);
+  assert.deepEqual(asked, [DELL]);
+  assert.equal(found.failures.size, 0);
+});
+
+test('only when no monitor answers is there nothing to show', async () => {
+  const { asked, load } = loader([]);
+
+  const found = await firstAnswering([TV, RTK], load);
+
+  assert.deepEqual({ monitorId: found.monitorId, panel: found.panel }, { monitorId: null, panel: null });
+  assert.deepEqual(asked, [TV, RTK]);
+  assert.deepEqual([...found.failures.keys()], [TV, RTK]);
+});
+
+test('a stale search stops before trying the next monitor', async () => {
+  const { asked, load } = loader([DELL]);
+  let stale = false;
+
+  const found = await firstAnswering([TV, RTK, DELL], async (id) => {
+    stale = true;
+    return load(id);
+  }, { stop: () => stale });
+
+  assert.equal(found.monitorId, null);
+  assert.deepEqual(asked, [TV]);
+});
+
+function memoryStorage() {
+  const items = new Map();
+  return {
+    items,
+    getItem: (key) => (items.has(key) ? items.get(key) : null),
+    setItem: (key, value) => items.set(key, String(value)),
+  };
+}
+
+const refusing = {
+  getItem: () => {
+    throw new Error('SecurityError');
+  },
+  setItem: () => {
+    throw new Error('QuotaExceededError');
+  },
+};
+
+test('the last monitor that answered is remembered between runs', () => {
+  const storage = memoryStorage();
+
+  assert.equal(recallMonitor(storage), null);
+  assert.equal(rememberMonitor(storage, RTK), true);
+  assert.equal(recallMonitor(storage), RTK);
+  assert.deepEqual([...storage.items], [[LAST_MONITOR_KEY, RTK]]);
+});
+
+test('a storage that refuses only loses the memory', () => {
+  const locked = {};
+  Object.defineProperty(locked, 'localStorage', {
+    get() {
+      throw new Error('SecurityError');
+    },
+  });
+
+  assert.equal(recallMonitor(refusing), null);
+  assert.equal(rememberMonitor(refusing, RTK), false);
+  assert.equal(recallMonitor(null), null);
+  assert.equal(rememberMonitor(null, RTK), false);
+  assert.equal(storageOf(locked), null);
+  assert.equal(storageOf(undefined), null);
+  const storage = memoryStorage();
+  assert.equal(storageOf({ localStorage: storage }), storage);
 });

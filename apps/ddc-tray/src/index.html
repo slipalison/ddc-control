@@ -1,8 +1,131 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title data-i18n="app.title"></title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="app.js"></script>
   </head>
-  <body></body>
+  <body>
+    <div class="app" id="app" data-state="loading">
+      <header class="header">
+        <h1 class="visually-hidden" data-i18n="app.title"></h1>
+        <span class="brand" data-icon="brand"></span>
+        <div class="identity">
+          <div class="title" id="title">
+            <p class="monitor-name" id="monitor-name" data-i18n="app.title"></p>
+            <span class="title-chevron" id="picker-chevron" data-icon="chevron" hidden></span>
+            <select class="title-select" id="monitor-select" data-i18n-attr="aria-label:header.monitor" hidden></select>
+          </div>
+          <p class="monitor-meta" id="monitor-meta"></p>
+        </div>
+        <button type="button" class="icon-button" id="refresh" data-i18n-attr="aria-label:action.refresh;title:action.refresh">
+          <span class="icon-slot spins" data-icon="refresh"></span>
+        </button>
+        <button type="button" class="icon-button icon-button-danger" id="power" data-i18n-attr="aria-label:power.changeLabel;title:power.changeLabel" hidden>
+          <span class="icon-slot" data-icon="power"></span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+      </header>
+
+      <main class="content" id="content" aria-busy="true">
+        <div class="skeleton" id="skeleton" aria-hidden="true">
+          <div class="card skeleton-card">
+            <div class="skeleton-row"><span class="bone bone-tile"></span><span class="bone-lines"><span class="bone bone-line bone-short"></span><span class="bone bone-track"></span></span></div>
+            <div class="skeleton-row"><span class="bone bone-tile"></span><span class="bone-lines"><span class="bone bone-line bone-short"></span><span class="bone bone-track"></span></span></div>
+            <div class="skeleton-row"><span class="bone bone-tile"></span><span class="bone-lines"><span class="bone bone-line bone-short"></span><span class="bone bone-track"></span></span></div>
+          </div>
+          <div class="card skeleton-card">
+            <span class="bone bone-line bone-short"></span>
+            <div class="skeleton-chips"><span class="bone bone-chip"></span><span class="bone bone-chip"></span><span class="bone bone-chip"></span><span class="bone bone-chip"></span></div>
+          </div>
+          <div class="card skeleton-card">
+            <div class="skeleton-row"><span class="bone bone-tile"></span><span class="bone bone-line"></span></div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel" hidden>
+          <section class="card quick" id="quick" data-i18n-attr="aria-label:panel.quick">
+            <div class="sliders" id="sliders"></div>
+            <div class="quick-rows" id="quick-rows"></div>
+          </section>
+
+          <section class="card" id="input-card" aria-labelledby="input-title" hidden>
+            <div class="card-head">
+              <span class="tile" data-icon="input"></span>
+              <h2 class="card-title" id="input-title" data-i18n="feature.input"></h2>
+            </div>
+            <div class="chips" id="input-chips" role="radiogroup" aria-labelledby="input-title"></div>
+          </section>
+
+          <details class="card more" id="more">
+            <summary class="more-summary">
+              <span class="tile" data-icon="sliders"></span>
+              <span class="more-title" data-i18n="more.title"></span>
+              <span class="more-chevron" data-icon="chevron"></span>
+            </summary>
+            <div class="more-body">
+              <div class="more-status" id="more-status" hidden>
+                <span class="spinner" id="more-spinner" aria-hidden="true"></span>
+                <span id="more-status-text"></span>
+                <button type="button" class="link-button" id="more-retry" data-i18n="action.retry" hidden></button>
+              </div>
+              <ul class="feature-list" id="feature-list"></ul>
+              <div class="probe">
+                <button type="button" class="button probe-button" id="probe">
+                  <span class="icon-slot" data-icon="search"></span>
+                  <span class="spinner" aria-hidden="true"></span>
+                  <span id="probe-label" data-i18n="more.probe"></span>
+                </button>
+                <p class="probe-hint" data-i18n="more.probeHint"></p>
+              </div>
+              <div class="probe-results" id="probe-results" hidden>
+                <h3 class="probe-title" data-i18n="more.probed"></h3>
+                <ul class="feature-list" id="probe-list"></ul>
+                <p class="probe-note" id="probe-note"></p>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="message" id="message" hidden>
+          <span class="message-art" id="message-art"></span>
+          <h2 class="message-title" id="message-title"></h2>
+          <p class="message-text" id="message-tip"></p>
+          <p class="message-hint" id="message-hint"></p>
+          <p class="message-detail" id="message-detail"></p>
+          <button type="button" class="button button-accent" id="retry">
+            <span class="icon-slot spins" data-icon="refresh"></span>
+            <span data-i18n="action.retry"></span>
+          </button>
+        </div>
+      </main>
+
+      <div class="toast" id="toast" hidden>
+        <span class="toast-icon" data-icon="alert"></span>
+        <span class="toast-text" id="toast-text"></span>
+        <button type="button" class="link-button" id="toast-retry" data-i18n="action.retry"></button>
+      </div>
+      <p class="visually-hidden" id="announcer" aria-live="polite"></p>
+    </div>
+
+    <dialog class="dialog" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+      <div class="dialog-surface">
+        <span class="dialog-icon" data-icon="alert"></span>
+        <h2 class="dialog-title" id="confirm-title"></h2>
+        <p class="dialog-body" id="confirm-body"></p>
+        <p class="dialog-note" id="confirm-note" hidden></p>
+        <fieldset class="choices" id="confirm-choices" hidden>
+          <legend class="choices-legend" data-i18n="confirm.choose"></legend>
+          <div class="choices-list" id="confirm-choice-list"></div>
+        </fieldset>
+        <div class="dialog-actions">
+          <button type="button" class="button" id="confirm-cancel" autofocus data-i18n="confirm.cancel"></button>
+          <button type="button" class="button button-accent" id="confirm-accept" data-i18n="confirm.accept"></button>
+        </div>
+      </div>
+    </dialog>
+  </body>
 </html>

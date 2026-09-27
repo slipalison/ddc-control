@@ -2,9 +2,32 @@
 // keys are slugs of the core's value names; a name without a key shows as is.
 
 export default Object.freeze({
+  'app.title': 'DDC Control',
+  'header.monitor': 'Monitor',
+  'header.meta': '{manufacturer} · DDC/CI',
+  'header.tagline': 'Monitor control over DDC/CI',
+  'header.silent': '{label} (no DDC/CI)',
+  'header.noAnswer': 'Not answering over DDC/CI',
+  'panel.quick': 'Quick settings',
+  'power.changeLabel': 'Change power mode',
+  'tag.dangerous': 'Caution',
+  'announce.readBack': '{feature}: the monitor applied {value}.',
+
+  'more.title': 'All settings',
+  'more.loading': 'Reading settings…',
+  'more.empty': 'The monitor declares no other settings.',
+  'more.probe': 'Probe hidden settings',
+  'more.probing': 'Probing…',
+  'more.probeHint': 'Tries codes the monitor does not declare. Takes a few seconds.',
+  'more.probed': 'Found by probing',
+  'more.probeEmpty': 'No hidden setting answered.',
+  'more.probeSilent': 'Codes without an answer: {count}',
+
   'state.loading': 'Looking for monitors…',
   'state.empty': 'No monitor with DDC/CI was found.',
   'action.retry': 'Try again',
+  'action.refresh': 'Refresh',
+  'hint.ddc': "Turn on DDC/CI in the monitor's on-screen menu, then try again.",
   'hint.i2c':
     'On Linux, DDC/CI needs the i2c-dev module and read/write access to /dev/i2c-*. See {doc}.',
 
@@ -25,6 +48,8 @@ export default Object.freeze({
     "Set power to {to}? The screen may turn off, and you may need the monitor's power button to turn it back on.",
   'confirm.body.generic':
     'Set {feature} to {to}? This setting can change how the monitor behaves.',
+  'confirm.recover.input': 'To go back, use the input (source) button on the monitor.',
+  'confirm.choose': 'Power mode',
   'confirm.accept': 'Apply',
   'confirm.cancel': 'Cancel',
 

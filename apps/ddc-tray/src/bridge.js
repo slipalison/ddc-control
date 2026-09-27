@@ -81,9 +81,9 @@ function demoBridge(win, latencyMs, timers) {
       demo.selected = monitorOf(monitors, monitorId).info.id;
       return null;
     },
-    load_panel: ({ monitorId }) => panelDto(monitorOf(monitors, monitorId)),
-    load_features: ({ monitorId }) => monitorOf(monitors, monitorId).features.map(featureDto),
-    probe_features: ({ monitorId }) => monitorOf(monitors, monitorId).probe.map(featureDto),
+    load_panel: ({ monitorId }) => panelDto(answering(monitors, monitorId)),
+    load_features: ({ monitorId }) => answering(monitors, monitorId).features.map(featureDto),
+    probe_features: ({ monitorId }) => answering(monitors, monitorId).probe.map(featureDto),
     set_feature: (args) => write(monitors, demo.writes, args),
     hide_popup: () => null,
   };
@@ -116,7 +116,7 @@ function demoBridge(win, latencyMs, timers) {
 }
 
 function write(monitors, writes, { monitorId, code, value, confirmed }) {
-  const entry = writableEntry(monitorOf(monitors, monitorId), code);
+  const entry = writableEntry(answering(monitors, monitorId), code);
   if (entry.dangerous && confirmed !== true) {
     throw uiError('needs_confirmation', `writing feature ${hex(code)} is dangerous and was not confirmed`);
   }
@@ -129,6 +129,13 @@ function write(monitors, writes, { monitorId, code, value, confirmed }) {
 function monitorOf(monitors, monitorId) {
   const monitor = monitors.find((candidate) => candidate.info.id === monitorId);
   if (!monitor) throw uiError('not_found', `monitor ${monitorId} not found`);
+  return monitor;
+}
+
+// A silent monitor is listed, but every DDC/CI transaction with it times out.
+function answering(monitors, monitorId) {
+  const monitor = monitorOf(monitors, monitorId);
+  if (monitor.silent) throw uiError('timeout', 'monitor did not respond in time');
   return monitor;
 }
 

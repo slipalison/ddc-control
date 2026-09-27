@@ -19,13 +19,13 @@ export function scenarioName(search) {
 /**
  * Fresh monitors of scenario `name`, in enumeration order. Each entry holds
  * the raw reading (`current`, `max`) a write changes, and `options` when
- * the feature is non-continuous.
+ * the feature is non-continuous; a `silent` monitor never answers DDC/CI.
  * @param {string} name
  */
 export function scenarioMonitors(name) {
   switch (name) {
     case 'two-monitors':
-      return [rtk(), dell()];
+      return [silentTv(), rtk(), dell()];
     case 'empty':
     case 'error':
       return [];
@@ -140,6 +140,23 @@ function rtk() {
       probed(0xe6, null, 'Manufacturer specific (0xE6)', true, 'unsupported'),
       probed(0xf1, null, 'Manufacturer specific (0xF1)', true, 'unsupported'),
     ],
+  };
+}
+
+// A TV listed first, as on the development machine: its EDID reads, but
+// it never answers DDC/CI, so the popup has to move on to the next monitor.
+function silentTv() {
+  return {
+    info: {
+      id: 'GSM-LG-TV-SSCR2-01010101',
+      label: 'LG TV SSCR2',
+      manufacturer: 'GSM',
+      model: 'LG TV SSCR2',
+    },
+    silent: true,
+    controls: [],
+    features: [],
+    probe: [],
   };
 }
 

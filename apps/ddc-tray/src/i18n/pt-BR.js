@@ -2,9 +2,32 @@
 // (D-2026-09-26-tray-app-6).
 
 export default Object.freeze({
+  'app.title': 'DDC Control',
+  'header.monitor': 'Monitor',
+  'header.meta': '{manufacturer} · DDC/CI',
+  'header.tagline': 'Controle do monitor via DDC/CI',
+  'header.silent': '{label} (sem DDC/CI)',
+  'header.noAnswer': 'Sem resposta via DDC/CI',
+  'panel.quick': 'Ajustes rápidos',
+  'power.changeLabel': 'Alterar o modo de energia',
+  'tag.dangerous': 'Cuidado',
+  'announce.readBack': '{feature}: o monitor aplicou {value}.',
+
+  'more.title': 'Todos os ajustes',
+  'more.loading': 'Lendo ajustes…',
+  'more.empty': 'O monitor não declara outros ajustes.',
+  'more.probe': 'Sondar ajustes ocultos',
+  'more.probing': 'Sondando…',
+  'more.probeHint': 'Testa códigos que o monitor não declara. Leva alguns segundos.',
+  'more.probed': 'Encontrados na sondagem',
+  'more.probeEmpty': 'Nenhum ajuste oculto respondeu.',
+  'more.probeSilent': 'Códigos sem resposta: {count}',
+
   'state.loading': 'Procurando monitores…',
   'state.empty': 'Nenhum monitor com DDC/CI foi encontrado.',
   'action.retry': 'Tentar de novo',
+  'action.refresh': 'Atualizar',
+  'hint.ddc': 'Ative o DDC/CI no menu na tela do monitor e tente de novo.',
   'hint.i2c':
     'No Linux, o DDC/CI precisa do módulo i2c-dev e de acesso de leitura e escrita a /dev/i2c-*. Veja {doc}.',
 
@@ -25,6 +48,8 @@ export default Object.freeze({
     'Mudar a energia para {to}? A tela pode desligar, e talvez seja preciso usar o botão de energia do monitor para religá-la.',
   'confirm.body.generic':
     'Definir {feature} como {to}? Este ajuste pode mudar o comportamento do monitor.',
+  'confirm.recover.input': 'Para voltar, use o botão de entrada (source) do próprio monitor.',
+  'confirm.choose': 'Modo de energia',
   'confirm.accept': 'Aplicar',
   'confirm.cancel': 'Cancelar',
 

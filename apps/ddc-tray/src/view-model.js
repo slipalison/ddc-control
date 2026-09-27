@@ -29,21 +29,103 @@ export function detectPlatform(nav) {
 }
 
 /**
- * The monitor to show: `preferredId` while it is still listed, else the
- * first one, else none.
+ * The header: the monitor's name, and a picker when there is a choice. A
+ * monitor whose panel did not load (`silentIds`) stays listed, marked.
+ * @param {readonly { id: string, label: string }[]} monitors
+ * @param {string | null} selectedId
+ * @param {ReadonlySet<string>} [silentIds]
  */
-export function pickMonitor(monitors, preferredId) {
-  if (monitors.some((monitor) => monitor.id === preferredId)) return preferredId;
-  return monitors[0]?.id ?? null;
-}
-
-/** The header: the monitor's name, and a picker when there is a choice. */
-export function monitorPicker(monitors, selectedId) {
+export function monitorPicker(monitors, selectedId, silentIds = new Set()) {
   return {
     selectable: monitors.length > 1,
     current: monitors.find((monitor) => monitor.id === selectedId) ?? null,
-    options: monitors.map(({ id, label }) => ({ id, label, selected: id === selectedId })),
+    options: monitors.map(({ id, label }) => ({
+      id,
+      label,
+      selected: id === selectedId,
+      silent: silentIds.has(id),
+    })),
   };
+}
+
+/** Where the last monitor whose panel loaded is kept between runs. */
+export const LAST_MONITOR_KEY = 'ddc-tray.last-monitor';
+
+/**
+ * The order to try monitors in: `preferredId` first while it is listed,
+ * then the others as the system lists them. Some outputs (a TV, say) show
+ * an EDID but never answer DDC/CI, so the first listed may not be usable.
+ * @param {readonly { id: string }[]} monitors
+ * @param {string | null} preferredId
+ */
+export function monitorOrder(monitors, preferredId) {
+  const ids = monitors.map((monitor) => monitor.id);
+  if (!ids.includes(preferredId)) return ids;
+  return [preferredId, ...ids.filter((id) => id !== preferredId)];
+}
+
+/**
+ * Loads the panel of the first of `ids` that answers, one at a time.
+ * Resolves with `{ monitorId, panel, failures }`: `monitorId` is null when
+ * none answered (or `stop()` said to give up), and `failures` maps each
+ * monitor tried in vain to its error, in the order tried.
+ * @template P
+ * @param {readonly string[]} ids
+ * @param {(monitorId: string) => Promise<P>} load
+ * @param {{ stop?: () => boolean }} [options]
+ */
+export async function firstAnswering(ids, load, { stop = () => false } = {}) {
+  const failures = new Map();
+  for (const monitorId of ids) {
+    if (stop()) break;
+    try {
+      return { monitorId, panel: await load(monitorId), failures };
+    } catch (error) {
+      failures.set(monitorId, error);
+    }
+  }
+  return { monitorId: null, panel: null, failures };
+}
+
+/**
+ * The page's storage, or null where reading it is refused.
+ * @param {{ localStorage?: Storage } | undefined} win
+ */
+export function storageOf(win) {
+  try {
+    return win?.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The monitor remembered in `storage`, or null when none is (or the storage
+ * refuses to answer).
+ * @param {Pick<Storage, 'getItem'> | null} storage
+ */
+export function recallMonitor(storage) {
+  try {
+    return storage?.getItem(LAST_MONITOR_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remembers `monitorId` in `storage`; a storage that refuses (private mode,
+ * quota) only loses the memory, never the popup.
+ * @param {Pick<Storage, 'setItem'> | null} storage
+ * @param {string} monitorId
+ * @returns {boolean} whether it was stored
+ */
+export function rememberMonitor(storage, monitorId) {
+  try {
+    storage?.setItem(LAST_MONITOR_KEY, monitorId);
+    return Boolean(storage);
+  } catch {
+    return false;
+  }
 }
 
 /**
