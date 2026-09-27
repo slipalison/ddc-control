@@ -7,12 +7,16 @@
 //!   menu.
 //! - On Linux it is a StatusNotifierItem of the app's own (`status_item`):
 //!   a left click toggles the popup, the wheel steps the brightness
-//!   ([`crate::scroll`]), a right click opens the menu.
+//!   ([`crate::scroll`]), a right click opens the menu. On KDE Plasma under
+//!   Wayland a KWin script places the popup next to the icon
+//!   (`kwin_placement`).
 //!
 //! What both share lives here: the popup toggle and the menu's actions. A
 //! brightness shortcut sets the monitor the popup last selected, off the
 //! main thread.
 
+#[cfg(target_os = "linux")]
+mod kwin_placement;
 #[cfg(not(target_os = "linux"))]
 mod notification_area;
 #[cfg(target_os = "linux")]
@@ -53,6 +57,11 @@ pub const APP_NAME: &str = "DDC Control";
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let locale = Locale::from_tag(&sys_locale::get_locale().unwrap_or_default());
     platform::install(app, locale)
+}
+
+/// Undoes what [`install`] set up outside the app, as it quits.
+pub fn uninstall<R: Runtime>(app: &AppHandle<R>) {
+    platform::uninstall(app);
 }
 
 /// Tells the icon the popup selected another monitor, which its tooltip

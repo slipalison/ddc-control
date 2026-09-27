@@ -870,6 +870,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-positioner",
  "tauri-plugin-single-instance",
+ "zbus",
 ]
 
 [[package]]

@@ -24,7 +24,7 @@ use std::time::Instant;
 use ddc_adapters::{CachingMonitorBackend, DdcHiMonitorBackend, default_cache_dir};
 use ddc_core::app::SoftwareOsd;
 use ddc_core::domain::DdcError;
-use tauri::{AppHandle, Emitter, Manager, Runtime, Window, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, Window, WindowEvent};
 
 use crate::commands::{AppState, SharedOsd};
 use crate::dto::POPUP_SHOWN;
@@ -98,7 +98,13 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::set_feature,
             commands::hide_popup,
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())?
+        .run(|app, event| {
+            if matches!(event, RunEvent::Exit) {
+                tray::uninstall(app);
+            }
+        });
+    Ok(())
 }
 
 /// WebKitGTK's DMA-BUF renderer kills the app with a Wayland protocol error

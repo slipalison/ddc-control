@@ -26,6 +26,9 @@ pub(super) fn install<R: Runtime>(app: &AppHandle<R>, locale: Locale) -> tauri::
     Ok(())
 }
 
+/// Tauri removes its icon itself.
+pub(super) fn uninstall<R: Runtime>(_app: &AppHandle<R>) {}
+
 /// The tooltip here does not name the monitor: nothing to update.
 pub(super) fn selection_changed<R: Runtime>(_app: &AppHandle<R>) {}
 

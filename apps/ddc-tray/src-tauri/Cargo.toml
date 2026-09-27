@@ -40,6 +40,9 @@ tauri-plugin-positioner = { version = "2.4.0", features = ["tray-icon"] }
 # runtime Tauri already runs on.
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.6", default-features = false, features = ["tokio"] }
+# Loads the popup-placement script into KWin on KDE Plasma under Wayland
+# (D-2026-09-27-tray-app-3); already in the tree through ksni.
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 
 [lints]
 workspace = true
