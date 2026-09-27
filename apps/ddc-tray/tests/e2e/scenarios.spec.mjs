@@ -1,6 +1,7 @@
 // Gate 7's critical paths (D-2026-09-26-tray-app-8): every demo scenario,
-// and the states a dangerous change opens, show what they should with no
-// console error, no uncaught error and no critical or serious axe violation.
+// the states a dangerous change opens and the failures the demo's `fail=`
+// brings about show what they should with no console error, no uncaught
+// error and no critical or serious axe violation.
 
 import {
   MONITORS,
@@ -14,6 +15,7 @@ import {
   monitorPicker,
   open,
   optionsOf,
+  pick,
   powerButton,
   retryButton,
   slider,
@@ -163,3 +165,88 @@ test('/?demo=rtk with "all settings" open and probed, clean console, no serious 
   expect(await writes(page)).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+// `fail=` makes the demo time out the commands it names, as the backend
+// does when a monitor stops answering. Each failure is told in words, the
+// control shows the monitor's value again, and nothing was written.
+const TIMED_OUT = t('error.timeout');
+
+async function toastTells(page, text) {
+  const toast = page.locator('#toast');
+  await expect(toast).toBeVisible();
+  await expect(page.locator('#toast-text')).toHaveText(text);
+  await expect(page.locator('#announcer')).toHaveText(text);
+  await expect(toast.getByRole('button', { name: t('action.retry'), exact: true })).toBeVisible();
+}
+
+async function openAllSettings(page) {
+  await page.getByText(t('more.title'), { exact: true }).click();
+}
+
+function probeButton(page) {
+  return page.getByRole('button', { name: t('more.probe'), exact: true });
+}
+
+const FAILURES = [
+  {
+    name: 'a brightness write that timed out',
+    fail: 'write',
+    act: (page) => slider(page, 'brightness').press('ArrowRight'),
+    shows: async (page) => {
+      await toastTells(page, TIMED_OUT);
+      await expect(slider(page, 'brightness')).toHaveValue('75');
+      await expect(slider(page, 'brightness')).toHaveAttribute('aria-valuetext', '75%');
+    },
+  },
+  {
+    name: 'a color preset change that timed out',
+    fail: 'write',
+    act: (page) => pick(dropdown(page, t('feature.preset')), t('value.display-native')),
+    shows: async (page) => {
+      await toastTells(page, TIMED_OUT);
+      await expectPicked(dropdown(page, t('feature.preset')), 0x01);
+      await expect(dropdown(page, t('feature.preset'))).toHaveText('sRGB');
+    },
+  },
+  {
+    name: '"all settings" failing to load',
+    fail: 'features',
+    act: openAllSettings,
+    shows: async (page) => {
+      const status = page.locator('#more-status');
+      await expect(status).toHaveAttribute('data-kind', 'error');
+      await expect(page.locator('#more-status-text')).toHaveText(TIMED_OUT);
+      await expect(status.getByRole('button', { name: t('action.retry'), exact: true })).toBeVisible();
+      await expect(page.locator('#feature-list > li')).toHaveCount(0);
+      await expect(page.locator('#toast')).toBeHidden();
+    },
+  },
+  {
+    name: 'a probe that timed out',
+    fail: 'probe',
+    act: async (page) => {
+      await openAllSettings(page);
+      await expect(page.locator('#feature-list > li')).toHaveCount(7);
+      await probeButton(page).click();
+    },
+    shows: async (page) => {
+      await toastTells(page, TIMED_OUT);
+      await expect(probeButton(page)).toHaveAttribute('aria-disabled', 'false');
+      await expect(page.locator('#probe-results')).toBeHidden();
+    },
+  },
+];
+
+for (const { name, fail, act, shows } of FAILURES) {
+  test(`/?demo=rtk&fail=${fail} after ${name}, clean console, no serious axe violation`, async ({
+    page,
+    pageErrors,
+  }) => {
+    await open(page, `/?demo=rtk&fail=${fail}`);
+    await act(page);
+    await shows(page);
+    await expectAccessible(page);
+    expect(await writes(page)).toEqual([]);
+    expect(pageErrors).toEqual([]);
+  });
+}
