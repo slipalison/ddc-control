@@ -43,7 +43,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - O Verify do DoD 8 imprime `OK` localmente.
 - **Dependencies:** none
 - **Test:** Verify do DoD 8 · commit `ci(ci-crossbuild): add cargo audit policy with justified ignores`
-- **Status:** pending
+- **Status:** completed
 
 #### T-2: Manifesto do Windows embutido em todo binário do `ddc-tray` (tauri#13419)
 - **Specialist:** jdi-doer-ddc-control
@@ -54,7 +54,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - No Linux nada muda: `cargo build -p ddc-tray --locked -vv 2>&1 | grep -c MANIFEST` = 0, e os gates locais seguem verdes. A prova no Windows é o DoD 5 (T-6).
 - **Dependencies:** none
 - **Test:** gates locais + DoD 5 · commit `fix(ci-crossbuild): embed the Windows app manifest in test binaries`
-- **Status:** pending
+- **Status:** completed
 
 #### T-3: `npm test` roda `node --test` e o Playwright, sem sudo local
 - **Specialist:** jdi-doer-ddc-control
@@ -65,7 +65,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - Local, `cd apps/ddc-tray && npm test` (sem sudo) dá TAP com `# fail 0` e `# pass` ≥ 158, e Playwright com ≥ 138 `passed`.
 - **Dependencies:** none
 - **Test:** `npm test` + Gate 7 · commit `test(ci-crossbuild): run node --test and Playwright from npm test`
-- **Status:** pending
+- **Status:** completed
 
 #### T-4 (gw): `qualidade.yml` estendido, README e exemplo, num PR no github-workflows
 - **Specialist:** jdi-doer-ddc-control
@@ -86,7 +86,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - **Commit e PR:** 1 commit `feat(qualidade): …`, push, `gh pr create --repo slipalison/github-workflows --base main` (corpo em pt-BR). O CI de lá fica verde no head: `Scripts`, `Pins das actions`, `Sintaxe dos workflows` e `versao`.
 - **Dependencies:** none
 - **Test:** CI do gw + DoD 2
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2
 
@@ -102,7 +102,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - **Publicação:** actionlint local limpo; commit; `git push -u origin phase/ci-crossbuild`; `gh pr create --draft --base main --head phase/ci-crossbuild --title "feat(ci-crossbuild): CI on Linux and Windows via reusable workflows"`, com corpo curto em inglês e a linha de atribuição. O run de `pull_request` nasce com `versao` e `qualidade / {rust-linux,rust-windows,node-ui}`, sem `startup_failure`.
 - **Dependencies:** T-1, T-2, T-3, T-4
 - **Test:** 1º run criado · commit `ci(ci-crossbuild): run CI on Linux and Windows via reusable workflows`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3
 
@@ -117,7 +117,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - Os gates locais ficam verdes em todo commit de código, cobertura ≥ 80 inclusive.
 - **Dependencies:** T-5
 - **Test:** ensaio dos Verify 1–6 do DoD
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 
@@ -131,7 +131,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - Todo número citado vem de um run. O commit não leva código nem `.jdi/`: `docs(ci-crossbuild): document the CI`.
 - **Dependencies:** T-6
 - **Test:** revisão humana (Deferred) + o run do push verde
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5
 
@@ -146,7 +146,7 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
   - Depois do `HEAD_SHA`, nada muda em `crates/`, `apps/`, `Cargo.*`, `.cargo/` nem `.github/`. Se o template mudar depois do negativo, refazer o negativo: o `ci.yml` do NEG tem de ser byte a byte o do HEAD_SHA.
 - **Dependencies:** T-7
 - **Test:** os 8 Verify do DoD
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - 8 tasks em 5 waves. Só a W1 é paralela (T-1..T-3 aqui, T-4 no gw, arquivos disjuntos). Speedup ≈ 1.6x.
