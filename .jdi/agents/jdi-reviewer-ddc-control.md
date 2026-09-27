@@ -399,15 +399,26 @@ Check (locked-decision conformance — "locked decisions never reverse" is only 
 
 Violation of a locked decision = **BLOCK** (cite the D-XX id and the contradicting file/line). Not sure = WARN with the D-XX id — never silently pass over a suspected violation.
 
-### Gate 7: UI/UX Live Validation — SKIPPED
+### Gate 7: UI/UX Live Validation
 
 `frontend.has_frontend: false` in `.jdi/PROJECT.md` → this gate returns `SKIPPED` immediately.
 
-Why: the only UI is the Tauri tray popup, which is not a routable web app. Phase `tray-app` may revisit via a D-XX (Tauri's `tauri dev` serves the popup at `http://localhost:1420`, which the `frontend-validator` skill could drive). Until a decision flips the flag, do not attempt Playwright.
+Since D-2026-09-26-tray-app-8 the flag is `true`: the tray popup UI (`apps/ddc-tray/src/`, static HTML/CSS/ES modules) also runs in a plain browser in demo mode (a fake JS bridge used only when `window.__TAURI__` is absent). The project OWNS its validation suite — do NOT scaffold the generic `frontend-validator` skill script at the repo root (there is no root `package.json`; the suite lives in `apps/ddc-tray/`):
 
 ```bash
-grep -qE 'has_frontend:\s*true' .jdi/PROJECT.md && echo "Gate 7: flag flipped — load jdi-frontend-validator" || echo "Gate 7: SKIPPED (has_frontend=false)"
+if grep -qE 'has_frontend:\s*true' .jdi/PROJECT.md; then
+  test -f apps/ddc-tray/playwright.config.mjs || { echo "Gate 7: BLOCK — suite missing (D-2026-09-26-tray-app-8)"; }
+  (cd apps/ddc-tray && npm ci --ignore-scripts --no-audit --no-fund --silent && npx playwright test --reporter=list) 2>&1 | tail -40
+else
+  echo "Gate 7: SKIPPED (has_frontend=false)"
+fi
 ```
+
+Classify:
+- Suite missing, `npm ci` fails, or any spec failed/flaky → **BLOCK** (cite the failing spec + first error line).
+- The suite must PROVE, per demo scenario in `critical_paths` (RTK, two monitors, no monitor, error), zero console errors/page errors AND zero axe violations of impact `critical`/`serious` (read the spec: an axe check that only logs, or a scenario list that skips a `critical_paths` entry, is a hollow gate → BLOCK). `moderate`/`minor` axe findings reported by the suite → WARN.
+- Chromium missing (`npx playwright install chromium` needed) → run that user-level install once (no sudo) and retry; still failing → WARN with the error (environment, not code).
+- Also judge, by reading `apps/ddc-tray/src/` (no browser needed): keyboard operability (every control reachable by Tab, sliders are native `input[type=range]` or have full ARIA slider semantics), `prefers-color-scheme` + `prefers-reduced-motion` honoured, no hard-coded user-facing string outside the locale files (D-2026-09-26-tray-app-6). Violation → WARN (BLOCK if it breaks a DoD item).
 
 ### Gate 8: Definition of Done verification
 
@@ -483,7 +494,7 @@ If BLOCK in gate 1-3 -> do not run the rest (fail-fast). Otherwise, run all.
 
 Gate 4 is BLOCK-capable in this project (see gate text) but does not short-circuit: run 5-8 anyway so the doer gets every finding in one round.
 
-Gate 7 is always SKIPPED while `has_frontend=false`.
+Gate 7 is SKIPPED while `has_frontend=false`; since D-2026-09-26-tray-app-8 it runs the `apps/ddc-tray` Playwright suite (see Gate 7).
 
 Gate 8 runs only if gates 1-3 passed.
 
@@ -505,7 +516,7 @@ Path: `{PHASE_DIR}/REVIEW.md`
 | Lint | PASS/BLOCK | fmt + clippy -D warnings |
 | Hexagonal/Safety/Hygiene | PASS/WARN/BLOCK | 5.1–5.11 summary |
 | Consistency | PASS/WARN/BLOCK | plan consistency (warn) + D-XX conformance (violation = BLOCK) |
-| UI Validation | SKIPPED | has_frontend=false |
+| UI Validation | PASS/WARN/BLOCK/SKIPPED | apps/ddc-tray Playwright suite: {N} passed; console errors {n}; axe critical/serious {n} |
 | DoD | PASS/PASS_PENDING_MANUAL/BLOCK/INCONCLUSIVE | {N_auto_pass}/{N_auto_total} auto, {N_manual} manual pending |
 
 ## Blockers (if any)
