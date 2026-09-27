@@ -593,15 +593,18 @@ function endOfLine(code, start) {
 // through a sink neither knows gets past both. So no string or template
 // literal of the popup's scripts may hold a phrase — two or more words of
 // two or more letters, apart by whitespace — whatever it is for, but in
-// the locale files (`i18n/`: the texts themselves) and in `demo-data.js`
-// (the demo's monitors and backend, written out as the core and Tauri
-// answer). A template is read with `${}` where each expression was, each
-// literal inside an expression on its own; literals joined with `+` are
-// read as one, a plain operand between two of them as `${}`; escapes are
-// read as the characters they stand for.
+// the locale files (`i18n/en.js`, `i18n/pt-BR.js`: the texts themselves)
+// and in `demo-data.js` (the demo's monitors and backend, written out as
+// the core and Tauri answer). `i18n/index.js` is code, and is read. A
+// template is read with `${}` where each expression was, each literal
+// inside an expression on its own; literals joined with `+` are read as
+// one, a plain operand between two of them as `${}`; escapes are read as
+// the characters they stand for.
 
-/** Paths under `src/` whose literals are texts or data by design. */
-const isLanguageFile = (path) => path.startsWith('i18n/') || path === 'demo-data.js';
+/** Paths under `src/` whose literals are texts or data by design, exactly. */
+const LANGUAGE_FILES = new Set(['i18n/en.js', 'i18n/pt-BR.js', 'demo-data.js']);
+
+const isLanguageFile = (path) => LANGUAGE_FILES.has(path);
 
 /**
  * Literals with two words that are not language, by file, each with why.
@@ -705,9 +708,10 @@ test('no natural-language literal outside the locale files', () => {
   const scanned = scripts.filter(([path]) => !isLanguageFile(path));
   const skipped = scripts.filter(([path]) => isLanguageFile(path)).map(([path]) => path);
 
-  assert.deepEqual(skipped, ['demo-data.js', 'i18n/en.js', 'i18n/index.js', 'i18n/pt-BR.js'], 'files left out');
+  assert.deepEqual(skipped, ['demo-data.js', 'i18n/en.js', 'i18n/pt-BR.js'], 'files left out');
   const names = scanned.map(([path]) => path);
-  for (const expected of ['app.js', 'bridge.js', 'debounce.js', 'dropdown.js', 'icons.js', 'view-model.js']) {
+  const mustRead = ['app.js', 'bridge.js', 'debounce.js', 'dropdown.js', 'i18n/index.js', 'icons.js', 'view-model.js'];
+  for (const expected of mustRead) {
     assert.ok(names.includes(expected), `${expected} was read`);
   }
   const found = [];
@@ -764,6 +768,78 @@ test('the phrase scan reads every literal form, and only literals', () => {
       '6 "Wait ${} seconds"',
       '7 "Hidden text "',
       '8 "It\'s broken"',
+    ],
+  );
+});
+
+// ------------------------------------------------ the demo's data, one reader
+//
+// D-2026-09-27-tray-app-9 leaves `demo-data.js` out of the phrase scan
+// because its messages are the core's, and the demo bridge hands them to
+// the popup as the backend's own answer. That holds only while the bridge
+// is the one module that reads it: a sentence exported from there and
+// shown by the popup would get past the scan and every translation. A
+// module can only reach it by naming it in a literal — `import … from`,
+// `import '…'`, `export … from`, `import(…)` — so a script under `src/`
+// that has a literal naming `demo-data`, read as the phrase scan reads
+// them (joined with `+`, escapes as characters, inside a template's
+// expressions too), counts as one of its readers.
+
+/** The one module of `src/` that may import `demo-data.js`. */
+const DEMO_DATA_READER = 'bridge.js';
+
+/** The literals of `code` that name `demo-data`, as `{ line, literal }`. */
+function demoDataMentions(code) {
+  return literalChains(tokenize(code).tokens)
+    .filter(({ text }) => text.includes('demo-data'))
+    .map(({ at, text }) => ({ line: lineOf(code, at), literal: text }));
+}
+
+test('only bridge.js imports demo-data.js', () => {
+  const mentions = popupScripts().flatMap(([path, code]) =>
+    demoDataMentions(code).map(({ line, literal }) => ({ path, line, literal })),
+  );
+  const readers = [...new Set(mentions.map(({ path }) => path))];
+
+  assert.ok(readers.includes(DEMO_DATA_READER), `${DEMO_DATA_READER} is seen importing demo-data.js`);
+  assert.deepEqual(
+    mentions
+      .filter(({ path }) => path !== DEMO_DATA_READER)
+      .map(({ path, line, literal }) => `${path}:${line} ${JSON.stringify(literal)}`),
+    [],
+    `modules other than ${DEMO_DATA_READER} that import demo-data.js`,
+  );
+});
+
+test('the demo-data scan finds each way to name the module, and only literals', () => {
+  const code = [
+    "import { DEMO_MESSAGES } from './demo-data.js';",
+    'import * as demo from "demo-data.js";',
+    "import '../demo-data.js';",
+    "export { FAILURES } from './demo-data.js';",
+    "const lazy = await import('./demo-data.js');",
+    'const late = import(`./demo-data.js`);',
+    "const glued = import('./demo-' + 'data.js');",
+    "const hidden = import('./demo\\x2ddata.js');",
+    "const nested = import(`./${'demo-data'}.js`);",
+    "// import './demo-data.js';",
+    "/* const commented = import('./demo-data.js'); */",
+    "import { t } from './i18n/index.js';",
+    "const other = await import('./demo.js');",
+  ].join('\n');
+
+  assert.deepEqual(
+    demoDataMentions(code).map(({ line, literal }) => `${line} ${JSON.stringify(literal)}`),
+    [
+      '1 "./demo-data.js"',
+      '2 "demo-data.js"',
+      '3 "../demo-data.js"',
+      '4 "./demo-data.js"',
+      '5 "./demo-data.js"',
+      '6 "./demo-data.js"',
+      '7 "./demo-data.js"',
+      '8 "./demo-data.js"',
+      '9 "demo-data"',
     ],
   );
 });
