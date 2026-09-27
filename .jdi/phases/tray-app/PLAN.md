@@ -42,7 +42,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
   - **Ícones:** `icon.svg` próprio (monitor colorido, legível em barra clara e escura), passado por `npx -y @tauri-apps/cli@2.12.0 icon`; o conjunto gerado é commitado, junto com o `tray.png` da bandeja.
 - **Dependencies:** none
 - **Test:** Verify da CONTEXT de CSP, capabilities, `forbid` e `cargo build -p ddc-tray --release --locked`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2
 
