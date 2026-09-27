@@ -250,6 +250,13 @@ mod switch_tests {
     }
 
     #[test]
+    fn the_smoke_script_waits_for_the_notice_the_app_prints() {
+        let script = include_str!("../../scripts/smoke-sni.sh");
+
+        assert!(script.contains(&format!("readonly SIMULATED_LINE='{SIMULATION_NOTICE}'")));
+    }
+
+    #[test]
     fn the_simulated_core_serves_the_rtk_of_the_contract() {
         let osd = simulated_osd();
 
