@@ -22,7 +22,9 @@ use std::fmt::Display;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use ddc_adapters::{CachingMonitorBackend, DdcHiMonitorBackend, default_cache_dir};
+use ddc_adapters::{
+    CachingMonitorBackend, DdcHiMonitorBackend, InMemoryMonitorBackend, default_cache_dir,
+};
 use ddc_core::app::SoftwareOsd;
 use ddc_core::domain::DdcError;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, Window, WindowEvent};
@@ -42,23 +44,48 @@ const DMABUF_SWITCH: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
 /// (`ddc-tray: popup shown`…); the tray's smoke test reads those lines.
 pub const DIAGNOSTICS_SWITCH: &str = "DDC_TRAY_DEBUG";
 
+/// Set to `1` to have the app serve the simulated monitor of [`fixture`]
+/// instead of the real ones (D-2026-09-27-tray-app-5): end-to-end checks
+/// of the tray — the wheel, the shortcuts — that must never write to a
+/// real monitor. Off unless set; no I2C device is opened while on.
+pub const SIMULATION_SWITCH: &str = "DDC_TRAY_FAKE";
+
+/// What the app always says on stderr when [`SIMULATION_SWITCH`] is on, so
+/// the mode is never mistaken for the real one.
+pub const SIMULATION_NOTICE: &str =
+    "ddc-tray: DDC_TRAY_FAKE=1, serving the simulated RTK monitor; no real monitor is touched";
+
 /// Whether the diagnostic lines are on, decided once at start.
 static DIAGNOSTICS: OnceLock<bool> = OnceLock::new();
 
-/// Builds the core over the real DDC/CI backend, with the on-disk
+/// Builds the core: over the simulated monitor when [`SIMULATION_SWITCH`]
+/// is `1`, else over the real DDC/CI backend, with the on-disk
 /// capabilities cache the CLI also uses (D-2026-09-26-tray-app-3). Without
 /// a cache directory the core reads the capabilities from the monitor, as
 /// the CLI does.
 ///
 /// # Errors
 ///
-/// The backend's error when it cannot start.
+/// The real backend's error when it cannot start.
 pub fn compose_osd() -> Result<SharedOsd, DdcError> {
+    if switch_on(std::env::var_os(SIMULATION_SWITCH).as_deref()) {
+        eprintln!("{SIMULATION_NOTICE}");
+        return Ok(simulated_osd());
+    }
     let real = DdcHiMonitorBackend::new()?;
     Ok(match default_cache_dir() {
         Some(dir) => Arc::new(SoftwareOsd::new(CachingMonitorBackend::new(real, dir))),
         None => Arc::new(SoftwareOsd::new(real)),
     })
+}
+
+/// The core over the simulated RTK monitor of [`fixture`], held in memory:
+/// writes change only that memory.
+pub fn simulated_osd() -> SharedOsd {
+    let simulated = InMemoryMonitorBackend::builder()
+        .monitor(fixture::rtk_monitor())
+        .build();
+    Arc::new(SoftwareOsd::new(simulated))
 }
 
 /// Starts the tray app and blocks until it exits. A DDC/CI backend that
@@ -71,7 +98,7 @@ pub fn compose_osd() -> Result<SharedOsd, DdcError> {
 pub fn run() -> Result<(), tauri::Error> {
     #[cfg(target_os = "linux")]
     restart_without_dmabuf_renderer();
-    DIAGNOSTICS.get_or_init(|| diagnostics_on(std::env::var_os(DIAGNOSTICS_SWITCH).as_deref()));
+    DIAGNOSTICS.get_or_init(|| switch_on(std::env::var_os(DIAGNOSTICS_SWITCH).as_deref()));
     let builder = tauri::Builder::default()
         // First plugin: a second launch only shows this popup and exits
         // before building a backend, so one process owns the I2C bus
@@ -140,9 +167,9 @@ fn dmabuf_switch_to_set(current: Option<&OsStr>) -> Option<&'static str> {
     current.is_none().then_some("1")
 }
 
-/// Whether [`DIAGNOSTICS_SWITCH`], set to `value`, turns the diagnostic
-/// lines on: only `1` does.
-fn diagnostics_on(value: Option<&OsStr>) -> bool {
+/// Whether a switch of the app — [`DIAGNOSTICS_SWITCH`],
+/// [`SIMULATION_SWITCH`] — set to `value` is on: only `1` is.
+fn switch_on(value: Option<&OsStr>) -> bool {
     value == Some(OsStr::new("1"))
 }
 
@@ -205,19 +232,50 @@ pub(crate) fn diagnose(event: &str) {
 }
 
 #[cfg(test)]
-mod diagnostics_tests {
+mod switch_tests {
     use std::ffi::OsStr;
 
-    use super::{DIAGNOSTICS_SWITCH, diagnostics_on};
+    use ddc_core::domain::{Confirm, VcpCode, VcpValue};
+
+    use super::{
+        DIAGNOSTICS_SWITCH, SIMULATION_NOTICE, SIMULATION_SWITCH, simulated_osd, switch_on,
+    };
+    use crate::fixture::{rtk_id, rtk_info};
 
     #[test]
-    fn the_diagnostics_switch_is_ddc_tray_debug() {
+    fn the_switches_are_ddc_tray_debug_and_ddc_tray_fake() {
         assert_eq!(DIAGNOSTICS_SWITCH, "DDC_TRAY_DEBUG");
+        assert_eq!(SIMULATION_SWITCH, "DDC_TRAY_FAKE");
+        assert!(SIMULATION_NOTICE.starts_with("ddc-tray: DDC_TRAY_FAKE=1"));
     }
 
     #[test]
-    fn only_a_switch_set_to_1_turns_the_diagnostics_on() {
-        assert!(diagnostics_on(Some(OsStr::new("1"))));
+    fn the_simulated_core_serves_the_rtk_of_the_contract() {
+        let osd = simulated_osd();
+
+        assert_eq!(osd.list_monitors(), Ok(vec![rtk_info()]));
+        let brightness = osd.get_feature(&rtk_id(), VcpCode::BRIGHTNESS).unwrap();
+        assert_eq!(
+            brightness.value,
+            VcpValue {
+                current: 75,
+                max: 100
+            }
+        );
+    }
+
+    #[test]
+    fn a_write_to_the_simulated_core_is_read_back() {
+        let osd = simulated_osd();
+
+        let read_back = osd.set_feature(&rtk_id(), VcpCode::BRIGHTNESS, 80, Confirm::No);
+
+        assert_eq!(read_back.map(|value| value.current), Ok(80));
+    }
+
+    #[test]
+    fn only_a_switch_set_to_1_is_on() {
+        assert!(switch_on(Some(OsStr::new("1"))));
         for value in [
             None,
             Some(""),
@@ -226,7 +284,7 @@ mod diagnostics_tests {
             Some("1 "),
             Some("yes"),
         ] {
-            assert!(!diagnostics_on(value.map(OsStr::new)), "{value:?}");
+            assert!(!switch_on(value.map(OsStr::new)), "{value:?}");
         }
     }
 }

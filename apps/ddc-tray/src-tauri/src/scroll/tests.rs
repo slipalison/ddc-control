@@ -5,11 +5,12 @@ use super::{
     Push, SCROLL_STEP_PERCENT, WHEEL_NOTCH, WheelQueue, drain_wheel, percent_of, scroll_brightness,
     scrolled_percent,
 };
-use crate::dto::{ErrorKind, PanelChangedDto, UiError};
+use crate::dto::{ErrorKind, UiError};
 use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
+use crate::panel::BrightnessChange;
 use crate::panel::tests::{DELL_ID, Osd, dell_monitor, osd_with};
 
-type Batch = Result<Option<PanelChangedDto>, UiError>;
+type Batch = Result<Option<BrightnessChange>, UiError>;
 
 fn brightness_writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
     backend
@@ -19,10 +20,16 @@ fn brightness_writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
         .collect()
 }
 
-fn written(id: &str) -> Batch {
-    Ok(Some(PanelChangedDto {
-        monitor_id: id.to_owned(),
-    }))
+fn change(id: &str, before: u16, after: u16) -> BrightnessChange {
+    BrightnessChange {
+        monitor_id: MonitorId::new(id),
+        before,
+        after,
+    }
+}
+
+fn written(id: &str, before: u16, after: u16) -> Batch {
+    Ok(Some(change(id, before, after)))
 }
 
 /// A queue holding `notches` whole notches, as the wheel would leave it.
@@ -168,7 +175,7 @@ fn scroll_a_burst_of_notches_becomes_one_write() {
 
     let batches = drained(&osd, &queue);
 
-    assert_eq!(batches, [written(RTK_ID)]);
+    assert_eq!(batches, [written(RTK_ID, 75, 90)]);
     assert_eq!(
         brightness_writes(&backend),
         [BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 90)]
@@ -191,13 +198,27 @@ fn scroll_notches_that_arrive_during_a_write_become_the_next_single_write() {
         batches.push(batch);
     });
 
-    assert_eq!(batches, [written(RTK_ID), written(RTK_ID)]);
+    assert_eq!(batches, [written(RTK_ID, 75, 70), written(RTK_ID, 70, 50)]);
     assert_eq!(
         brightness_writes(&backend),
         [
             BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 70),
             BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 50),
         ]
+    );
+}
+
+#[test]
+fn scroll_answers_what_the_monitor_kept_not_what_was_asked() {
+    let monitor = rtk_monitor().ignoring_writes_to(VcpCode::BRIGHTNESS);
+    let (osd, backend) = osd_with([monitor]);
+
+    let outcome = scroll_brightness(&osd, &rtk_id(), 1);
+
+    assert_eq!(outcome, Ok(Some(change(RTK_ID, 75, 75))));
+    assert_eq!(
+        brightness_writes(&backend),
+        [BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 80)]
     );
 }
 
@@ -228,7 +249,7 @@ fn scroll_scales_to_a_maximum_other_than_100_and_answers_the_read_back() {
 
     let outcome = scroll_brightness(&osd, &MonitorId::new(DELL_ID), 1);
 
-    assert_eq!(outcome, Ok(Some(204)));
+    assert_eq!(outcome, Ok(Some(change(DELL_ID, 191, 204))));
     assert_eq!(
         brightness_writes(&backend),
         [BackendCall::WriteVcp(
@@ -249,7 +270,7 @@ fn scroll_moves_the_selected_monitor_and_names_it() {
         batches.push(batch);
     });
 
-    assert_eq!(batches, [written(DELL_ID)]);
+    assert_eq!(batches, [written(DELL_ID, 30, 35)]);
     assert_eq!(
         brightness_writes(&backend),
         [BackendCall::WriteVcp(

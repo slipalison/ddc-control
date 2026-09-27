@@ -15,8 +15,8 @@ use ksni::{Category, Handle, Icon, MenuItem, Orientation, ToolTip, TrayMethods};
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 use super::{
-    APP_NAME, TRAY_ID, kwin_placement, on_main_thread, panel_changed, report_ui, run_menu_action,
-    toggle_popup,
+    APP_NAME, TRAY_ID, brightness_changed, kwin_placement, on_main_thread, report_ui,
+    run_menu_action, toggle_popup,
 };
 use crate::commands::{AppState, on_blocking_thread};
 use crate::i18n::Locale;
@@ -161,7 +161,7 @@ fn write_wheel<R: Runtime>(app: &AppHandle<R>, wheel: Arc<WheelQueue>) {
         let emitter = app.clone();
         let ran = on_blocking_thread(&state, move |osd| {
             drain_wheel(osd, selected, &writer, |batch| match batch {
-                Ok(Some(changed)) => panel_changed(&emitter, changed),
+                Ok(Some(change)) => brightness_changed(&emitter, &change),
                 Ok(None) => {}
                 Err(error) => report_ui("step the brightness", &error),
             });

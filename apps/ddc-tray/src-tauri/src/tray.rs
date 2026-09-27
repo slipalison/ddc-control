@@ -34,10 +34,10 @@ use ddc_core::ports::MonitorControl;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::commands::{AppState, on_blocking_thread};
-use crate::dto::{PANEL_CHANGED, PanelChangedDto, UiError};
+use crate::dto::{PANEL_CHANGED, UiError};
 use crate::i18n::Locale;
 use crate::menu::MenuAction;
-use crate::panel;
+use crate::panel::{self, BrightnessChange};
 use crate::popup::{ClickAction, PopupGate, Visibility};
 use crate::{POPUP, diagnose, report, show_popup};
 
@@ -72,8 +72,8 @@ pub(crate) fn selection_changed<R: Runtime>(app: &AppHandle<R>) {
 
 /// Sets the brightness of the shortcut target — the monitor the popup last
 /// selected, else the first one listed — to `percent` of its maximum, and
-/// names the monitor that changed. Brightness is a safe feature: nothing
-/// here can confirm a dangerous write.
+/// returns the change. Brightness is a safe feature: nothing here can
+/// confirm a dangerous write.
 ///
 /// # Errors
 ///
@@ -83,12 +83,9 @@ pub fn brightness_shortcut<M: MonitorControl + ?Sized>(
     osd: &M,
     selected: Option<MonitorId>,
     percent: u8,
-) -> Result<PanelChangedDto, UiError> {
+) -> Result<BrightnessChange, UiError> {
     let id = panel::shortcut_target(osd, selected)?;
-    panel::set_brightness_percent(osd, &id, percent)?;
-    Ok(PanelChangedDto {
-        monitor_id: id.as_str().to_owned(),
-    })
+    panel::set_brightness_percent(osd, &id, percent)
 }
 
 /// What a menu item does, on either platform.
@@ -154,15 +151,17 @@ fn apply_brightness<R: Runtime>(app: &AppHandle<R>, percent: u8) {
         })
         .await;
         match changed {
-            Ok(changed) => panel_changed(&app, changed),
+            Ok(change) => brightness_changed(&app, &change),
             Err(error) => report_ui("apply the brightness shortcut", &error),
         }
     });
 }
 
-/// Tells the popup the tray changed a monitor, so it reloads it.
-fn panel_changed<R: Runtime>(app: &AppHandle<R>, changed: PanelChangedDto) {
-    if let Err(error) = app.emit(PANEL_CHANGED, changed) {
+/// Says on stderr what the tray wrote (`brightness 75 -> 80`, with
+/// `DDC_TRAY_DEBUG=1`) and tells the popup, so it reloads the monitor.
+fn brightness_changed<R: Runtime>(app: &AppHandle<R>, change: &BrightnessChange) {
+    diagnose(&change.to_string());
+    if let Err(error) = app.emit(PANEL_CHANGED, change.panel_changed()) {
         report("tell the popup the brightness changed", &error);
     }
 }
@@ -177,8 +176,9 @@ mod tests {
     use ddc_core::domain::{DdcError, MonitorId, VcpCode};
 
     use super::{APP_NAME, TRAY_ID, brightness_shortcut};
-    use crate::dto::{ErrorKind, PanelChangedDto, UiError};
+    use crate::dto::{ErrorKind, UiError};
     use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
+    use crate::panel::BrightnessChange;
     use crate::panel::tests::{DELL_ID, dell_monitor, osd_with};
 
     fn writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
@@ -189,9 +189,11 @@ mod tests {
             .collect()
     }
 
-    fn changed(id: &str) -> Result<PanelChangedDto, UiError> {
-        Ok(PanelChangedDto {
-            monitor_id: id.to_owned(),
+    fn changed(id: &str, before: u16, after: u16) -> Result<BrightnessChange, UiError> {
+        Ok(BrightnessChange {
+            monitor_id: MonitorId::new(id),
+            before,
+            after,
         })
     }
 
@@ -207,7 +209,7 @@ mod tests {
 
         let outcome = brightness_shortcut(&osd, Some(MonitorId::new(DELL_ID)), 75);
 
-        assert_eq!(outcome, changed(DELL_ID));
+        assert_eq!(outcome, changed(DELL_ID, 30, 75));
         assert_eq!(
             writes(&backend),
             [BackendCall::WriteVcp(
@@ -224,7 +226,7 @@ mod tests {
 
         let outcome = brightness_shortcut(&osd, None, 25);
 
-        assert_eq!(outcome, changed(RTK_ID));
+        assert_eq!(outcome, changed(RTK_ID, 75, 25));
         assert_eq!(
             writes(&backend),
             [BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 25)]
@@ -235,8 +237,11 @@ mod tests {
     fn the_zero_and_full_shortcuts_reach_the_ends_of_the_range() {
         let (osd, backend) = osd_with([rtk_monitor()]);
 
-        assert_eq!(brightness_shortcut(&osd, None, 0), changed(RTK_ID));
-        assert_eq!(brightness_shortcut(&osd, None, 100), changed(RTK_ID));
+        assert_eq!(brightness_shortcut(&osd, None, 0), changed(RTK_ID, 75, 0));
+        assert_eq!(
+            brightness_shortcut(&osd, None, 100),
+            changed(RTK_ID, 0, 100)
+        );
 
         assert_eq!(
             writes(&backend),

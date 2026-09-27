@@ -11,11 +11,13 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use ddc_core::domain::{Confirm, MonitorId, VcpCode, VcpValue};
+use ddc_core::domain::{MonitorId, VcpCode, VcpValue};
 use ddc_core::ports::MonitorControl;
 
-use crate::dto::{PanelChangedDto, UiError};
-use crate::panel::{brightness_for_percent, shortcut_target, ui_error};
+use crate::dto::UiError;
+use crate::panel::{
+    BrightnessChange, brightness_for_percent, shortcut_target, ui_error, write_brightness,
+};
 
 /// How far one notch moves the brightness, in percent of its maximum.
 pub const SCROLL_STEP_PERCENT: u8 = 5;
@@ -124,7 +126,8 @@ pub fn scrolled_percent(percent: u8, notches: i32) -> u8 {
 /// Moves monitor `id`'s brightness by `notches`: one read for the current
 /// value and its maximum, then one write — none when the brightness is
 /// already at the end the wheel pushes to. Brightness is safe to write, so
-/// no confirmation is given. Returns the value read back after a write.
+/// no confirmation is given. Returns the change a write made, with the
+/// value read back.
 ///
 /// # Errors
 ///
@@ -133,7 +136,7 @@ pub fn scroll_brightness<M: MonitorControl + ?Sized>(
     osd: &M,
     id: &MonitorId,
     notches: i32,
-) -> Result<Option<u16>, UiError> {
+) -> Result<Option<BrightnessChange>, UiError> {
     let value = osd
         .get_feature(id, VcpCode::BRIGHTNESS)
         .map_err(ui_error)?
@@ -142,19 +145,17 @@ pub fn scroll_brightness<M: MonitorControl + ?Sized>(
     if target == value.current {
         return Ok(None);
     }
-    osd.set_feature(id, VcpCode::BRIGHTNESS, target, Confirm::No)
-        .map(|read_back| Some(read_back.current))
-        .map_err(ui_error)
+    write_brightness(osd, id, value, target).map(Some)
 }
 
 /// Writes what `wheel` holds, one batch of notches per write, until nothing
 /// waits. The target is `selected`, else the first monitor listed.
-/// `on_batch` hears each batch: the monitor written, `None` for a batch
+/// `on_batch` hears each batch: the change it made, `None` for a batch
 /// that had nothing to write, or the error.
 pub fn drain_wheel<M, F>(osd: &M, selected: Option<MonitorId>, wheel: &WheelQueue, mut on_batch: F)
 where
     M: MonitorControl + ?Sized,
-    F: FnMut(Result<Option<PanelChangedDto>, UiError>),
+    F: FnMut(Result<Option<BrightnessChange>, UiError>),
 {
     let id = match shortcut_target(osd, selected) {
         Ok(id) => id,
@@ -164,11 +165,8 @@ where
             return;
         }
     };
-    let changed = || PanelChangedDto {
-        monitor_id: id.as_str().to_owned(),
-    };
     while let Some(notches) = wheel.take() {
-        on_batch(scroll_brightness(osd, &id, notches).map(|written| written.map(|_| changed())));
+        on_batch(scroll_brightness(osd, &id, notches));
     }
 }
 

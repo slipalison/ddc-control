@@ -5,13 +5,15 @@
 //! and value lists all come from the core; nothing here knows the webview
 //! or the DDC/CI transport.
 
+use std::fmt;
+
 use ddc_core::domain::{
     Capabilities, Confirm, DdcError, Feature, FeatureKind, MonitorId, VcpCode, VcpValue,
 };
 use ddc_core::ports::MonitorControl;
 
 use crate::dto::{
-    ControlDto, ErrorKind, FeatureDto, MonitorDto, OptionDto, Origin, PanelDto, ReadBackDto,
+    ControlDto, ErrorKind, FeatureDto, MonitorDto, OptionDto, Origin, PanelChangedDto, PanelDto,
     UiError,
 };
 
@@ -148,9 +150,37 @@ pub fn brightness_for_percent(max: u16, percent: u8) -> u16 {
     u16::try_from(scaled).unwrap_or(max)
 }
 
+/// A brightness write the tray made (a shortcut or the wheel): the monitor,
+/// and its brightness before the write and as read back after it. Shown,
+/// it is the tray's diagnostic line: `brightness 75 -> 80`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrightnessChange {
+    /// The monitor written to.
+    pub monitor_id: MonitorId,
+    /// The brightness read before the write.
+    pub before: u16,
+    /// The brightness read back after the write — what the monitor kept.
+    pub after: u16,
+}
+
+impl BrightnessChange {
+    /// The event that has the popup reload the monitor.
+    pub fn panel_changed(&self) -> PanelChangedDto {
+        PanelChangedDto {
+            monitor_id: self.monitor_id.as_str().to_owned(),
+        }
+    }
+}
+
+impl fmt::Display for BrightnessChange {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "brightness {} -> {}", self.before, self.after)
+    }
+}
+
 /// Sets monitor `id`'s brightness to `percent` percent of the maximum it
-/// reports, and returns the value read back. Brightness is safe to write,
-/// so no confirmation is given.
+/// reports, and returns the change: the value read first, and the one read
+/// back. Brightness is safe to write, so no confirmation is given.
 ///
 /// # Errors
 ///
@@ -159,15 +189,33 @@ pub fn set_brightness_percent<M: MonitorControl + ?Sized>(
     osd: &M,
     id: &MonitorId,
     percent: u8,
-) -> Result<ReadBackDto, UiError> {
-    let max = osd
+) -> Result<BrightnessChange, UiError> {
+    let before = osd
         .get_feature(id, VcpCode::BRIGHTNESS)
         .map_err(ui_error)?
-        .value
-        .max;
-    let value = brightness_for_percent(max, percent);
-    osd.set_feature(id, VcpCode::BRIGHTNESS, value, Confirm::No)
-        .map(ReadBackDto::from)
+        .value;
+    write_brightness(osd, id, before, brightness_for_percent(before.max, percent))
+}
+
+/// Writes `target` as monitor `id`'s brightness, which read `before`, and
+/// returns the change the monitor kept. Brightness is safe to write, so no
+/// confirmation is given.
+///
+/// # Errors
+///
+/// The [`UiError`] of the write.
+pub fn write_brightness<M: MonitorControl + ?Sized>(
+    osd: &M,
+    id: &MonitorId,
+    before: VcpValue,
+    target: u16,
+) -> Result<BrightnessChange, UiError> {
+    osd.set_feature(id, VcpCode::BRIGHTNESS, target, Confirm::No)
+        .map(|read_back| BrightnessChange {
+            monitor_id: id.clone(),
+            before: before.current,
+            after: read_back.current,
+        })
         .map_err(ui_error)
 }
 

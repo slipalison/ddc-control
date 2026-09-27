@@ -8,12 +8,12 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::{
-    QUICK_CONTROLS, brightness_for_percent, load_features, load_panel, monitors, probe_features,
-    set_brightness_percent, shortcut_target, ui_error,
+    BrightnessChange, QUICK_CONTROLS, brightness_for_percent, load_features, load_panel, monitors,
+    probe_features, set_brightness_percent, shortcut_target, ui_error,
 };
 use crate::dto::{
     ControlDto, ControlValueDto, ErrorKind, FeatureDto, FeatureStatus, MonitorDto, OptionDto,
-    Origin, PanelDto, ReadBackDto, UiError,
+    Origin, PanelChangedDto, PanelDto, UiError,
 };
 use crate::fixture::{COLOR_TEMP, RTK_CAPS, RTK_ID, rtk_id, rtk_info, rtk_monitor};
 
@@ -76,6 +76,15 @@ pub(crate) fn dell_monitor(current: u16, max: u16) -> FakeMonitor {
         serial: Some("7".to_owned()),
     })
     .with_value(VcpCode::BRIGHTNESS, current, max)
+}
+
+/// The brightness change the tray reports for the RTK.
+pub(crate) fn rtk_change(before: u16, after: u16) -> BrightnessChange {
+    BrightnessChange {
+        monitor_id: rtk_id(),
+        before,
+        after,
+    }
 }
 
 fn writes(backend: &InMemoryMonitorBackend) -> Vec<BackendCall> {
@@ -658,15 +667,9 @@ fn percentages_round_to_the_nearest_step_and_stop_at_the_maximum() {
 fn a_brightness_shortcut_writes_the_percentage_and_returns_the_read_back() {
     let (osd, backend) = osd_with([rtk_monitor()]);
 
-    let read_back = set_brightness_percent(&osd, &rtk_id(), 25);
+    let change = set_brightness_percent(&osd, &rtk_id(), 25);
 
-    assert_eq!(
-        read_back,
-        Ok(ReadBackDto {
-            current: 25,
-            max: 100
-        })
-    );
+    assert_eq!(change, Ok(rtk_change(75, 25)));
     assert_eq!(
         writes(&backend),
         [BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 25)]
@@ -680,15 +683,9 @@ fn a_brightness_shortcut_scales_to_the_monitor_maximum() {
         .with_value(VcpCode::BRIGHTNESS, 60, 80);
     let (osd, backend) = osd_with([monitor]);
 
-    let read_back = set_brightness_percent(&osd, &rtk_id(), 50);
+    let change = set_brightness_percent(&osd, &rtk_id(), 50);
 
-    assert_eq!(
-        read_back,
-        Ok(ReadBackDto {
-            current: 40,
-            max: 80
-        })
-    );
+    assert_eq!(change, Ok(rtk_change(60, 40)));
     assert_eq!(
         writes(&backend),
         [BackendCall::WriteVcp(rtk_id(), VcpCode::BRIGHTNESS, 40)]
@@ -700,28 +697,35 @@ fn a_brightness_shortcut_returns_what_the_monitor_kept() {
     let monitor = rtk_monitor().ignoring_writes_to(VcpCode::BRIGHTNESS);
     let (osd, _) = osd_with([monitor]);
 
-    let read_back = set_brightness_percent(&osd, &rtk_id(), 25);
+    let change = set_brightness_percent(&osd, &rtk_id(), 25);
 
-    assert_eq!(
-        read_back,
-        Ok(ReadBackDto {
-            current: 75,
-            max: 100
-        })
-    );
+    assert_eq!(change, Ok(rtk_change(75, 75)));
 }
 
 #[test]
 fn a_brightness_shortcut_on_an_unreachable_monitor_writes_nothing() {
     let (osd, backend) = osd_with([rtk_monitor()]);
 
-    let read_back = set_brightness_percent(&osd, &MonitorId::new("NOPE"), 50);
+    let change = set_brightness_percent(&osd, &MonitorId::new("NOPE"), 50);
 
-    assert_eq!(
-        read_back.map_err(|error| error.kind),
-        Err(ErrorKind::NotFound)
-    );
+    assert_eq!(change.map_err(|error| error.kind), Err(ErrorKind::NotFound));
     assert_eq!(writes(&backend), []);
+}
+
+#[test]
+fn a_brightness_change_reads_as_the_tray_s_diagnostic_line() {
+    assert_eq!(rtk_change(75, 80).to_string(), "brightness 75 -> 80");
+    assert_eq!(rtk_change(100, 0).to_string(), "brightness 100 -> 0");
+}
+
+#[test]
+fn a_brightness_change_has_the_popup_reload_its_monitor() {
+    assert_eq!(
+        rtk_change(75, 80).panel_changed(),
+        PanelChangedDto {
+            monitor_id: RTK_ID.to_owned(),
+        }
+    );
 }
 
 #[test]
