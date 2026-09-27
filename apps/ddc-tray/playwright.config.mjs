@@ -1,9 +1,10 @@
 // Gate 7 (D-2026-09-26-tray-app-8): the popup in demo mode — the bridge's
-// in-memory fake, picked because `window.__TAURI__` is absent — served as
-// the static files Tauri embeds, in a window the size of the popup, in the
-// light and the dark theme. Every run starts its own server: a leftover one
-// on the port may serve another checkout's `src/`, and the suite would pass
-// on a UI that is not this one.
+// in-memory fake, picked because `window.__TAURI__` is absent and the page
+// is on localhost (D-2026-09-27-tray-app-6) — served as the static files
+// Tauri embeds, in a window the size of the popup, in the light and the
+// dark theme. Every run starts its own server: a leftover one on the port
+// may serve another checkout's `src/`, and the suite would pass on a UI
+// that is not this one.
 
 import { defineConfig } from '@playwright/test';
 

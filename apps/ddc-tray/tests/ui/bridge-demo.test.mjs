@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEMO_LATENCY_MS, createBridge, normalizeError } from '../../src/bridge.js';
+import {
+  DEMO_LATENCY_MS,
+  UNAVAILABLE_MESSAGE,
+  createBridge,
+  isLocalDevServer,
+  normalizeError,
+} from '../../src/bridge.js';
 import { SCENARIOS, scenarioName } from '../../src/demo-data.js';
 
 const RTK = 'RTK-RTK-QHD-HDR-01010101';
@@ -11,8 +17,15 @@ const INPUT = 0x60;
 const BRIGHTNESS = 0x10;
 const POWER = 0xd6;
 
+// Where the Playwright suite serves the popup: the only kind of page the
+// demo runs on (D-2026-09-27-tray-app-6).
+const DEV_SERVER = 'http://localhost:1420/';
+
+// A window without Tauri at `href`, with the browser's parsing of it.
+const windowAt = (href) => ({ location: new URL(href) });
+
 function demo(search = '') {
-  const win = { location: { search } };
+  const win = windowAt(`${DEV_SERVER}${search}`);
   const bridge = createBridge(win, { latencyMs: 0 });
   return { win, bridge };
 }
@@ -27,6 +40,102 @@ async function rejection(promise) {
 }
 
 const control = (panel, code) => panel.controls.find((c) => c.code === code);
+
+// Every command of the contract, as the popup calls it.
+const COMMANDS = Object.freeze({
+  list_monitors: (bridge) => bridge.listMonitors(),
+  select_monitor: (bridge) => bridge.selectMonitor(RTK),
+  load_panel: (bridge) => bridge.loadPanel(RTK),
+  load_features: (bridge) => bridge.loadFeatures(RTK),
+  probe_features: (bridge) => bridge.probeFeatures(RTK),
+  set_feature: (bridge) => bridge.setFeature(RTK, BRIGHTNESS, 40),
+  set_feature_confirmed: (bridge) => bridge.setFeature(RTK, INPUT, 0x11, { confirmed: true }),
+  hide_popup: (bridge) => bridge.hidePopup(),
+});
+
+async function refusals(bridge) {
+  const answers = {};
+  for (const [name, call] of Object.entries(COMMANDS)) answers[name] = await rejection(call(bridge));
+  return answers;
+}
+
+const UNAVAILABLE = Object.freeze({ kind: 'backend_unavailable', message: UNAVAILABLE_MESSAGE });
+
+test('outside a local dev server the bridge never falls back to the demo', async () => {
+  const pages = [
+    'tauri://localhost/index.html',
+    'http://tauri.localhost/index.html',
+    'https://tauri.localhost/index.html',
+    'tauri://localhost/?demo=rtk',
+    'http://tauri.localhost/?demo=two-monitors',
+  ];
+
+  for (const href of pages) {
+    const win = windowAt(href);
+    const bridge = createBridge(win, { latencyMs: 0 });
+
+    assert.equal(bridge.mode, 'unavailable', href);
+    assert.equal(win.__ddcDemo, undefined, href);
+    assert.deepEqual(
+      await refusals(bridge),
+      Object.fromEntries(Object.keys(COMMANDS).map((name) => [name, UNAVAILABLE])),
+      href,
+    );
+  }
+});
+
+test('the demo needs http or https on localhost or 127.0.0.1', () => {
+  const dev = [
+    'http://localhost:1420/',
+    'http://localhost/?demo=error',
+    'https://localhost:8443/',
+    'http://127.0.0.1:1420/?demo=empty',
+  ];
+  const elsewhere = [
+    'tauri://localhost/',
+    'http://tauri.localhost/',
+    'https://tauri.localhost/',
+    'file:///home/user/ddc-tray/src/index.html',
+    'http://192.168.0.10:1420/',
+    'http://localhost.example.com/',
+    'http://[::1]:1420/',
+    'ftp://localhost/',
+  ];
+
+  assert.deepEqual(
+    dev.filter((href) => !isLocalDevServer(new URL(href))),
+    [],
+  );
+  assert.deepEqual(
+    elsewhere.filter((href) => isLocalDevServer(new URL(href))),
+    [],
+  );
+  assert.equal(isLocalDevServer(undefined), false);
+  assert.equal(createBridge({}).mode, 'unavailable');
+  assert.equal(createBridge(undefined).mode, 'unavailable');
+  assert.equal(createBridge(windowAt('http://127.0.0.1:1420/')).mode, 'demo');
+});
+
+test('a __TAURI__ without invoke on a dev server is not a demo either', async () => {
+  const win = { ...windowAt(DEV_SERVER), __TAURI__: { event: {} } };
+  const bridge = createBridge(win, { latencyMs: 0 });
+
+  assert.equal(bridge.mode, 'unavailable');
+  assert.equal(win.__ddcDemo, undefined);
+  assert.deepEqual(await rejection(bridge.listMonitors()), UNAVAILABLE);
+});
+
+test('the unavailable bridge accepts listeners that never hear anything', async () => {
+  const bridge = createBridge(windowAt('tauri://localhost/'));
+  const heard = [];
+
+  const unlisten = await bridge.onPanelChanged((payload) => heard.push(payload));
+  await bridge.onPopupShown((payload) => heard.push(payload));
+  unlisten();
+
+  assert.equal(typeof unlisten, 'function');
+  assert.deepEqual(heard, []);
+});
 
 test('without Tauri the bridge runs the demo, RTK by default', async () => {
   const { win, bridge } = demo();
@@ -251,7 +360,7 @@ test('demo events reach their listeners until they unlisten', async () => {
 
 test('the demo answers only after its latency', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const bridge = createBridge({ location: { search: '' } });
+  const bridge = createBridge(windowAt(DEV_SERVER));
   let answered = null;
 
   const pending = bridge.listMonitors().then((monitors) => {

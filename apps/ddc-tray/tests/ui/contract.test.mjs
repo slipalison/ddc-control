@@ -14,8 +14,9 @@ const muteGolden = fixture('contract-mute.json');
 
 const keys = (value) => Object.keys(value).sort();
 
+// The demo answers only on a local dev server (D-2026-09-27-tray-app-6).
 function demo(search) {
-  return createBridge({ location: { search } }, { latencyMs: 0 });
+  return createBridge({ location: new URL(`http://localhost:1420/${search}`) }, { latencyMs: 0 });
 }
 
 async function snapshot(bridge, monitorId) {

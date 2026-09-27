@@ -4,6 +4,11 @@
 // the Playwright suite and `node --test`. The demo enforces what the core
 // does to the UI: a dangerous write needs `confirmed`, a value must be one
 // the feature accepts, and the answer is the value read back.
+//
+// The demo runs only on a local dev server (D-2026-09-27-tray-app-6).
+// Inside the app (`tauri://localhost`, `http://tauri.localhost`) a missing
+// `__TAURI__` means the app is broken, and simulated values would pass for
+// the monitor's: there every command fails as `backend_unavailable`.
 
 import { scenarioMonitors, scenarioName } from './demo-data.js';
 
@@ -16,17 +21,34 @@ const realTimers = Object.freeze({
   setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
 });
 
+const DEV_PROTOCOLS = new Set(['http:', 'https:']);
+const DEV_HOSTS = new Set(['localhost', '127.0.0.1']);
+
+/** Why every command fails when the page is neither in Tauri nor on a dev server. */
+export const UNAVAILABLE_MESSAGE = 'the Tauri API is missing from this window, so no monitor can be reached';
+
 /**
- * The bridge for `win`: Tauri's when it is there, else the demo's, which
- * also exposes `win.__ddcDemo` ({ scenario, writes, selected, hides, emit }):
- * `hides` counts the times the popup asked to be hidden.
+ * The bridge for `win`: Tauri's when it is there; without `__TAURI__`, the
+ * demo's on a local dev server, else one that refuses every command. The
+ * demo also exposes `win.__ddcDemo` ({ scenario, writes, selected, hides,
+ * emit }): `hides` counts the times the popup asked to be hidden.
  * @param {object} win the page's `window`
  * @param {{ latencyMs?: number, timers?: { setTimeout: Function } }} [options]
  */
 export function createBridge(win, { latencyMs = DEMO_LATENCY_MS, timers = realTimers } = {}) {
   const tauri = win?.__TAURI__;
   if (typeof tauri?.core?.invoke === 'function') return tauriBridge(tauri);
-  return demoBridge(win, latencyMs, timers);
+  if (tauri == null && isLocalDevServer(win?.location)) return demoBridge(win, latencyMs, timers);
+  return unavailableBridge();
+}
+
+/**
+ * Whether `location` is a page served by a dev server on this machine:
+ * `http:`/`https:` on `localhost` or `127.0.0.1`, any port.
+ * @param {{ protocol?: string, hostname?: string } | undefined} location
+ */
+export function isLocalDevServer(location) {
+  return DEV_PROTOCOLS.has(location?.protocol) && DEV_HOSTS.has(location?.hostname);
 }
 
 /**
@@ -67,6 +89,16 @@ function tauriBridge(tauri) {
   };
   const listen = (event, handler) => tauri.event.listen(event, (message) => handler(message.payload));
   return api('tauri', invoke, listen);
+}
+
+// No event ever comes, so listening succeeds and does nothing: the first
+// command already shows the error, and a second message would repeat it.
+function unavailableBridge() {
+  const invoke = async () => {
+    throw uiError('backend_unavailable', UNAVAILABLE_MESSAGE);
+  };
+  const listen = async () => () => {};
+  return api('unavailable', invoke, listen);
 }
 
 function demoBridge(win, latencyMs, timers) {
