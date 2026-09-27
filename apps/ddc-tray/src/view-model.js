@@ -2,7 +2,8 @@
 // tray-app-5). Texts come from the injected `t`; names, risks and value
 // lists come from the DTOs — that is, from the core — so nothing here knows
 // MCCS. A value name is shown through its `value.<slug>` key when one
-// exists, else as the core wrote it.
+// exists, else as the core wrote it — and then it is `verbatim`: the
+// monitor's data, which no translation reaches (D-2026-09-27-tray-app-7).
 
 import { errorKey, featureKey, translateOr, valueKey } from './i18n/index.js';
 
@@ -151,7 +152,7 @@ export function controlView(control, t) {
   return {
     code: control.code,
     key: control.key,
-    label: featureLabel(t, control.key, null, control.code),
+    ...featureLabel(t, control.key, null, control.code),
     dangerous: control.dangerous,
     ...valueView(control.value, t),
   };
@@ -164,14 +165,15 @@ export function featuresView(features, t) {
 
 /**
  * One "all settings" entry: labelled by its `feature.<alias>` text, else by
- * the core's MCCS name; `widget` is null when reading it gave no value.
+ * the core's MCCS name (`labelVerbatim`); `widget` is null when reading it
+ * gave no value.
  */
 export function featureView(feature, t) {
   return {
     code: feature.code,
     hex: hex(feature.code),
     key: feature.alias,
-    label: featureLabel(t, feature.alias, feature.name, feature.code),
+    ...featureLabel(t, feature.alias, feature.name, feature.code),
     dangerous: feature.dangerous,
     origin: feature.origin,
     originText: t(`origin.${feature.origin}`),
@@ -196,7 +198,7 @@ export function withReadBack(item, { current, max }) {
 /**
  * The status line: `loading`, `ready`, `empty` or `error`. Empty and error
  * offer `retry`; on Linux, when a missing i2c-dev setup may be the cause,
- * `hint` points at the setup guide.
+ * `hint` points at the setup guide: its text, then the guide's path.
  * @param {{ state: 'loading' | 'ready' | 'empty' | 'error', error?: { kind: string, message: string } | null }} status
  * @param {{ t: Function, platform: string }} context
  */
@@ -208,7 +210,7 @@ export function statusView({ state, error = null }, { t, platform }) {
     message: statusMessage(state, error, t),
     detail: state === 'error' ? error?.message || null : null,
     retry: state === 'empty' || state === 'error',
-    hint: platform === 'linux' && hintable ? { text: t('hint.i2c', { doc: I2C_DOC }), doc: I2C_DOC } : null,
+    hint: platform === 'linux' && hintable ? { text: t('hint.i2c'), doc: I2C_DOC } : null,
   };
 }
 
@@ -251,29 +253,35 @@ function sliderFields({ current, max }, t) {
 function choiceFields({ current, options }, t) {
   const views = options.map((option) => ({
     value: option.value,
-    label: optionLabel(option, t),
+    ...optionLabel(option, t),
     selected: option.value === current,
   }));
-  const selected = views.find((option) => option.selected);
+  const shown = views.find((option) => option.selected) ?? unnamed(current, t);
   return {
     widget: 'choice',
     current,
-    currentLabel: selected ? selected.label : unnamed(current, t),
+    currentLabel: shown.label,
+    currentVerbatim: shown.verbatim,
     options: views,
   };
 }
 
+// A name no key translates is shown as the core wrote it, as data.
 function optionLabel({ value, name }, t) {
-  return name ? translateOr(t, valueKey(name), name) : unnamed(value, t);
+  if (!name) return unnamed(value, t);
+  const translated = translateOr(t, valueKey(name), null);
+  return translated === null ? { label: name, verbatim: true } : { label: translated, verbatim: false };
 }
 
 function unnamed(value, t) {
-  return t('format.unnamed', { hex: hex(value) });
+  return { label: t('format.unnamed', { hex: hex(value) }), verbatim: false };
 }
 
 function featureLabel(t, alias, name, code) {
-  const fallback = name ?? t('format.code', { hex: hex(code) });
-  return alias ? translateOr(t, featureKey(alias), fallback) : fallback;
+  const translated = alias ? translateOr(t, featureKey(alias), null) : null;
+  if (translated !== null) return { label: translated, labelVerbatim: false };
+  if (name) return { label: name, labelVerbatim: true };
+  return { label: t('format.code', { hex: hex(code) }), labelVerbatim: false };
 }
 
 function statusMessage(state, error, t) {

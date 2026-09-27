@@ -63,6 +63,7 @@ test('a slider whose maximum is not 100 reads as a fraction with a rounded perce
     code: 0x10,
     key: 'brightness',
     label: 'Brilho',
+    labelVerbatim: false,
     dangerous: false,
     widget: 'slider',
     current: 40,
@@ -78,8 +79,10 @@ test('the input is a segmented choice with the current source selected', () => {
   const { input } = panelView(golden.panel, pt);
 
   assert.equal(input.label, 'Entrada');
+  assert.equal(input.labelVerbatim, false);
   assert.equal(input.dangerous, true);
   assert.equal(input.currentLabel, 'DisplayPort-1');
+  assert.equal(input.currentVerbatim, true);
   assert.deepEqual(labels(input.options), [
     'VGA-1',
     'DVI-1',
@@ -112,6 +115,33 @@ test('value names translate through their key and keep the core name otherwise',
   assert.deepEqual(labels(panelView(golden.panel, en).selects[0].options).slice(0, 2), ['sRGB', 'Native']);
 });
 
+// A name shown as the core wrote it is the monitor's data, never a
+// translation: the page marks it `translate="no"` (D-2026-09-27-tray-app-7).
+test('a value name no key translates is verbatim, a translated one is not', () => {
+  const {
+    selects: [preset],
+    input,
+    power,
+  } = panelView(golden.panel, pt);
+
+  assert.deepEqual(
+    preset.options.map(({ label, verbatim }) => [label, verbatim]),
+    [
+      ['sRGB', true],
+      ['Nativo', false],
+      ['5000 K', true],
+      ['6500 K', true],
+      ['7500 K', true],
+      ['9300 K', true],
+      ['Usuário 1', false],
+    ],
+  );
+  assert.equal(preset.currentVerbatim, true);
+  assert.ok(input.options.every((option) => option.verbatim), 'input names are the core\'s');
+  assert.equal(power.currentVerbatim, false);
+  assert.ok(power.options.every((option) => !option.verbatim), 'power modes are translated');
+});
+
 test('a value the core does not name shows its byte', () => {
   const input = controlView(
     {
@@ -123,8 +153,9 @@ test('a value the core does not name shows its byte', () => {
     pt,
   );
 
-  assert.deepEqual(input.options, [{ value: 0x1b, label: 'Valor 0x1B', selected: false }]);
+  assert.deepEqual(input.options, [{ value: 0x1b, label: 'Valor 0x1B', verbatim: false, selected: false }]);
   assert.equal(input.currentLabel, 'Valor 0x2A');
+  assert.equal(input.currentVerbatim, false);
 });
 
 test('power is a button offering the modes other than the current one', () => {
@@ -134,8 +165,8 @@ test('power is a button offering the modes other than the current one', () => {
   assert.equal(power.dangerous, true);
   assert.equal(power.currentLabel, 'Ligado');
   assert.deepEqual(power.choices, [
-    { value: 0x04, label: 'Em espera (DPM)', selected: false },
-    { value: 0x05, label: 'Desligado (botão de energia)', selected: false },
+    { value: 0x04, label: 'Em espera (DPM)', verbatim: false, selected: false },
+    { value: 0x05, label: 'Desligado (botão de energia)', verbatim: false, selected: false },
   ]);
 });
 
@@ -167,6 +198,7 @@ test('all settings are labelled by their feature key, with widgets by kind', () 
   assert.equal(views[5].currentLabel, 'Ativado');
   assert.equal(views[6].currentLabel, 'Inglês');
   assert.deepEqual(views.map((view) => view.statusText), Array(7).fill(null));
+  assert.deepEqual(views.map((view) => view.labelVerbatim), Array(7).fill(false));
 });
 
 test('a feature without a label key keeps the core name, and a failed reading has no widget', () => {
@@ -185,6 +217,7 @@ test('a feature without a label key keeps the core name, and a failed reading ha
     hex: '0xE6',
     key: null,
     label: 'Manufacturer specific (0xE6)',
+    labelVerbatim: true,
     dangerous: true,
     origin: 'probe',
     originText: 'Encontrado na sondagem',
@@ -194,8 +227,10 @@ test('a feature without a label key keeps the core name, and a failed reading ha
   });
   const unknownAlias = { ...manufacturer, alias: 'mystery', name: 'Mystery', status: 'unresponsive' };
   assert.equal(featureView(unknownAlias, en).label, 'Mystery');
+  assert.equal(featureView(unknownAlias, en).labelVerbatim, true);
   assert.equal(featureView(unknownAlias, en).statusText, 'No response');
   assert.equal(featureView({ ...manufacturer, name: null }, en).label, 'Setting 0xE6');
+  assert.equal(featureView({ ...manufacturer, name: null }, en).labelVerbatim, false);
 });
 
 test('the value read back replaces the shown one, a list value by its low byte', () => {
@@ -243,7 +278,7 @@ test('empty offers retry and, only on Linux, the i2c setup hint', () => {
     detail: null,
     retry: true,
     hint: {
-      text: 'On Linux, DDC/CI needs the i2c-dev module and read/write access to /dev/i2c-*. See docs/linux-ddc-setup.md.',
+      text: 'On Linux, DDC/CI needs the i2c-dev module and read/write access to /dev/i2c-*. Setup guide:',
       doc: 'docs/linux-ddc-setup.md',
     },
   });

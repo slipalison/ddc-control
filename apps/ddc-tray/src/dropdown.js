@@ -7,6 +7,8 @@
 // and an event; `placeList` says where the list fits in the window; and
 // `createDropdown` only binds them to the DOM. Texts come from the caller,
 // and the only style the script sets is a `--dropdown-*` custom property.
+// A `verbatim` label is the monitor's own (its name, a value name no locale
+// translates): it is shown under `translate="no"` (D-2026-09-27-tray-app-7).
 
 import { createIcon } from './icons.js';
 
@@ -20,7 +22,7 @@ export const LIST_MARGIN = 8;
 export const LIST_GAP = 4;
 
 /**
- * @typedef {{ value: unknown, label: string, disabled?: boolean }} DropdownOption
+ * @typedef {{ value: unknown, label: string, disabled?: boolean, verbatim?: boolean }} DropdownOption
  * @typedef {{
  *   open: boolean,
  *   options: readonly DropdownOption[],
@@ -278,6 +280,7 @@ export function createDropdown({
     const { open, options, selected, active } = state;
     const current = options[selected];
     shown.textContent = current?.label ?? '';
+    shown.translate = !current?.verbatim;
     button.dataset.value = current ? String(current.value) : '';
     button.setAttribute('aria-expanded', String(open));
     node.classList.toggle('is-open', open);
@@ -293,7 +296,9 @@ export function createDropdown({
   }
 
   function paintOptions(options, selected, active) {
-    const next = JSON.stringify(options.map((option) => [String(option.value), option.label, Boolean(option.disabled)]));
+    const next = JSON.stringify(
+      options.map((option) => [String(option.value), option.label, Boolean(option.disabled), Boolean(option.verbatim)]),
+    );
     if (next !== signature) {
       signature = next;
       items = options.map((option, index) => optionItem(doc, optionId(index), option));
@@ -409,7 +414,9 @@ function optionItem(doc, id, option) {
   const check = element(doc, 'span', 'dropdown-check');
   check.setAttribute('aria-hidden', 'true');
   check.append(createIcon('check', doc));
-  item.append(check, element(doc, 'span', 'dropdown-label', option.label));
+  const label = element(doc, 'span', 'dropdown-label', option.label);
+  label.translate = !option.verbatim;
+  item.append(check, label);
   return item;
 }
 

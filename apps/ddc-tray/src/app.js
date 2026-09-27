@@ -7,7 +7,9 @@
 // inline style is set — a slider's fill is the custom property `--fill`.
 // Lists are in-page dropdowns, never a native select element: its menu is
 // a window of its own, and the popup hid on losing the focus to it
-// (D-2026-09-27-tray-app-1).
+// (D-2026-09-27-tray-app-1). What the monitor or the core wrote — a name,
+// a value name no locale translates, a code, a backend's message — is data
+// and carries `translate="no"` (D-2026-09-27-tray-app-7).
 
 import { createBridge } from './bridge.js';
 import { createWriteQueue } from './debounce.js';
@@ -349,6 +351,7 @@ function paintHeader() {
   const current = shown ? picker.current : null;
   const choosing = shown && picker.selectable;
   ui.monitorName.textContent = current?.label ?? t('app.title');
+  markVerbatim(ui.monitorName, Boolean(current));
   // With a choice, the name is the picker's button.
   ui.title.classList.toggle('is-picker', choosing);
   ui.monitorName.hidden = choosing;
@@ -369,6 +372,7 @@ function paintPicker(picker) {
   const options = picker.options.map(({ id, label, silent }) => ({
     value: id,
     label: silent ? t('header.silent', { label }) : label,
+    verbatim: !silent,
   }));
   monitorDropdown.update({ options, value: model.selectedId });
 }
@@ -382,14 +386,7 @@ function paintMessage(status) {
   setText(ui.messageTip, empty || mute ? t('hint.ddc') : null);
   setText(ui.messageDetail, status.detail);
   ui.messageHint.hidden = !status.hint;
-  if (status.hint) ui.messageHint.replaceChildren(...withCode(status.hint.text, status.hint.doc));
-}
-
-// The guide's path reads as code inside the hint.
-function withCode(text, code) {
-  const at = text.indexOf(code);
-  if (at < 0) return [text];
-  return [text.slice(0, at), element('code', '', code), text.slice(at + code.length)];
+  if (status.hint) ui.messageHint.replaceChildren(status.hint.text, verbatim('code', '', status.hint.doc));
 }
 
 function showToast(text) {
@@ -472,7 +469,7 @@ function quickSlider(entry, view) {
 
 function sliderWidget(entry, view, { id, icon = null, marks = [] }) {
   const node = element('div', icon ? 'slider has-icon' : 'slider');
-  const label = element('label', 'slider-label', view.label);
+  const label = markVerbatim(element('label', 'slider-label', view.label), view.labelVerbatim);
   label.htmlFor = id;
   const pill = element('span', 'pill');
   pill.setAttribute('aria-hidden', 'true');
@@ -538,7 +535,7 @@ function chip(entry, choice) {
   node.dataset.value = String(choice.value);
   const mark = element('span', 'chip-mark');
   mark.append(createIcon('check'), element('span', 'spinner'));
-  node.append(mark, element('span', 'chip-label', choice.label));
+  node.append(mark, markVerbatim(element('span', 'chip-label', choice.label), choice.verbatim));
   node.addEventListener('click', () => void requestChange(entry, choice.value));
   return node;
 }
@@ -580,7 +577,7 @@ function selectRow(entry, view) {
   const id = `control-${view.code}`;
   const node = element('div', 'row');
   const text = element('div', 'row-text');
-  const label = element('span', 'row-label', view.label);
+  const label = markVerbatim(element('span', 'row-label', view.label), view.labelVerbatim);
   label.id = `${id}-label`;
   text.append(label);
   const widget = selectWidget(entry, id, label.id);
@@ -606,9 +603,9 @@ function selectWidget(entry, id, labelId) {
 // A current value outside the list shows as a choice that cannot be
 // picked, so the dropdown never silently displays another value.
 function paintSelect(dropdown, view) {
-  const options = view.options.map(({ value, label }) => ({ value, label }));
+  const options = view.options.map(({ value, label, verbatim }) => ({ value, label, verbatim }));
   if (!view.options.some((choice) => choice.selected)) {
-    options.unshift({ value: view.current, label: view.currentLabel, disabled: true });
+    options.unshift({ value: view.current, label: view.currentLabel, verbatim: view.currentVerbatim, disabled: true });
   }
   dropdown.update({ options, value: view.current });
 }
@@ -742,7 +739,7 @@ function radio(choice, index, describe) {
   input.addEventListener('change', () => {
     ui.confirmBody.textContent = describe(choice).body;
   });
-  label.append(input, element('span', 'choice-label', choice.label));
+  label.append(input, markVerbatim(element('span', 'choice-label', choice.label), choice.verbatim));
   return label;
 }
 
@@ -815,7 +812,7 @@ function featureWidget(entry, view) {
   if (view.widget === 'slider') return sliderWidget(entry, view, { id, marks });
   const node = element('div', 'slider');
   const head = element('div', 'slider-head');
-  const label = element('span', 'slider-label', view.label);
+  const label = markVerbatim(element('span', 'slider-label', view.label), view.labelVerbatim);
   label.id = `${id}-label`;
   head.append(label, ...marks);
   const widget = selectWidget(entry, id, label.id);
@@ -825,13 +822,13 @@ function featureWidget(entry, view) {
 
 function silentFeature(view) {
   const node = element('div', 'feature-row is-silent');
-  node.append(element('span', 'slider-label', view.label), ...featureMarks(view));
+  node.append(markVerbatim(element('span', 'slider-label', view.label), view.labelVerbatim), ...featureMarks(view));
   node.append(element('span', 'feature-status', view.statusText));
   return node;
 }
 
 function featureMarks(view) {
-  const marks = [element('span', 'code', view.hex)];
+  const marks = [verbatim('span', 'code', view.hex)];
   if (view.dangerous) marks.push(element('span', 'tag', t('tag.dangerous')));
   return marks;
 }
@@ -876,6 +873,17 @@ function element(tag, className = '', text = null) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== null) node.textContent = text;
+  return node;
+}
+
+/** A text as the monitor or the core wrote it: data, never translated. */
+function verbatim(tag, className, text) {
+  return markVerbatim(element(tag, className, text), true);
+}
+
+/** Marks `node` as showing data (`translate="no"`) or a translation. */
+function markVerbatim(node, isVerbatim) {
+  node.translate = !isVerbatim;
   return node;
 }
 

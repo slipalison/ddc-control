@@ -29,7 +29,7 @@ export default Object.freeze({
   'action.refresh': 'Refresh',
   'hint.ddc': "Turn on DDC/CI in the monitor's on-screen menu, then try again.",
   'hint.i2c':
-    'On Linux, DDC/CI needs the i2c-dev module and read/write access to /dev/i2c-*. See {doc}.',
+    'On Linux, DDC/CI needs the i2c-dev module and read/write access to /dev/i2c-*. Setup guide:',
 
   'format.percent': '{value}%',
   'format.fraction': '{current} of {max}',
