@@ -1,7 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The popup only listens to and emits app events; each app command is allowed explicitly next to it.",
+  "description": "The popup only listens to and emits app events, and invokes the app's own commands, each allowed by name.",
   "windows": ["popup"],
-  "permissions": ["core:event:default"]
+  "permissions": [
+    "core:event:default",
+    "allow-list-monitors",
+    "allow-select-monitor",
+    "allow-load-panel",
+    "allow-load-features",
+    "allow-probe-features",
+    "allow-set-feature",
+    "allow-hide-popup"
+  ]
 }

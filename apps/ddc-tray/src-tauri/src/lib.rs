@@ -3,18 +3,150 @@
 //! A small popup webview turns clicks and slider moves into calls on the
 //! core's `MonitorControl` port. Every rule about monitors — which writes
 //! are dangerous, which values are valid — lives in the core; this crate
-//! only presents, forwards and wires.
+//! only presents, forwards and wires. [`run`] is its composition root.
 
 #![forbid(unsafe_code)]
 
+pub mod commands;
 pub mod dto;
 pub mod panel;
+pub mod popup;
 
-/// Starts the tray app and blocks until it exits.
+use std::fmt::Display;
+use std::sync::Arc;
+use std::time::Instant;
+
+use ddc_adapters::{CachingMonitorBackend, DdcHiMonitorBackend, default_cache_dir};
+use ddc_core::app::SoftwareOsd;
+use ddc_core::domain::DdcError;
+use tauri::{AppHandle, Emitter, Manager, Runtime, Window, WindowEvent};
+
+use crate::commands::{AppState, SharedOsd};
+use crate::dto::POPUP_SHOWN;
+use crate::popup::PopupGate;
+
+/// Label of the popup window in `tauri.conf.json`.
+const POPUP: &str = "popup";
+
+/// Builds the core over the real DDC/CI backend, with the on-disk
+/// capabilities cache the CLI also uses (D-2026-09-26-tray-app-3). Without
+/// a cache directory the core reads the capabilities from the monitor, as
+/// the CLI does.
+///
+/// # Errors
+///
+/// The backend's error when it cannot start.
+pub fn compose_osd() -> Result<SharedOsd, DdcError> {
+    let real = DdcHiMonitorBackend::new()?;
+    Ok(match default_cache_dir() {
+        Some(dir) => Arc::new(SoftwareOsd::new(CachingMonitorBackend::new(real, dir))),
+        None => Arc::new(SoftwareOsd::new(real)),
+    })
+}
+
+/// Starts the tray app and blocks until it exits. A DDC/CI backend that
+/// cannot start does not stop it: every command then answers
+/// `backend_unavailable`.
 ///
 /// # Errors
 ///
 /// Returns the Tauri error when the runtime or the webview cannot start.
 pub fn run() -> Result<(), tauri::Error> {
-    tauri::Builder::default().run(tauri::generate_context!())
+    #[cfg(target_os = "linux")]
+    restart_without_dmabuf_renderer();
+    tauri::Builder::default()
+        // First plugin: a second launch only shows this popup and exits
+        // before building a backend, so one process owns the I2C bus
+        // (D-2026-09-26-tray-app-7).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_popup(app);
+        }))
+        .setup(|app| {
+            app.manage(AppState::new(compose_osd()));
+            app.manage(PopupGate::new());
+            Ok(())
+        })
+        .on_window_event(hide_popup_on_leave)
+        .invoke_handler(tauri::generate_handler![
+            commands::list_monitors,
+            commands::select_monitor,
+            commands::load_panel,
+            commands::load_features,
+            commands::probe_features,
+            commands::set_feature,
+            commands::hide_popup,
+        ])
+        .run(tauri::generate_context!())
+}
+
+/// WebKitGTK's DMA-BUF renderer kills the app with a Wayland protocol error
+/// (71) as soon as the popup is shown on NVIDIA's driver — the dev
+/// machine's case. WebKit reads the switch once, at start, and setting it
+/// from Rust takes `unsafe` (`std::env::set_var`), so the process replaces
+/// itself — same PID, same arguments — with the switch on, unless the user
+/// already chose a value. If that fails, the app starts as it is.
+#[cfg(target_os = "linux")]
+fn restart_without_dmabuf_renderer() {
+    use std::os::unix::process::CommandExt;
+
+    const SWITCH: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+    if std::env::var_os(SWITCH).is_some() {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let error = std::process::Command::new(exe)
+        .args(std::env::args_os().skip(1))
+        .env(SWITCH, "1")
+        .exec();
+    report("restart with the DMA-BUF renderer off", &error);
+}
+
+/// Shows and focuses the popup, and tells the UI to revalidate what it
+/// shows.
+pub(crate) fn show_popup<R: Runtime>(app: &AppHandle<R>) {
+    let Some(popup) = app.get_webview_window(POPUP) else {
+        return;
+    };
+    let shown = popup
+        .show()
+        .and_then(|()| popup.set_focus())
+        .and_then(|()| popup.emit(POPUP_SHOWN, ()));
+    if let Err(error) = shown {
+        report("show the popup", &error);
+    }
+}
+
+/// Hides the popup when it loses the focus — remembering when, for the
+/// tray click that caused it — and instead of closing it.
+fn hide_popup_on_leave<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
+    if window.label() != POPUP {
+        return;
+    }
+    match event {
+        WindowEvent::Focused(false) => {
+            if let Some(gate) = window.try_state::<PopupGate>() {
+                gate.hidden_on_blur(Instant::now());
+            }
+            hide(window);
+        }
+        WindowEvent::CloseRequested { api, .. } => {
+            api.prevent_close();
+            hide(window);
+        }
+        _ => {}
+    }
+}
+
+fn hide<R: Runtime>(window: &Window<R>) {
+    if let Err(error) = window.hide() {
+        report("hide the popup", &error);
+    }
+}
+
+/// Reports a window operation the app shrugs off: the popup keeps working,
+/// and the user has nothing to act on.
+pub(crate) fn report(action: &str, error: &dyn Display) {
+    eprintln!("ddc-tray: could not {action}: {error}");
 }
