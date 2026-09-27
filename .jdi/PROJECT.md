@@ -47,7 +47,7 @@ ddc-control
       **Verify:** `cargo llvm-cov --workspace --summary-only` → coluna Lines >= 80%
       **Source:** PROJECT
 - [ ] No `TODO`/`FIXME` without linked issue reference
-      **Verify:** `! grep -RInE '\b(TODO|FIXME)S?\b|\b(todo|unimplemented)!\(' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vE '\b(TODO|FIXME)S?\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && ! grep -RInEi '(//[/!]?|/\*[*!]?|^[[:space:]]*\*|@)[[:space:]]*(todo|fixme)s?\b' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vEi '\b(todo|fixme)s?\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && echo OK` (D-2026-09-27-tray-app-4/-8/-9: referência de issue colada ao marcador; `todo!`/`unimplemented!`, plural e marcadores de comentário `//`, `//!`, `///`, `/*`, `/**`, `*`, `@` em qualquer caixa)
+      **Verify:** `! grep -RInE '\b(TODO|FIXME)S?\b|\b(todo|unimplemented)!\(' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vE '\b(TODO|FIXME)S?\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && ! grep -RInEi '(//[/!]?|/\*[*!]?|^[[:space:]]*\*|@)[[:space:]]*(todo|fixme)s?\b' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vEi '\b(todo|fixme)s?\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && ! grep -RInEi '\b(to[ -]?do|fixme)s?\b[[:space:]]*[:(]' --include='*.rs' src/ crates/ apps/ 2>/dev/null | grep -vEi '\b(to[ -]?do|fixme)s?\b[[:space:]]*[(:]?[[:space:]]*\(?#[0-9]+' | grep -q . && echo OK` (D-2026-09-27-tray-app-4/-8/-9/-12: referência de issue colada ao marcador; `todo!`/`unimplemented!`, plural e marcadores de comentário `//`, `//!`, `///`, `/*`, `/**`, `*`, `@` em qualquer caixa; e `todo:`/`To do:`/`fixme(` em qualquer ponto da linha)
       **Source:** PROJECT
 
 ### Manual
