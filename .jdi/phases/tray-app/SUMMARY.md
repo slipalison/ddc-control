@@ -2663,3 +2663,53 @@ A cláusula `jq` do C8, que proíbe `app.security` em arquivo de plataforma (`jq
   - os dois continuam corretos, mas não dizem que a checagem vale para Linux, Windows e macOS;
   - ajustar essas linhas fica para a revisão Manual do PR (`/jdi-confirm-dod`), se o orquestrador quiser.
 - **Binário instalado.** O `/home/slipalison/.local/bin/ddc-tray` (08:48) não foi reinstalado. Esta iteração não muda o binário: só entrou um teste.
+
+## Loop reiniciado — iteração 1
+
+Loop reiniciado pelo usuário com `/jdi-loop tray-app --reset-loop`, depois da revisão do DoD pelo orquestrador (`28ef3a0`, D-2026-09-27-tray-app-12). O código já tinha sido aprovado nas 15 iterações anteriores. Esta iteração só mexeu nas docs dos 2 itens Manual do DoD.
+
+### O que mudou
+- `f443647` `docs(tray-app): state the CSP check covers every target`. Acrescenta 1 linha em cada arquivo:
+  - `README.md` (seção Tests do tray): um item logo abaixo do que descreve a checagem de CSP. Diz que ela cobre a política EFETIVA de Linux, Windows e macOS, cada alvo mesclado como o build do Tauri mescla (`the_effective_csp_is_the_strict_policy_on_every_target`). Diz também que a política vive só no `tauri.conf.json`: um `tauri.<platform>.conf.json` não pode mexer em `app.security` (D-2026-09-27-tray-app-11), e o teste reprova um arquivo de plataforma que mude a `csp` ou defina um `devCsp`;
+  - `CHANGELOG.md` `[Unreleased]` → `ddc-tray`: um subitem com a mesma frase, logo abaixo de "strict CSP, tested as Tauri embeds it…".
+- **Descrição fiel ao código.** O teste Rust reprova qualquer `csp` diferente da estrita e qualquer `devCsp`, em cada alvo. A proibição de um bloco `app.security` inteiro num arquivo de plataforma é regra da D-11, verificada pelo `jq` do C8, e não pelo `cargo test`. Por isso a frase diz "must not touch" (regra) e "the test fails one that changes `csp` or sets a `devCsp`" (o que o teste faz).
+- **Nada congelado foi tocado:** código, testes, o harness (`playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs`, `scripts/smoke-sni.sh`), `rtk_qhd_hdr.rs` e o módulo `build_tests` de `lib.rs`. O PLAN continua com as 8 tasks `completed`. O binário instalado em `~/.local/bin` não foi reinstalado.
+
+### Verify do CONTEXT.md e do PROJECT.md
+- **Como rodei:** extraí os comandos por script (19 do CONTEXT + 3 do PROJECT; os outros 4 são os Manual) e rodei cada um literalmente com `bash`, a partir da raiz, sem `DDC_HW_TESTS`, `DDC_TRAY_FAKE` nem `DDC_TRAY_DEBUG`. HEAD: `f443647`.
+
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (total: 157 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n + scanner + trava de frase + título da guarda | `OK` |
+| C8 | CSP + `custom-protocol` + `is_not_a_dev_build` + CSP efetiva (2 testes `--exact`) + hash do `build_tests` | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` (backend real, só leituras) | `OK` na 1ª execução (PID 2561458: `popup shown`, ainda mostrado 1,5 s depois) |
+| C12 | teste de hardware `#[ignore]` gated + hash | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK` em 17 s (contagem à parte: 138 passed, 6 skipped = screenshots) |
+| C14 | bridge nunca cai no demo fora de servidor local | `OK` |
+| C15 | hash do harness (`ba730a00…c001`) | `OK` |
+| C16 | nenhum `<select>` | `OK` |
+| C17 | `ksni` + `scroll` + smoke `--fake --scroll` | `OK` (PID 2561972: `75 -> 80` na vertical, nada na horizontal, `80 -> 75`) |
+| C18 | TODO/FIXME em arquivo versionado do produto | `OK` |
+| C19 | screenshots regenerados e byte a byte iguais | `OK` (`git status` sem mudança em `docs/screenshots`) |
+| P1 | `cargo test --workspace --locked` | `OK`: 386 passed, 0 failed, 9 ignored (15 linhas `test result`) |
+| P2 | cobertura (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines **82,93 %**, exit 0. Gate (`--locked --fail-under-lines 80`, sem `main.rs`/`build.rs`): **83,36 %**, exit 0 |
+| P3 | TODO/FIXME/`todo!` em `*.rs` | `OK` |
+
+- **Porta 1420:** livre antes e depois do C13/C19.
+- **Protocolo da instância do usuário:**
+  - antes do C11 e do C17, `pgrep -xa ddc-tray` mostrou a instância. Ela foi encerrada com `pkill -x ddc-tray` (nunca `-f`), esperando o processo sair;
+  - logo depois de cada smoke, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu;
+  - PIDs: 2518323 → 2561695 → 2562221, a única instância viva no fim. Nenhum `tray activated` externo, então não houve repetição. Nada em `~/.local` foi tocado.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17, o monitor simulado.
+
+### Pendências
+- Os 2 itens Manual (CHANGELOG com `## [version]` e README) seguem para o PR via `/jdi-confirm-dod tray-app`. O CHANGELOG continua só com `## [Unreleased]`: a versão sai na `release-packaging`.
+- W-1 (`cargo audit`, RUSTSEC-2018-0005 via `ddc-hi` → `mccs-db` → `serde_yaml` 0.7.5) continua conhecido e fica para a `ci-crossbuild`.
