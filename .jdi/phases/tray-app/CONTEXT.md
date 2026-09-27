@@ -64,8 +64,8 @@ App Tauri 2 `apps/ddc-tray`: ícone na bandeja (Linux + Windows), popup com sele
 - [ ] Smoke Linux/KDE: o binário release sobe, registra no StatusNotifierWatcher um item cuja conexão D-Bus pertence AO PRÓPRIO processo (PID conferido via `org.freedesktop.DBus.GetConnectionUnixProcessID`), continua vivo depois do registro, e não imprime `panicked` no stderr; o script encerra o app ao final.
       **Verify:** `cargo build -p ddc-tray --release --locked -q && bash apps/ddc-tray/scripts/smoke-sni.sh target/release/ddc-tray && echo OK` (o script sai ≠0 em qualquer uma das condições violadas, com timeout de registro de 15 s)
       **Source:** CONTEXT
-- [ ] Teste `#[ignore]` de hardware no monitor "RTK QHD HDR" passa no monitor de dev (painel carregado só com leituras + UMA escrita Safe de brilho, restaurada ao valor original; nada Dangerous é gravado).
-      **Verify:** `cargo test -p ddc-tray --locked -- --ignored --list 2>&1 | grep -qi 'rtk_qhd_hdr' && cargo test -p ddc-tray --locked -- --ignored rtk_qhd_hdr --test-threads=1 2>&1 | grep -qE 'test result: ok\. [1-9][0-9]* passed' && echo OK`
+- [ ] Teste `#[ignore]` de hardware no monitor "RTK QHD HDR" existe, compila e é gated por `DDC_HW_TESTS=1` (painel carregado só com leituras + UMA escrita Safe de brilho, restaurada ao valor original; nada Dangerous é gravado). O reviewer NUNCA o roda (regra do reviewer); o orquestrador o roda nesta máquina com `DDC_HW_TESTS=1` e anexa a evidência no corpo do PR (mesma prática de `ddc-backends`/`full-osd-control`).
+      **Verify:** `cargo test -p ddc-tray --locked -- --ignored --list 2>&1 | grep -qi 'rtk_qhd_hdr' && grep -RqE 'DDC_HW_TESTS' apps/ddc-tray/src-tauri/tests && echo OK`
       **Source:** CONTEXT
 - [ ] Gate 7 (frontend-validator): zero erros de console e zero violações axe critical/serious nos `critical_paths` de demo.
       **Verify:** `cd apps/ddc-tray && npm ci --ignore-scripts --no-audit --no-fund --silent && o=$(npx playwright test --reporter=list 2>&1); echo "$o" | grep -qE '[1-9][0-9]* passed' && ! echo "$o" | grep -qE '[0-9]+ (failed|flaky)' && echo OK`
@@ -86,6 +86,7 @@ App Tauri 2 `apps/ddc-tray`: ícone na bandeja (Linux + Windows), popup com sele
 
 ## Deferred to PR review
 - Julgamento humano do visual "bonito e intuitivo" (screenshots claro/escuro commitadas em `docs/` para o revisor).
+- Execução real do teste de hardware `rtk_qhd_hdr` com `DDC_HW_TESTS=1` (orquestrador roda e cola a saída no PR).
 - Teste no Windows real: popup ancorado no ícone, tema claro/escuro, DDC via `ddc-winapi`/dxva2 nunca exercitado em hardware nesta phase.
 - GNOME sem extensão AppIndicator (SNI não aparece — limitação conhecida, não corrigida aqui).
 - Confirmação manual dos 2 itens `Manual` (CHANGELOG/README) da baseline do PROJECT.
