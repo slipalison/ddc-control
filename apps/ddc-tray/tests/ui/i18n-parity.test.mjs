@@ -134,10 +134,10 @@ test('the detected locale prefers the language list over the single language', (
 });
 
 test('t falls back to en, then to the key itself', () => {
-  const dictionaries = { en: { greet: 'Hello', only: 'Only in en' }, 'pt-BR': { greet: 'Olá' } };
+  const dictionaries = { en: { greet: 'Hello', english: 'Only in en' }, 'pt-BR': { greet: 'Olá' } };
 
   assert.equal(translator('pt-BR', dictionaries)('greet'), 'Olá');
-  assert.equal(translator('pt-BR', dictionaries)('only'), 'Only in en');
+  assert.equal(translator('pt-BR', dictionaries)('english'), 'Only in en');
   assert.equal(translator('pt-BR', dictionaries)('nowhere'), 'nowhere');
   assert.equal(translator('fr', dictionaries)('greet'), 'Hello');
 });

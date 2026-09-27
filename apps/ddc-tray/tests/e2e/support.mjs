@@ -1,8 +1,10 @@
 // What every popup spec shares (Gate 7, D-2026-09-26-tray-app-8): each
 // response carries the CSP of the Tauri window (D-2026-09-26-tray-app-7),
 // so what the webview would refuse fails here too; console errors and
-// uncaught errors fail the test; the axe check; and the texts, read from
-// the locale files the page uses (the suite runs in pt-BR, see the config).
+// uncaught errors fail the test; a native <select> anywhere on the page
+// fails it too, in every state checked (D-2026-09-27-tray-app-1); the axe
+// check; and the texts, read from the locale files the page uses (the
+// suite runs in pt-BR, see the config).
 
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
@@ -54,9 +56,19 @@ export const test = base.extend({
     page.on('pageerror', (error) => pageErrors.push(`pageerror: ${error.message}`));
     await page.route('**/*', (route) => serve(route));
     await use(page);
+    await expectNoNativeSelect(page);
     expect(pageErrors, 'console errors and uncaught page errors').toEqual([]);
   },
 });
+
+/**
+ * Fails when the page has a native `<select>` (D-2026-09-27-tray-app-1):
+ * its menu opens in a window of its own, the popup loses the focus and
+ * hides. Run on every state a spec settles in, checks and ends in.
+ */
+export async function expectNoNativeSelect(page) {
+  await expect(page.locator('select'), 'native <select> elements on the page').toHaveCount(0);
+}
 
 /**
  * Opens `path` and waits for the popup to settle in `state`
@@ -65,6 +77,7 @@ export const test = base.extend({
 export async function open(page, path, state = 'ready') {
   await page.goto(path);
   await expect(page.locator('#app')).toHaveAttribute('data-state', state);
+  await expectNoNativeSelect(page);
 }
 
 /**
@@ -110,6 +123,7 @@ export function hides(page) {
  * are reported as an annotation and on stdout.
  */
 export async function expectAccessible(page) {
+  await expectNoNativeSelect(page);
   const { violations } = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
   const found = violations.map(({ id, impact, help, nodes }) => ({
     id,
