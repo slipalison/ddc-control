@@ -7,6 +7,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dto;
+pub mod panel;
+
 /// Starts the tray app and blocks until it exits.
 ///
 /// # Errors
