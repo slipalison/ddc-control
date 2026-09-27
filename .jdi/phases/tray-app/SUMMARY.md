@@ -1431,3 +1431,130 @@ Os smokes (C11, C16) seguiram o protocolo do orquestrador. A instância do usuá
 - **Item 4:** nenhuma mudança necessária. As duas linhas literais já estavam lá, e não havia forma proibida.
 - **Instância do usuário:** encerrada e reaberta 1× (só para os smokes C11/C16), com `pkill -x ddc-tray` e `setsid -f`. Nada em `~/.local` foi tocado, e o binário instalado continua sendo o build da iter 3, como a review já notou. Um único popup apareceu na tela (C11).
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` rodou 2× e só com `DDC_TRAY_FAKE=1`: a guarda, que dispara antes de qualquer backend, e o mutante, que usou o monitor em memória. A execução real com `DDC_HW_TESTS=1` segue com o orquestrador (Deferred), agora protegida pela guarda.
+
+## Iteração 6 (rodada 2) — arraste do slider + texto literal
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 6 (rodada 2, depois do AUTO-RESET 1). A iter 5 foi aprovada pelo reviewer (APPROVED_PENDING_MANUAL, só o W-1 herdado), mas o DoD critic demonstrou 2 lacunas: um slider que escreve a cada `input` passava em tudo, e `element(tag, classe, 'texto')` no `app.js` escapava dos testes de i18n. O orquestrador endureceu o CONTEXT (`05ef2ae`). Não editei o CONTEXT. As 8 tasks do PLAN continuam `completed`. O W-1 (`cargo audit`) segue com a `ci-crossbuild`.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `31150bd` | test | Item 1: `tests/e2e/slider.spec.mjs` com o teste `dragging the brightness slider writes once, after the drag` (2 temas → 2 ✓) e um segundo teste de valor lido de volta. |
+| `7479761` | test | Item 2: `app.js passes no literal text to element() or setText()` em `tests/ui/i18n-html.test.mjs`, mais um autoteste do scanner. |
+| `f9e263d` | docs | README (testes do tray) e CHANGELOG descrevem os dois testes novos. |
+
+### 1 — arraste real do slider de brilho (D-2026-09-26-tray-app-5)
+- **O arraste:** em `?demo=rtk`, `page.mouse.move` até o centro do polegar em 75 %, `page.mouse.down()`, 20 `page.mouse.move` ao longo da trilha até 20 % e `page.mouse.up()`.
+  - A posição do polegar considera a largura dele (18 px em `styles.css`).
+  - Cada passo do laço deixa passar 20 ms no relógio da página e 20 ms no relógio de parede.
+- **O que a página registra** (listeners de observação, instalados antes do arraste):
+  - cada `input`: valor, `performance.now()` e quantas escritas o demo já tinha tomado;
+  - o `pointerup`, na fase de captura da `window`, antes dos handlers do app;
+  - o instante em que cada escrita chega em `__ddcDemo.writes`.
+- **O que o teste exige:**
+  - ≥ 15 eventos `input` (dão 20) e ≥ 300 ms do primeiro ao último (dão 380 ms de página);
+  - nenhuma pausa ≥ `DEBOUNCE_MS` durante o arraste;
+  - zero escritas em todo `input` e no `pointerup`, e o último valor exatamente 20;
+  - depois de soltar, exatamente `[{ monitorId: RTK, code: 0x10, value: 20, confirmed: false }]`, e ainda só ela depois de mais `2 × DEBOUNCE_MS + DEMO_LATENCY_MS`;
+  - a escrita chega exatamente `DEMO_LATENCY_MS` (60 ms) depois do release, ou seja, foi enviada no release;
+  - o slider mostra `20` e `aria-valuetext` `20%`.
+- **Teste extra:** `a dragged slider settles on the brightness the monitor read back`. O `bridge.js` de teste mantém a leitura do 0x10, como o `dropdown.spec.mjs` faz com o preset. O arraste termina em 20, a escrita leva 20, e o slider volta para `75`/`75%`, com o anúncio `announce.readBack`. O título não contém a substring do Verify, então o `dr` continua 2.
+- **Relógio da página (desvio de método):**
+  - A primeira versão usava só tempo real. Sob carga (suíte ×4 com 24 workers), uma pausa entre dois `move` chegou a 80,5 ms e o teste falhou: 1 em 264 execuções.
+  - Com a janela de 80 ms, essa escrita no meio do arraste seria correta, e a falha, espúria.
+  - Agora o relógio da página é o do Playwright (`page.clock.install()` + `pauseAt`) e fica parado durante o arraste. Cada passo avança exatamente 20 ms com `page.clock.runFor`, o que dispara qualquer timer vencido.
+  - Os eventos de mouse continuam reais (CDP). Um debounce mais curto que 20 ms, um throttle ou um flush imediato continuam disparando dentro do arraste.
+  - Estabilidade depois da mudança: 2 × 264 (suíte ×4, 24 workers) e 160 execuções só do spec, 0 falhas.
+- **Prova negativa (mutação do critic, não commitada):** `if (!entry.dto.dangerous) queueWrite(entry, value, { now: true });` na linha 508 de `src/app.js`. O arquivo foi restaurado por cópia, e `git diff --quiet` ficou limpo.
+  - Suíte inteira: **4 failed** (os 2 testes do `slider.spec.mjs` × 2 temas), 56 passed, 6 skipped. Os 56 testes anteriores passam com o mutante, que é justamente a lacuna.
+  - O teste do Verify falha em `writes taken at each input`:
+    ```text
+    ✘  1 [light] › tests/e2e/slider.spec.mjs:88:1 › dragging the brightness slider writes once, after the drag
+        Error: writes taken at each input
+        - Expected  - 17
+        + Received  + 17
+        (recebido: 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6)
+    ```
+    São 6 escritas durante um arraste de 400 ms, uma a cada 60 ms de latência do demo.
+- **Prova negativa extra (throttle):** tirar o `stopTimer(state)` do `push` de `src/debounce.js` → os 4 testes do `slider.spec.mjs` falham (`writes taken at each input`). Restaurado.
+
+### 2 — nenhum texto literal no DOM montado pelos scripts (D-2026-09-26-tray-app-6)
+- **Escopo:** o teste `app.js passes no literal text to element() or setText()` lê todo script de `src/` (recursivo) que monta DOM, detectado por `document`/`createElement(NS)`/`textContent`/`setAttribute`. Hoje são `app.js`, `dropdown.js` e `icons.js`, e o teste exige que os 3 sejam encontrados.
+- **Como lê:** um tokenizador pequeno, no próprio arquivo de teste e sem dependências. Ele descarta comentários de linha e de bloco, separa strings, templates (com as expressões `${}` tokenizadas) e regexes (distingue `/` de divisão) e casa parênteses.
+- **O que ele reprova:** um literal com letra (`\p{L}`) fora de `t(…)`, em qualquer destes lugares:
+  - nos helpers do próprio módulo com parâmetro `text`, na posição desse parâmetro: `element()` (3º argumento no `app.js`, 4º no `dropdown.js`), `setText()`, `announce()`, `showToast()`, `withCode()`;
+  - em atribuição (`=`, `+=`, `??=`, `||=`, `&&=`) a uma propriedade de texto: `textContent`, `innerText`, `outerText`, `nodeValue`, `title`, `alt`, `placeholder`, `ariaLabel`, `ariaDescription`, `ariaRoleDescription`, `ariaValueText`, `ariaPlaceholder`, `ariaKeyShortcuts`;
+  - em `setAttribute` de atributo legível (`READABLE_ATTRIBUTES`, que ganhou `aria-braillelabel`, `aria-brailleroledescription` e `aria-keyshortcuts`) ou de nome dinâmico;
+  - em `setAttribute` de outro `aria-*` cujo valor não seja token ARIA (`true`, `false`, `polite`, `listbox`…). Os atributos de id (`aria-controls`, `aria-labelledby`…) ficam de fora;
+  - numa propriedade de texto passada a `Object.assign`;
+  - como argumento string de `append`/`prepend`/`replaceChildren`/`before`/`after`/`replaceWith`, fora de chamadas, e em `createTextNode`/`insertAdjacentText`.
+- **Contra teste oco:** o teste exige ter lido os lugares que guarda: no `app.js`, ≥ 8 `element()` (há 26), ≥ 4 `setText()` (4), ≥ 10 `.textContent =` (16) e ≥ 10 `setAttribute()` (12); no `dropdown.js`, ≥ 1 `element()` (8).
+- **Autoteste:** `the literal-text scan flags each way a text reaches the DOM, and nothing else`. Um script sintético de 22 linhas fixa por igualdade as 12 marcações esperadas e as formas permitidas: `t()`, dados, `aria-hidden 'true'`, `aria-controls` com template, comentários de linha e de bloco, regex com aspas e divisão.
+- **Ocorrências reais:** nenhuma em `src/`. Nada foi corrigido no produto.
+- **Provas negativas (mutações não commitadas, restauradas por cópia, `git diff --quiet` limpo):**
+  | Mutação | Resultado |
+  |---|---|
+  | M1 (pedida): `app.js:832` `element('span', 'tag', 'Undeclared')` | `not ok 8 - app.js passes no literal text to element() or setText()`, `+ 'app.js:832 element() "Undeclared"'`, `# pass 14`, `# fail 1` |
+  | M2: `app.js:379` `setText(ui.messageTip, … ? 'Check the DDC/CI setting' : null)` | `not ok 8`, `+ 'app.js:379 setText() "Check the DDC/CI setting"'`, `# fail 1` |
+  | M3: `dropdown.js:412` `element(doc, 'span', 'dropdown-label', 'Pick one')` | `not ok 8`, `+ 'dropdown.js:412 element() "Pick one"'`, `# fail 1` |
+
+  Nos 3 casos, os outros 14 testes do arquivo passam com o mutante, que é justamente a lacuna.
+
+### 3 — conferências sem mudança
+- **Coletor de console em `tests/e2e/support.mjs`:** as linhas literais que o Verify do Gate 7 exige estão lá.
+  - `:54` `if (message.type() === 'error') pageErrors.push(` com `` `console.error: ${message.text()}` ``;
+  - `:56` `page.on('pageerror', (error) => pageErrors.push(`;
+  - `:60` `expect(pageErrors, 'console errors and uncaught page errors').toEqual([]);`.
+  - Não há filtro (`Failed to load`, `filter`, `startsWith` ou `return` no handler).
+- **`rtk_qhd_hdr.rs`:** 2 `#[test]`, 2 `#[ignore]`, 2 `if !hardware_enabled() {`, e 2 `assert!(std::env::var_os("DDC_TRAY_FAKE").is_none(), …)` (`:127`, `:175`), um por teste. O Verify C12 confere `= $t`.
+
+### Verify do CONTEXT.md e do PROJECT.md (extraídos por script do `.md`, conferidos como substring exata, rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`)
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total, 0 fail/cancelled/skipped/todo | `OK` (131 pass) |
+| C7 | i18n: título `app.js passes no literal text to element() or setText()` presente + paridade/HTML | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` (PID 1109074, item `org.kde.StatusNotifierItem-1109074-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras) |
+| C12 | teste de hardware `#[ignore]` gated, guard vivo, `DDC_TRAY_FAKE` recusado em cada teste | `OK` (não executado contra hardware) |
+| C13 | Gate 7 (coletor e axe travados, 10 `critical_paths`, dropdown completo, `dr = 2`, pulados = screenshots) | `OK` (60 passed, 6 skipped) |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri == true` | `OK` |
+| C15 | nenhum `<select>` em `src/` | `OK` |
+| C16 | `ksni` + ≥ 3 testes `scroll` + `smoke-sni.sh --fake --scroll` | `OK` (`75 -> 80` vertical, horizontal sem escrita em 1,5 s, `80 -> 75`) |
+| C17 | TODO/FIXME em todo arquivo versionado do produto | `OK` |
+| C18 | screenshots regenerados sem nada pulado, byte a byte iguais | `OK` (SHA-1 dos 6 PNGs iguais antes e depois) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.78 % |
+| P3 | TODO/FIXME em `*.rs` | `OK` |
+
+- **Protocolo dos smokes (C11, C16):** um de cada vez. Antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário, encerrada com `pkill -x ddc-tray`; logo depois, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu. PIDs: 930850 → 1109309 → 1110145, que é a instância viva no fim.
+- **Porta 1420:** livre antes e depois do C13/C18.
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored (igual à iter 5: nenhum `.rs` mudou) |
+| cross-check `ddc-core ddc-adapters ddc-cli` em `x86_64-unknown-linux-gnu`; `ddc-cli ddc-adapters` em `x86_64-pc-windows-msvc` | exit 0 / exit 0 |
+| `node --test` (todos) | **131 pass** (iter 5: 129; +2 em `i18n-html`), 0 fail, 0 cancelled, 0 skipped, 0 todo |
+| Playwright | **60 passed** (iter 5: 56; +4 do `slider.spec.mjs`), 6 skipped (screenshots sem `SCREENSHOTS=1`) |
+| cobertura (gate, `--fail-under-lines 80`, sem `main.rs`/`build.rs`) | exit 0, TOTAL lines **83.22 %** (igual à iter 5) |
+| `Cargo.lock` / `package-lock.json` | intocados |
+
+### Desvios e observações
+- **Relógio controlado no arraste:** os ≥ 300 ms do CONTEXT valem no relógio da página (380 ms do primeiro ao último `input`, exigido pelo teste) e também no de parede (20 × 20 ms de `waitForTimeout`). Os eventos de mouse são reais. O motivo, a medição e a estabilidade estão no item 1.
+- **Testes além dos 2 títulos pedidos:** `a dragged slider settles on the brightness the monitor read back`, que prova que o slider mostra o valor lido e não o arrastado, e o autoteste do scanner. Nenhum dos dois títulos contém as substrings dos Verify.
+- **`READABLE_ATTRIBUTES`** ganhou 3 atributos ARIA legíveis, o que também deixa um pouco mais estrito o teste do HTML (`the page has no literal readable attribute`). O `index.html` não usa nenhum deles.
+- **Docs:** README e CHANGELOG ganharam uma frase cada sobre os testes novos (`f9e263d`), porque são itens Manual do DoD.
+- **Suspeitas `objective:false` do critic:**
+  - «15» (guard de `DDC_TRAY_FAKE` uma só vez) já está coberto pelo Verify, que conta `= $t`.
+  - «3/20» (`Todo` em caixa mista) não foi tratado: não fazia parte do pedido, e o CONTEXT não foi editado.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. Os smokes usaram o backend real só com leituras (C11) e o monitor simulado (C16).
+- **Instância do usuário:** encerrada e reaberta 2× (só para os smokes), com `pkill -x ddc-tray` e `setsid -f`. Nada em `~/.local` foi tocado. O binário instalado continua anterior à iter 5, como a review já notou.
