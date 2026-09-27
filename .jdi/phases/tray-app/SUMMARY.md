@@ -2087,3 +2087,154 @@ Extraídos por script do `.md` e rodados com `bash` a partir da raiz, sem `DDC_H
 - **Texto do toast:** a falha do `listen()` e a do Esc mostram o genérico "Algo deu errado." (`error.unknown`). Um texto próprio ("as mudanças feitas pela bandeja não vão aparecer aqui") exigiria chaves i18n novas e ficou fora do escopo. Fica como sugestão para uma issue.
 - **Contagem da iter 9 corrigida** no próprio texto da iter 9 (20 estados × 2 = 40, mais a origem × 2 = 42, e não "21 × 2 + …").
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
+
+## Iteração 11 (rodada 3) — trava estática de texto + diálogo genérico
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 11 (rodada 3, depois do AUTO-RESET 2). O DoD critic da iter 10 bloqueou por três linhas. Duas eram do Verify de TODO e o orquestrador já as corrigiu no PROJECT/CONTEXT (D-2026-09-27-tray-app-9). A terceira é o trabalho desta iteração: a nota do diálogo de confirmação genérico (`const note = input ? t(…) : 'Some monitors only undo this from their own buttons.'`) aparecia em inglês no popup pt-BR, e nada a pegava. Nenhum estado do pseudo-locale abria esse diálogo, e o scanner só lê os argumentos dos sinks. Não editei o CONTEXT: o C15 ainda tem o hash da iter 10, e quem refixa é o orquestrador. As 8 tasks do PLAN continuam `completed`.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `efac15c` | refactor | As mensagens de falha do backend do demo (as do `DdcError` do core, "no DDC/CI backend…" e a recusa de ACL do Tauri) saem de `bridge.js` para `DEMO_MESSAGES` em `demo-data.js`. Nenhuma mensagem mudou. |
+| `bdba5a2` | fix | O bridge "indisponível" (app sem a API do Tauri) deixa de mandar a frase em inglês "the Tauri API is missing…" como detalhe. O erro fica sem mensagem, e o popup mostra só o texto traduzido do `backend_unavailable`. |
+| `edd7a7d` | fix | `createIcon` lança `RangeError(name)` em vez de `Error("unknown icon <name>")`, com teste que reprova no código antigo. |
+| `8344a40` | test | A trava estática `no natural-language literal outside the locale files`, o autoteste dela e a trava de CSS (`styles.css` não gera texto). |
+| `3e15fb4` | test | 5 estados novos no pseudo-locale, todos os diálogos incluídos. |
+| `ae9dfbf` | test | Textos exatos do diálogo genérico em `confirm.spec.mjs` (locale pt-BR real), por lista e por slider perigoso. |
+| `d3edb87` | docs | README e CHANGELOG: a trava, os 27 estados e o erro de indisponível só traduzido. |
+
+Depois do `ae9dfbf`, `playwright.config.mjs`, `tests/e2e/*.mjs`, `tests/ui/*.mjs` e `scripts/smoke-sni.sh` não mudaram mais.
+
+### 1. Trava estática (`tests/ui/i18n-html.test.mjs`)
+- **`no natural-language literal outside the locale files`** (título exato do pedido e do C7):
+  - lê todo `.js`/`.mjs`/`.cjs` de `apps/ddc-tray/src/**`, recursivo, com o tokenizer que o arquivo já tinha (comentários e regex ficam de fora);
+  - deixa de fora só `i18n/**` e `demo-data.js`. A lista dos arquivos deixados de fora é travada: `demo-data.js`, `i18n/en.js`, `i18n/index.js`, `i18n/pt-BR.js`. Um arquivo novo em `i18n/` reprova com `files left out`;
+  - exige que `app.js`, `bridge.js`, `debounce.js`, `dropdown.js`, `icons.js` e `view-model.js` sejam lidos, e no mínimo 500 literais (hoje são 602);
+  - reprova qualquer literal com frase. Frase é duas ou mais palavras separadas por espaço em branco (`\s`, NBSP incluído), e palavra é um pedaço que contém `\p{L}{2,}`. Assim `It's broken` e `Wait 5 seconds` contam, e `0 0 24 24`, `M15.25 15.25…` e `a b c` não;
+  - template: as partes estáticas são lidas juntas, com `${}` no lugar de cada expressão. Os literais dentro de cada `${…}` são lidos à parte, inclusive templates aninhados;
+  - literais encadeados com `+` são lidos como um só (`'Try' + ' again'` vira `Try again`). Um operando simples entre dois literais (`a`, `a.b`, `a?.b(c)`, `a[0]`, número) vira `${}`;
+  - escapes são decodificados: ` `, `\x20`, `\u{…}` e os de uma letra. `'Hidden text'` reprova.
+- **Exceções:** uma allowlist explícita, `NOT_LANGUAGE`, com arquivo, literal exato e motivo. São só 3 entradas, todas nomes de classe: `app.js` `slider has-icon`, `app.js` `feature-row is-silent` e `icons.js` `icon icon-${}`. Uma entrada que não é mais encontrada no arquivo reprova (`allowed literals no longer there`), então a lista não acumula exceções mortas. Não há exceção por padrão genérico.
+- **Autoteste** (`the phrase scan reads every literal form, and only literals`): trava o que é lido (o mutante do critic, o sufixo da iter 7, template com lacuna, template aninhado, `+` entre literais, `+` com operando, escapes, contração) e o que não é (uma palavra, chave de `t()`, números/SVG, comentário de linha e de bloco, regex, `${a}${b}`).
+- **Trava de CSS a mais** (`no style writes a text: every content of styles.css is empty`): todo `content:` de `styles.css` precisa ser `""`, `''`, `none` ou `normal`. Um `::after { content: "Some text" }` num elemento que só existe em estado não visitado escaparia do pseudo-locale.
+
+#### Ocorrências reais achadas no produto e corrigidas
+| Onde | O que era | Correção |
+|---|---|---|
+| `bridge.js` (demo) | 9 mensagens de falha, as do `DdcError` do core (`monitor did not respond in time`, `writing feature ${} is dangerous and was not confirmed`, …), `no DDC/CI backend could be started (demo)`, `unknown command ${}` e `Command ${} not allowed by ACL` | São dados do backend simulado, como a mensagem de transporte da TV muda que já morava em `demo-data.js`. Foram para `DEMO_MESSAGES` em `demo-data.js` sem mudar o texto. O `bridge-demo` continua travando cada uma, e a de timeout contra o `error.rs` do core. |
+| `bridge.js` (indisponível) | `UNAVAILABLE_MESSAGE` = "the Tauri API is missing from this window, so no monitor can be reached", mostrada como linha de detalhe no popup real (sem Tauri), em qualquer locale | É texto do próprio popup, não de um backend. O erro fica `{ kind: 'backend_unavailable', message: '' }`, e o popup mostra só o título traduzido. O `bridge-demo` espera a mensagem vazia, e o `unavailable.spec` espera `#message-detail` oculto e vazio. |
+| `icons.js` | `throw new Error(\`unknown icon ${name}\`)`. Um erro lançado durante o carregamento do painel vira a linha de detalhe do estado de erro | `throw new RangeError(name)`. O teste `an unknown icon throws a RangeError whose message is its name alone` reprova no código antigo. |
+
+### 2. Diálogo genérico e as outras variantes sem estado
+- **Variantes procuradas:** percorri todo caminho de texto de `app.js`, `view-model.js` e `dropdown.js` e cruzei com os 21 estados. Faltavam 5, e cada uma virou um estado novo em `pseudo-locale.spec.mjs` (mesmo prefixo de título, mesmo check, com axe):
+
+| Estado | Como chega | O que só ele mostra |
+|---|---|---|
+| `rtk with the generic confirmation of a dangerous list open` | "Todos os ajustes" → trava do OSD (0xCA) → "Desativado" | o diálogo genérico: título, corpo `confirm.body.generic` e botões, sem nota nem escolhas |
+| `rtk with the generic confirmation of a dangerous slider open` | um código sem nome no catálogo (0xE9, contínuo, perigoso como todo código desconhecido do core) → ArrowRight (solta) | o genérico pelo caminho do slider (`bindSlider` → `change`), com `to` em `format.fraction` |
+| `rtk with the power confirmation open and another mode picked` | energia → marca o 2º rádio | o corpo reescrito pelo handler do rádio (`app.js`, `radio()`) |
+| `rtk with all settings listing codes the catalog does not name` | 0xE9 (ok), 0xEA (não suportado) e 0xEB (sem resposta), sem `alias` nem `name`, como o Rust lista | `format.code`, `silentFeature` com `reading.unsupported` e `reading.unresponsive`, a tag de cuidado |
+| `rtk with a color preset outside its list, the list open` | o RTK lendo o preset 0x03, fora da lista dele | a opção desabilitada do valor atual (`paintSelect`) e o botão com `format.unnamed` |
+
+- **Como os estados chegam lá:** os códigos sem nome e o preset fora da lista vêm de uma variante de teste do `bridge.js` (`altering`), que altera os monitores do demo logo depois de `const monitors = scenarioMonitors(scenario);`, antes de qualquer comando. Assim as escritas do demo concordam com o que é listado. Como nos outros estados com `bridge`, o spec exige que a linha trocada exista.
+- **O `reach` continua sem afirmar texto.** Ele espera o diálogo, o título, o corpo e os dois botões visíveis (`dialogShows`), a lista aberta com uma opção `aria-disabled`, ou 2 `.feature-status`. A nota não é esperada: se aparecer, o check a julga.
+- **Textos exatos (`confirm.spec.mjs`, pt-BR real):** a função `expectGenericDialog` exige título, corpo, `data-tone="danger"`, `#confirm-note` oculto e vazio, a lista de escolhas oculta, os textos dos botões e o foco em Cancelar. Os testes:
+  - `a dangerous list of All settings asks with the generic dialog, then writes confirmed`: o diálogo mais axe, nenhuma escrita antes, e Aplicar escreve 0xCA = 0x01 uma vez, `confirmed: true`;
+  - `a dangerous slider of All settings asks on release: Cancel puts it back, Apply writes it`: ArrowRight abre o diálogo com `21 de 40`, mais axe. Cancelar volta o slider a 20 (`aria-valuetext` `20 de 40`) sem escrita, e Aplicar escreve 0xE9 = 21 uma vez, confirmado. Nenhum teste dirigia um slider perigoso antes.
+- **Contagem:** `STATES` tem 26 estados, mais o `loading`, o que dá 27 × 2 temas = 54 (`ps = 54`, eram 44). O Playwright completo tem 134 passed + 6 skipped (eram 120). Com `--repeat-each=4` em `pseudo-locale` + `confirm`, deu 288/288.
+
+### Provas negativas (mutações não commitadas)
+Aplicadas no `src/` do repo por script e revertidas com `git checkout -- src` logo após cada rodada. As versões antigas dos testes rodaram como cópias temporárias (`git show <HEAD>:…` → `zz-old-*`) no mesmo diretório e foram apagadas no fim (`git status` limpo).
+
+**Trava estática** (antiga = `i18n-html` do `edd7a7d`, sem a trava):
+
+| Mutação | Trava nova | `i18n-html` antigo |
+|---|---|---|
+| **Critic:** `const note = input ? t('confirm.recover.input') : 'Some monitors only undo this from their own buttons.';` em `app.js` | **reprova**: `app.js:703 "Some monitors only undo this from their own buttons."` | 16/16 passam |
+| **Iter 7:** `t('more.probeEmpty') + ' (nothing else to try)'` em `showProbe` | **reprova**: `app.js:865 " (nothing else to try)"` | passam |
+| Iter 7 via `const PROBE_SUFFIX` | **reprova** (`app.js:36`) | passam |
+| `'Some' + ' monitors'` | **reprova**: `"Some monitors"` | passam |
+| `'Undo ' + view.label + ' yourself'` | **reprova**: `"Undo ${} yourself"` | passam |
+| `'Undo yourself'` | **reprova**: `"Undo yourself"` | passam |
+| template aninhado em `confirmView` (`view-model.js`) com `` ` (cannot be undone)` `` | **reprova** (`view-model.js:231`) | passam |
+| arquivo novo `src/notes.js` com uma frase | **reprova** (`notes.js:1`) | passam |
+| arquivo `src/i18n-notes.js` (nome parecido, fora de `i18n/`) | **reprova** | passam |
+| arquivo novo em `src/i18n/notes.js` | **reprova**: `files left out` | passam |
+| frase de volta no bridge indisponível | **reprova** (`bridge.js:112`) | passam |
+| entrada da allowlist renomeada no código (`is-quiet`) | **reprova** (literal novo encontrado) | passam |
+| `content: "Some text"` e `content: attr(title)` em `styles.css` | **reprova** (trava de CSS) | passam |
+
+**Estados novos** (antigo = `pseudo-locale`/`confirm` do `8344a40`, 48 e 10 testes). As mutações M2 a M6 têm uma palavra só, em constante, fora dos sinks, e passam pelas duas travas estáticas. Só o runtime as vê.
+
+| Mutação | Pseudo novo | Pseudo antigo | `confirm` novo | `confirm` antigo |
+|---|---|---|---|---|
+| **M1, a do critic** | **4 failed** (genérico por lista e por slider × 2): `text "Some monitors only undo this from their own buttons." in <p#confirm-note.dialog-note> is neither translated nor under translate="no"` | 48 passed | **4 failed** (os 2 testes novos × 2) | 10 passed |
+| M2: `const AFTER = ' now'` somado ao corpo reescrito pelo rádio de energia | **2 failed** (energia com outro modo) | 48 passed | 2 failed (o teste de energia que já existia) | 2 failed (idem) |
+| M3: `const SLIDER_NOTE = 'Irreversible'` como nota só do slider | **2 failed** (genérico por slider) | 48 passed | **2 failed** (slider) | 10 passed |
+| M4: `statusText` = `const SILENT = 'Silent'` (`view-model.js`) | **4 failed** (códigos sem nome, genérico por slider) | 48 passed | 14 passed | 10 passed |
+| M5: rótulo de código = `` `${CODE_WORD} ${hex(code)}` `` com `'Code'` | **4 failed** | 48 passed | **2 failed** (slider) | 10 passed |
+| M6: rótulo da opção desabilitada + `const NOW = ' (now)'` | **2 failed** (preset fora da lista) | 48 passed | 14 passed | 10 passed |
+
+- A trava estática reprova M1 sozinha. Com ela desligada, M1 ainda reprova no pseudo-locale e no `confirm`, porque as camadas são independentes.
+
+### Harness
+- **Mudaram nesta iteração:**
+  - `tests/ui/i18n-html.test.mjs`: +4 testes (trava, autoteste, CSS, `RangeError`); nada removido;
+  - `tests/ui/bridge-demo.test.mjs`: `UNAVAILABLE` com `message: ''` e o import de `UNAVAILABLE_MESSAGE` removido. É a mudança de comportamento do `bdba5a2`;
+  - `tests/e2e/unavailable.spec.mjs`: a asserção do detalhe virou "oculto e vazio", pelo mesmo motivo;
+  - `tests/e2e/pseudo-locale.spec.mjs`: +5 estados e o `dialogShows`. `textsOf`/`judge`, os mínimos, `TOAST_STATES` e os testes de `loading` e da origem do app não mudaram. Só o comentário do estado indisponível ganhou "less the detail line";
+  - `tests/e2e/confirm.spec.mjs`: +2 testes.
+- **Não mudaram:** `support.mjs`, `playwright.config.mjs`, `scripts/smoke-sni.sh` e os demais specs/testes.
+- **Hash novo do harness:** `9816fd4c7b5e90a364c86de1a2154cde7c9ea750c2e02e901da43d935f9549cc`, sobre 21 arquivos, com a última mudança em `ae9dfbf`. Calculado com `cd apps/ddc-tray && sha256sum playwright.config.mjs tests/e2e/*.mjs tests/ui/*.mjs scripts/smoke-sni.sh | sha256sum | cut -c1-64`.
+
+### Verify do CONTEXT.md e do PROJECT.md
+Extraídos por script do `.md` e rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`.
+
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (151 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n paridade/HTML + scanner + **trava de frase** (o título exigido existe e passa) | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` (PID 1863822, `org.kde.StatusNotifierItem-1863822-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK`: 134 passed, 6 skipped (= screenshots), 0 failed/flaky; `n = 10`, `dr = 2`, `ps = 54`, `dd = dl = 16`, `sk = sl = 6` |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | `OK` |
+| C15 | hash do harness | **não rodado, como pedido.** O CONTEXT tem o hash da iter 10 (`c3976dbf…37e2`); o novo está acima |
+| C16 | nenhum `<select>` em `src/` | `OK` |
+| C17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | `OK` (PID 1865023, `75 -> 80` na vertical, nada na horizontal em 1,5 s, `80 -> 75`) |
+| C18 | TODO/FIXME/`todo!` em todo arquivo versionado do produto (`git grep`) | `OK` |
+| C19 | screenshots regenerados, nada pulado, byte a byte iguais | `OK` (SHA-1 dos 6 PNGs inalterados) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.78 % (gate com `main.rs`/`build.rs` excluídos e `--fail-under-lines 80`: 83.22 %, exit 0) |
+| P3 | TODO/FIXME/`todo!` em `*.rs` | `OK` |
+
+- **Protocolo dos smokes (C11, C17):** um de cada vez.
+  - Antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário. Ela foi encerrada com `pkill -x ddc-tray` (nunca `-f`), esperando o processo sair.
+  - Logo depois de cada smoke, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu.
+  - PIDs do usuário: 1697644 → 1864047 → 1865254, que é a única instância viva no fim. Nada em `~/.local` foi tocado.
+- **Porta 1420:** livre antes e depois do C13/C19.
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 / exit 0 (nenhum `.rs` mudou) |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored |
+| `node --test` (todos) | **151 pass** (eram 147), 0 fail/cancelled/skipped/todo |
+| Playwright | **134 passed** (eram 120), 6 skipped (screenshots sem `SCREENSHOTS=1`) |
+| cobertura (gate) | TOTAL lines **83.22 %** |
+| `Cargo.lock` / `package.json` / `package-lock.json` | intocados |
+
+### Desvios e observações
+- **Mudança visível de produto (`bdba5a2`):** no app real sem a API do Tauri, a linha de detalhe em inglês sumiu, e o popup mostra só o erro traduzido (e, no Linux, a dica do i2c, como antes). Não havia outra correção honesta para essa frase. Uma allowlist a deixaria passar, e trocar a frase por um token seria só driblar a trava. O caminho só acontece com o app quebrado (`withGlobalTauri` desligado), e o C14 trava isso.
+- **`DEMO_MESSAGES` em `demo-data.js`:** as mensagens mudaram de arquivo, não de texto. Elas espelham o `DdcError` do core e o Tauri, e o pedido deixa de fora da trava justamente os dados do demo. Se o orquestrador preferir as mensagens no `bridge.js`, a alternativa é uma allowlist com 9 entradas.
+- **Travas e estados além do pedido:** a trava de CSS, o `RangeError` do ícone, os estados de energia com outro modo, de códigos sem nome e do preset fora da lista, e os 2 testes de texto exato no `confirm.spec`. Todos entraram porque a varredura das variantes sem estado os achou, e cada um tem um mutante que só ele pega (tabela acima).
+- **README/CHANGELOG (`d3edb87`)** não estavam na lista. Entraram porque o DoD manual #24 pede o README fiel ao comportamento atual (a trava nova, 27 estados, o erro de indisponível só traduzido).
+- **Limite residual conhecido:** um literal de uma palavra só, fora dos sinks, num caminho que nenhum estado renderiza, ainda passaria. A varredura desta iteração não achou nenhum caminho de texto sem estado em `app.js`, `view-model.js` ou `dropdown.js`. A trava de frase é por literal. Montar uma frase em runtime com palavras soltas (`['Some', 'words'].join(' ')`) não é pego estaticamente, só pelo pseudo-locale nos estados que ele visita.
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
