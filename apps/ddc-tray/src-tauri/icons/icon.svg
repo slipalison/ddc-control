@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!--
+    DDC Control app and tray icon: a monitor whose screen shows a brightness sun.
+    Vivid screen + mid-tone stand stay legible on light and dark tray bars.
+    Regenerate the raster set from apps/ddc-tray/src-tauri:
+      npx -y @tauri-apps/cli@2.12.0 icon icons/icon.svg -o icons
+      magick -background none -density 1536 icons/icon.svg -resize 64x64 -depth 8 -strip PNG32:icons/tray.png
+  -->
+  <defs>
+    <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.5" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.24"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="stand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8A97AE"/>
+      <stop offset="1" stop-color="#5E6B84"/>
+    </linearGradient>
+  </defs>
+  <path d="M108 184h40l8 30h-56z" fill="url(#stand)"/>
+  <rect x="60" y="206" width="136" height="26" rx="13" fill="url(#stand)"/>
+  <rect x="12" y="24" width="232" height="168" rx="28" fill="url(#screen)"/>
+  <rect x="12" y="24" width="232" height="168" rx="28" fill="url(#glass)"/>
+  <circle cx="128" cy="108" r="29" fill="#FFFFFF"/>
+  <path d="M174 108L188 108M160.5 140.5L170.4 150.4M128 154L128 168M95.5 140.5L85.6 150.4M82 108L68 108M95.5 75.5L85.6 65.6M128 62L128 48M160.5 75.5L170.4 65.6" stroke="#FFFFFF" stroke-width="17" stroke-linecap="round" fill="none"/>
+</svg>

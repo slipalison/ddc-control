@@ -1,0 +1,33 @@
+[package]
+name = "ddc-tray"
+description = "System-tray driving adapter of ddc-control: a popup to adjust monitor brightness, contrast, volume, input, colour preset and power over DDC/CI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ddc_tray"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ddc-tray"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = "2.7.0"
+
+# Declared here rather than in [workspace.dependencies] so serde and the
+# Tauri runtime stay out of the hexagon's crates (D-2): only this driving
+# adapter serializes DTOs and talks to the webview (D-2026-09-26-tray-app-2).
+[dependencies]
+ddc-core = { workspace = true }
+ddc-adapters = { workspace = true }
+tauri = { version = "2.12.0", features = ["tray-icon", "image-png"] }
+tauri-plugin-positioner = { version = "2.4.0", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2.5.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sys-locale = "0.3.2"
+
+[lints]
+workspace = true
