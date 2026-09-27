@@ -19,13 +19,17 @@ export function scenarioName(search) {
 }
 
 /**
- * The commands `?fail=` can make time out, by the word that names each:
- * `fail=write`, `fail=features`, `fail=probe`, or a comma-separated list.
+ * The commands `?fail=` can make fail, by the word that names each:
+ * `fail=write`, `fail=features`, `fail=probe` (they time out), `fail=events`
+ * (listening to the tray's events, Tauri's `plugin:event|listen`) and
+ * `fail=hide` (they are refused), or a comma-separated list.
  */
 export const FAILURES = Object.freeze({
   write: 'set_feature',
   features: 'load_features',
   probe: 'probe_features',
+  events: 'plugin:event|listen',
+  hide: 'hide_popup',
 });
 
 /**

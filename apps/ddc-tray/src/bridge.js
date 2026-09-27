@@ -5,7 +5,9 @@
 // does to the UI: a dangerous write needs `confirmed`, a value must be one
 // the feature accepts, and the answer is the value read back. `&fail=` makes
 // writes, "all settings" or the probe time out, as the backend does when a
-// monitor stops answering, so the popup's failures can be seen too.
+// monitor stops answering, and has hiding the popup or listening to the
+// tray's events refused, as Tauri refuses a command no capability grants,
+// so the popup's failures can be seen too.
 //
 // The demo runs only on a local dev server (D-2026-09-27-tray-app-6).
 // Inside the app (`tauri://localhost`, `http://tauri.localhost`) a missing
@@ -31,6 +33,16 @@ export const UNAVAILABLE_MESSAGE = 'the Tauri API is missing from this window, s
 
 /** What the core answers when the monitor does not answer (`DdcError::Timeout`). */
 const TIMEOUT_MESSAGE = 'monitor did not respond in time';
+
+/** The command behind `listen` in Tauri's own script. */
+const EVENT_LISTEN = 'plugin:event|listen';
+
+// How Tauri refuses a command no capability grants in a release build
+// (`webview/mod.rs` of tauri 2.12): a string, which the bridge reads as
+// kind `unknown`.
+function refusedByTauri(command) {
+  return `Command ${command} not allowed by ACL`;
+}
 
 /**
  * The bridge for `win`: Tauri's when it is there; without `__TAURI__`, the
@@ -84,6 +96,7 @@ function api(mode, invoke, listen) {
   });
 }
 
+// Listening is a command too (`plugin:event|listen`), refused as any other.
 function tauriBridge(tauri) {
   const invoke = async (command, args) => {
     try {
@@ -92,7 +105,13 @@ function tauriBridge(tauri) {
       throw normalizeError(error);
     }
   };
-  const listen = (event, handler) => tauri.event.listen(event, (message) => handler(message.payload));
+  const listen = async (event, handler) => {
+    try {
+      return await tauri.event.listen(event, (message) => handler(message.payload));
+    } catch (error) {
+      throw normalizeError(error);
+    }
+  };
   return api('tauri', invoke, listen);
 }
 
@@ -133,6 +152,7 @@ function demoBridge(win, latencyMs, timers) {
     },
     set_feature: (args) => write(monitors, demo.writes, args, fails),
     hide_popup: () => {
+      refuseIfFailing(fails, 'hide_popup');
       demo.hides += 1;
       return null;
     },
@@ -150,6 +170,7 @@ function demoBridge(win, latencyMs, timers) {
   };
 
   const listen = async (event, handler) => {
+    refuseIfFailing(fails, EVENT_LISTEN);
     const handlersOf = listeners.get(event) ?? new Set();
     listeners.set(event, handlersOf);
     handlersOf.add(handler);
@@ -208,6 +229,13 @@ function writableEntry(monitor, code) {
 // in time: nothing is read and nothing changes.
 function timeOutIfFailing(fails, command) {
   if (fails.has(command)) throw uiError('timeout', TIMEOUT_MESSAGE);
+}
+
+// A command of the window `?fail=` names (hiding it, listening to the
+// tray) is refused before it runs, and reaches the popup as the app's
+// bridge hands it such a refusal.
+function refuseIfFailing(fails, command) {
+  if (fails.has(command)) throw normalizeError(refusedByTauri(command));
 }
 
 function validate(entry, value) {

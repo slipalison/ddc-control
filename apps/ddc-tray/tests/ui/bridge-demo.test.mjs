@@ -32,6 +32,14 @@ const TIMEOUT = Object.freeze({
   message: /#\[error\("([^"]+)"\)\]\s*Timeout,/.exec(CORE_ERRORS)?.[1],
 });
 
+// What Tauri 2.12 rejects a command no capability grants with, in a
+// release build (`webview/mod.rs`): a string, by the command it refused.
+// Listening to an event is the command `plugin:event|listen`.
+const TAURI_REFUSALS = Object.freeze({
+  hide_popup: 'Command hide_popup not allowed by ACL',
+  'plugin:event|listen': 'Command plugin:event|listen not allowed by ACL',
+});
+
 // Where the Playwright suite serves the popup: the only kind of page the
 // demo runs on (D-2026-09-27-tray-app-6).
 const DEV_SERVER = 'http://localhost:1420/';
@@ -85,6 +93,7 @@ test('outside a local dev server the bridge never falls back to the demo', async
     'http://tauri.localhost/?demo=two-monitors',
     'tauri://localhost/?demo=rtk&fail=write',
     'http://tauri.localhost/?fail=features,probe',
+    'tauri://localhost/?fail=events,hide',
   ];
 
   for (const href of pages) {
@@ -143,7 +152,7 @@ test('a __TAURI__ without invoke on a dev server is not a demo either', async ()
 });
 
 test('the unavailable bridge accepts listeners that never hear anything', async () => {
-  const bridge = createBridge(windowAt('tauri://localhost/'));
+  const bridge = createBridge(windowAt('tauri://localhost/?fail=events'));
   const heard = [];
 
   const unlisten = await bridge.onPanelChanged((payload) => heard.push(payload));
@@ -261,6 +270,8 @@ test('?fail= names the commands the demo fails; an unknown word is ignored', () 
     write: 'set_feature',
     features: 'load_features',
     probe: 'probe_features',
+    events: 'plugin:event|listen',
+    hide: 'hide_popup',
   });
   const failing = (search) => [...failingCommands(search)].sort();
 
@@ -268,7 +279,8 @@ test('?fail= names the commands the demo fails; an unknown word is ignored', () 
   assert.deepEqual(failing('?fail=features,probe'), ['load_features', 'probe_features']);
   assert.deepEqual(failing('?fail=probe&fail=write&pseudo=1'), ['probe_features', 'set_feature']);
   assert.deepEqual(failing('?fail= write , features'), ['load_features', 'set_feature']);
-  assert.deepEqual(failing('?fail=panel,hide,nope,,constructor'), []);
+  assert.deepEqual(failing('?fail=events,hide'), ['hide_popup', 'plugin:event|listen']);
+  assert.deepEqual(failing('?fail=panel,hidden,listen,hide_popup,nope,,constructor'), []);
   assert.deepEqual(failing('?demo=rtk'), []);
   assert.deepEqual(failing(undefined), []);
 });
@@ -325,6 +337,64 @@ test('a failing command still looks for its monitor first', async () => {
     message: 'monitor gone not found',
   });
   assert.deepEqual(await rejection(bridge.probeFeatures(DELL)), TIMEOUT);
+});
+
+test('fail=events: listening is refused as Tauri refuses it, and every command still answers', async () => {
+  const { win, bridge } = demo('?demo=rtk&fail=events');
+  const refused = { kind: 'unknown', message: TAURI_REFUSALS['plugin:event|listen'] };
+  const heard = [];
+
+  assert.deepEqual(await rejection(bridge.onPopupShown(() => heard.push('shown'))), refused);
+  assert.deepEqual(await rejection(bridge.onPanelChanged(() => heard.push('changed'))), refused);
+  win.__ddcDemo.emit('popup-shown');
+  win.__ddcDemo.emit('panel-changed', { monitorId: RTK });
+
+  assert.deepEqual(heard, []);
+  assert.equal((await bridge.loadPanel(RTK)).monitorId, RTK);
+  assert.equal((await bridge.loadFeatures(RTK)).length, 7);
+  assert.deepEqual(await bridge.setFeature(RTK, BRIGHTNESS, 40), { current: 40, max: 100 });
+  assert.equal(await bridge.hidePopup(), null);
+  assert.equal(win.__ddcDemo.hides, 1);
+});
+
+test('fail=hide: hiding the popup is refused as Tauri refuses it, and nothing else fails', async () => {
+  const { win, bridge } = demo('?demo=rtk&fail=hide');
+  const heard = [];
+
+  assert.deepEqual(await rejection(bridge.hidePopup()), {
+    kind: 'unknown',
+    message: TAURI_REFUSALS.hide_popup,
+  });
+  assert.equal(win.__ddcDemo.hides, 0);
+  await bridge.onPopupShown(() => heard.push('shown'));
+  win.__ddcDemo.emit('popup-shown');
+  assert.deepEqual(heard, ['shown']);
+  assert.equal((await bridge.loadPanel(RTK)).monitorId, RTK);
+  assert.deepEqual(await bridge.setFeature(RTK, BRIGHTNESS, 40), { current: 40, max: 100 });
+});
+
+test("the demo's refusals are what the app's bridge makes of Tauri's", async () => {
+  const refuse = async (command) => {
+    throw TAURI_REFUSALS[command];
+  };
+  const app = createBridge({
+    __TAURI__: {
+      core: { invoke: refuse },
+      event: { listen: () => refuse('plugin:event|listen') },
+    },
+  });
+  const { bridge } = demo('?demo=rtk&fail=events,hide');
+
+  assert.equal(app.mode, 'tauri');
+  assert.deepEqual(await rejection(bridge.hidePopup()), await rejection(app.hidePopup()));
+  assert.deepEqual(
+    await rejection(bridge.onPopupShown(() => {})),
+    await rejection(app.onPopupShown(() => {})),
+  );
+  assert.deepEqual(
+    await rejection(bridge.onPanelChanged(() => {})),
+    await rejection(app.onPanelChanged(() => {})),
+  );
 });
 
 test('without fail=, a probed code that gave no answer times out as the core does', async () => {
@@ -536,6 +606,33 @@ test('Tauri rejections become { kind, message }', async () => {
     message: 'command set_feature not allowed',
   });
   assert.deepEqual(normalizeError(new Error('boom')), { kind: 'unknown', message: 'boom' });
+});
+
+test('a listen Tauri refuses becomes { kind, message } too', async () => {
+  const failures = [
+    { kind: 'transport', message: 'the event loop is gone' },
+    TAURI_REFUSALS['plugin:event|listen'],
+  ];
+  const win = {
+    __TAURI__: {
+      core: { invoke: async () => null },
+      event: {
+        listen: async () => {
+          throw failures.shift();
+        },
+      },
+    },
+  };
+  const bridge = createBridge(win);
+
+  assert.deepEqual(await rejection(bridge.onPopupShown(() => {})), {
+    kind: 'transport',
+    message: 'the event loop is gone',
+  });
+  assert.deepEqual(await rejection(bridge.onPanelChanged(() => {})), {
+    kind: 'unknown',
+    message: 'Command plugin:event|listen not allowed by ACL',
+  });
 });
 
 test('Tauri events hand their payload to the listener', async () => {
