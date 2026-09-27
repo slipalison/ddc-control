@@ -146,23 +146,45 @@ Needs a desktop session whose tray is a StatusNotifierItem host (KDE Plasma, or 
 ```sh
 cargo build -p ddc-tray --release --locked
 bash apps/ddc-tray/scripts/smoke-sni.sh --activate target/release/ddc-tray
+bash apps/ddc-tray/scripts/smoke-sni.sh --fake --scroll target/release/ddc-tray
 ```
 
-Expected: exit 0 a few seconds later, with
+Expected: exit 0 each, a few seconds later, with
 
 ```text
 smoke-sni: started target/release/ddc-tray as PID <pid>
 smoke-sni: org.kde.StatusNotifierWatcher lists org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem, owned by PID <pid>
 smoke-sni: called org.kde.StatusNotifierItem.Activate on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
 smoke-sni: the app printed 'ddc-tray: popup shown' after Activate
-smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later, showed its popup on Activate and never panicked
+smoke-sni: the popup was still shown 1.5 s later
+smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked
 ```
 
-The script lists the watcher's items, starts the app with `DDC_TRAY_DEBUG=1`, and waits up to 15 s for a new item whose D-Bus connection belongs to the app's own PID (`GetConnectionUnixProcessID`); the app must then still be alive 2 s later, with no `panicked` on its stderr. With `--activate` it then calls `Activate` on that item, as the tray does on a left click, and requires `ddc-tray: popup shown` on the app's stderr within 5 s: the popup appears on screen for a moment. Without `--activate` it stops after the registration checks. It always stops the app on the way out (SIGTERM, SIGKILL after 5 s). Nothing is written to any monitor: the popup only reads. On Linux the app replaces itself at launch to turn WebKitGTK's DMA-BUF renderer off (D-2026-09-26-tray-app-10); the PID stays the same, so the check still holds.
+and
 
-Any other outcome is exit 1 with a `smoke-sni: FAIL:` line and the end of the app's stderr: no watcher on the session bus; the app exited before registering (most often another instance was already running); no item owned by that PID within 15 s; the app died within 2 s of registering; the item did not answer `Activate` (an AppIndicator item, as the tray had until iteration 3, has no such method: `busctl` says "No such method", "Método inexistente" in Portuguese); no `popup shown` line within 5 s of it; or `panicked` on its stderr.
+```text
+smoke-sni: started target/release/ddc-tray as PID <pid> with DDC_TRAY_FAKE=1
+smoke-sni: org.kde.StatusNotifierWatcher lists org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem, owned by PID <pid>
+smoke-sni: the app serves the simulated monitor
+smoke-sni: called org.kde.StatusNotifierItem.Scroll 120 Vertical on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: the app printed 'ddc-tray: brightness 75 -> 80' after a vertical Scroll of +120
+smoke-sni: called org.kde.StatusNotifierItem.Scroll 120 Horizontal on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: a horizontal Scroll wrote nothing within 1.5 s
+smoke-sni: called org.kde.StatusNotifierItem.Scroll -120 Vertical on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: the app printed 'ddc-tray: brightness 80 -> 75' after a vertical Scroll of -120
+smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later, stepped the brightness on a vertical Scroll only and never panicked
+```
 
-A SIGTERM leaves the app's KWin placement script loaded (the app unloads it only when it quits through **Quit**); it only matches the popup of that dead process, and the next start replaces it. To remove it by hand: `busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting unloadScript s ddc-tray-anchor`.
+The script lists the watcher's items, starts the app with `DDC_TRAY_DEBUG=1`, and waits up to 15 s for a new item whose D-Bus connection belongs to the app's own PID (`GetConnectionUnixProcessID`); the app must then still be alive 2 s later, with no `panicked` on its stderr.
+
+- `--activate` then calls `Activate` on that item, as the tray does on a left click, and requires `ddc-tray: popup shown` on the app's stderr within 5 s and no `ddc-tray: popup hidden` in the 1.5 s after it: the popup appears on screen for a moment. It only reads.
+- `--fake` starts the app with `DDC_TRAY_FAKE=1`: a simulated RTK in memory (brightness 75 of 100), no real monitor touched, which the app must announce on stderr.
+- `--scroll`, only with `--fake` (it writes, and the script refuses it otherwise), calls `Scroll` on the item as the host does for the wheel: one vertical notch (+120) must print `ddc-tray: brightness 75 -> 80` within 5 s, one horizontal notch no brightness line within 1.5 s, and one notch down (−120) `ddc-tray: brightness 80 -> 75`.
+- Without options it stops after the registration checks. It always stops the app on the way out (SIGTERM, SIGKILL after 5 s). On Linux the app replaces itself at launch to turn WebKitGTK's DMA-BUF renderer off (D-2026-09-26-tray-app-10); the PID stays the same, so the check still holds.
+
+Any other outcome is exit 1 with a `smoke-sni: FAIL:` line and the end of the app's stderr: no watcher on the session bus; the app exited before registering (most often another instance was already running); no item owned by that PID within 15 s; the app died within 2 s of registering; the item did not answer `Activate` or `Scroll` (an AppIndicator item, as the tray had until iteration 3, has no such method: `busctl` says "No such method", "Método inexistente" in Portuguese); no `popup shown` line within 5 s of `Activate`, or `popup hidden` within 1.5 s of it; no simulated-monitor notice with `--fake`; a missing brightness line after a vertical notch, or one after a horizontal notch; or `panicked` on its stderr.
+
+The SIGTERM that stops the app quits it as **Quit** does, so its KWin placement script is unloaded (`popup placement unloaded from KWin` on its stderr). Only a SIGKILL or a crash leaves it loaded; it only matches the popup of that dead process, and the next start replaces it. To check: `busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting isScriptLoaded s ddc-tray-anchor` (`b false` once no `ddc-tray` runs); to remove one by hand: the same call with `unloadScript`.
 
 ### 7. Tray hardware test
 
