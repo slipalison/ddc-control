@@ -1,7 +1,7 @@
 ---
 phase_slug: tray-app
 phase_position: 5
-iter: 1
+iter: 2
 total_resets: 1
 status: running
 max_iter_per_round: 5
@@ -24,3 +24,4 @@ created_at: 2026-09-26T21:35:52-03:00
 --- AUTO-RESET 1 (iter cap 5 reached; critic still finds objective gaps, each round smaller: 10 → 13 → 8 → 2 → 2 rows; /jdi-issue takes Continue automatically) at 2026-09-27T03:21:40-03:00 ---
 - iter 6 (round 2, 1): APPROVED_PENDING_MANUAL (1 warn: W-1), hash=5f641c4c8c64, commit=b28784d, ts=2026-09-27T03:57:31-03:00
 - iter 6 aggregate after DoD critic: BLOCKED (critic: 2 rows — literal via const bypasses static scanner; test harness weakenable), ts=2026-09-27T03:57:31-03:00
+- iter 7 (round 2, 2): APPROVED_PENDING_MANUAL (3 warns: W-1 audit, W-2 pseudo check not strict, W-3 copy space), hash=ad5affd909b4, commit=5919fb0, ts=2026-09-27T04:37:48-03:00 — critic não rodado: W-2 era a lacuna que ele acharia; rodada de warnings (iter 8) disparada antes

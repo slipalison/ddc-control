@@ -2,113 +2,131 @@
 
 **Verdict:** APPROVED_PENDING_MANUAL
 
-Iteração 6 (rodada 2, depois do AUTO-RESET 1), commits `31150bd..b28784d`. Nesta iteração não mudou nenhum `.rs`, `Cargo.*` ou `package*.json`: entraram 2 arquivos de teste (`tests/e2e/slider.spec.mjs`, `tests/ui/i18n-html.test.mjs`), README, CHANGELOG e SUMMARY. Todos os gates rodaram do zero em 2026-09-27, em Linux (Fedora 44, KDE Wayland). Cada `Verify:` foi extraído por script do `.md` e rodado literalmente com `bash`, a partir da raiz.
+Iteração 7 (rodada 2), re-verificação completa dos gates 1-8 sobre `HEAD` `5919fb0` (commits `d32319f..e5281a8` + `5919fb0`). Revisão read-only: nenhum arquivo do repo foi alterado além deste REVIEW.md. Os experimentos de mutação rodaram numa cópia descartável de `apps/ddc-tray` no scratchpad, já apagada.
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
 | Build | PASS | `cargo build --workspace --locked` exit 0. Cross-check de `ddc-core`/`ddc-adapters`/`ddc-cli` em `x86_64-unknown-linux-gnu` exit 0 e em `x86_64-pc-windows-msvc` exit 0. O tray fica fora do cross-check Windows (D-2026-09-26-tray-app-9). |
-| Tests | PASS | 383 passed, 0 failed, 9 ignored (hardware: 7 `real_monitor` + 2 `rtk_qhd_hdr`). Igual à iter 5. |
-| Coverage | PASS | TOTAL Lines **83.22%** (gate: `--fail-under-lines 80`, `main.rs`/`build.rs` excluídos), exit 0. O literal do PROJECT (`cargo llvm-cov --workspace --summary-only`, sem exclusão) dá 82.78%. |
-| Lint | PASS | `cargo fmt --all --check` exit 0. `cargo clippy --workspace --all-targets --locked -- -D warnings` exit 0. Nenhum `#[allow(` fora de testes. |
-| Hexagonal/Safety/Hygiene | WARN | 5.1–5.9 e 5.11 limpos (detalhes abaixo). 5.10: W-1 (`cargo audit`), conhecido e adiado para `ci-crossbuild`. |
-| Consistency | PASS | Commits `test`/`docs(tray-app)`, sem misturar código e `.jdi/`. Os arquivos novos estão nos globs do PLAN (`tests/e2e/*.spec.mjs`, `tests/ui/*.test.mjs`). D-1, D-2 e D-tray-app-2/-5/-6/-8 conferidos, sem violação. |
-| UI Validation | PASS | Suíte Playwright do app (D-2026-09-26-tray-app-8): **60 passed**, 6 skipped (só screenshots sem `SCREENSHOTS=1`), 0 failed/flaky. Os 10 `critical_paths`×tema com ✓, o dropdown completo e `dragging the brightness slider…` ✓ nos 2 temas. |
-| DoD | PASS_PENDING_MANUAL | 21/21 auto PASS, 2 manuais pendentes |
-
-### Gate 5 em detalhe
-- **5.1 (deps do core):** sem saída. `ddc-core` só depende de `thiserror`.
-- **5.2 (I/O e cfg de plataforma no core):** sem saída.
-- **5.3:** `impl MonitorBackend` no core, sem saída. Nenhum `pub trait` em adapters/CLI/apps.
-- **5.4:** sem saída nos dois greps. O adapter real só é construído em `apps/ddc-tray/src-tauri/src/lib.rs:77` (composition root).
-- **5.5:** o único hit é `lib.rs:146`, e é doc comment (`/// … takes \`unsafe\` (std::env::set_var)`), não código. Nenhum `unsafe {` em `ddc-adapters`. Todas as raízes de crate têm `#![forbid(unsafe_code)]`.
-- **5.6:** os hits de `unwrap`/`expect` estão todos em `#[cfg(test)] mod tests`: `kwin_placement.rs` depois de `:195`, `lib.rs` depois de `:239`, `stop_signals.rs` depois de `:82`. `worker.rs:141` é doc comment.
-- **5.7 (monitor-write safety):**
-  - A classificação de risco existe (`feature.rs:33`, `:156` — código desconhecido cai em `Dangerous`).
-  - Nenhum `Confirm::Yes` fora de `ddc-cli`/`src-tauri/src/commands*`.
-  - Os 7 testes de `real_monitor.rs` são `#[ignore]` e gated por `DDC_HW_TESTS`. Na suíte do tray, `DdcHiMonitorBackend` só aparece em `lib.rs`.
-- **5.8 (paths de dispositivo no core):** sem saída.
-- **5.9 (comandos Tauri bloqueantes):** sem saída. Todo `#[tauri::command]` é `async fn`.
-- **5.10:** ver W-1.
-- **5.11 (segredos e TODO/FIXME):** sem saída nos dois greps.
+| Tests | PASS | 383 passed, 0 failed, 9 ignored (hardware), igual à iter 6: nenhum `.rs` mudou na iter 7. `node --test`: 135 pass, 0 fail/cancelled/skipped/todo. |
+| Coverage | PASS | 83.22% lines (linha TOTAL, `main.rs`/`build.rs` excluídos, `--fail-under-lines 80` exit 0). Literal do PROJECT (sem exclusões): 82.78%. |
+| Lint | PASS | `cargo fmt --all --check` exit 0; `cargo clippy --workspace --all-targets --locked -- -D warnings` exit 0; nenhum `#[allow(...)]` fora de testes. |
+| Hexagonal/Safety/Hygiene | WARN | 5.1-5.9 e 5.11 limpos. 5.10 = W-1 (conhecido, fica com a `ci-crossbuild`). |
+| Consistency | PASS | 6 commits `(tray-app)` com tipos coerentes (feat/test/docs). Nenhum `.rs`, `Cargo.lock` ou `package*.json` tocado. D-1, D-2 e D-2026-09-26-tray-app-2/-6/-7 e D-2026-09-27-tray-app-6/-7 conformes no produto. |
+| UI Validation | PASS | Playwright: 88 passed, 6 skipped (= screenshots sem `SCREENSHOTS=1`), 0 failed/flaky. 10/10 `critical_paths` × tema, dropdown 16/16, `dr = 2`, `ps = 26` (13 estados × 2 temas). |
+| DoD | PASS_PENDING_MANUAL | 22/22 auto, 2 manual pending |
 
 ## Blockers
 Nenhum.
 
 ## Warnings
-- **W-1 (5.10, conhecido, adiado para `ci-crossbuild` pelo orquestrador):** `cargo audit` acusa 1 vulnerabilidade e 3 avisos permitidos. `Cargo.lock` não mudou nesta iteração.
-  - **RUSTSEC-2018-0005:** `serde_yaml 0.7.5`, puxado por `mccs-db 0.1.3` ← `ddc-hi 0.4.1`. Vem da phase `ddc-backends`.
-  - **RUSTSEC-2024-0429 (unsound):** `glib 0.18.5`, puxado por `webkit2gtk`/Tauri. Entrou nesta phase.
-  - **Unmaintained:** `proc-macro-error` (RUSTSEC-2024-0370) e `yaml-rust` (RUSTSEC-2024-0320).
 
-### Observações (não bloqueiam, sem ação exigida)
-- **Relógio parado no teste de arraste (avaliação pedida pelo orquestrador): o teste NÃO ficou oco.**
-  - **Por que o relógio falso vale para o produto:** `debounce.js:8-11` e `bridge.js:21` resolvem `globalThis.setTimeout` na hora da chamada, então o `page.clock.install()` feito depois do load controla de fato o debounce e a latência do demo.
-  - **Mutações reproduzidas pelo reviewer** numa cópia isolada de `apps/ddc-tray` no scratchpad (o repositório não foi tocado). Controle: 4/4 ✓.
-    - **M1**, a mutação do critic: `queueWrite(entry, value, { now: true })` em `app.js:508`. Resultado: **4 ✘**. `dragging…` falha em `writes taken at each input`.
-    - **M2**, throttle: sem o `stopTimer(state)` do `push` em `debounce.js:82`. Resultado: **4 ✘**, com a mesma asserção.
-    - **M3**, extra: sem `writes.flush` no `change` (`app.js:513`), ou seja, a escrita só sai quando o debounce vence, não no release. Resultado: `dragging…` **2 ✘** (o `expect.poll` da escrita única).
-  - **O que o relógio parado mudou nas asserções:**
-    - "≥ 300 ms" e "pausa < `DEBOUNCE_MS`" agora são medidas no relógio falso, que o próprio teste avança em 20 ms por passo. Viraram verificações de sanidade da instrumentação, deterministas por construção.
-    - Quem prova o critério são `writes taken at each input` = 0, `writesAtRelease` = 0, a escrita única com o último valor e `landedAt − releasedAt === DEMO_LATENCY_MS`.
-    - Com relógio falso, o M3 cai já no `poll`. Com relógio real, só cairia na asserção de latência. A troca deixou o teste mais estrito, não menos.
-- **Scanner de texto literal (`i18n-html.test.mjs`, teste 8):** o reviewer aplicou 3 mutações novas na cópia isolada, e cada uma derrubou exatamente o teste 8 (`# fail 1`).
-  - 3º argumento literal em `element()`;
-  - `pill.title = \`Level of ${…}\``;
-  - `setAttribute('aria-label', 'Value')`.
-- **`THUMB_PX = 18` em `slider.spec.mjs:26`** repete `width: 18px` de `styles.css:544`. São só 2 lugares, com comentário apontando a origem, então não chega a ser achado de DRY (a regra pede 3+).
-- **Para o `/jdi-ship`:** `origin/main` está em `2628f8c` (`ddc-backends`). `phase/tray-app` está empilhada sobre `full-osd-control`, ainda não mergeada, com 88 commits à frente de `origin/main`. Como o usuário faz squash-merge, a ordem ou o rebase das PRs precisa ser tratada no ship.
-- **Instância do usuário:** encerrada com `pkill -x ddc-tray` antes de cada smoke (C11, C16) e reaberta com `setsid -f /home/slipalison/.local/bin/ddc-tray` logo depois. PIDs: 1110145 → 1131071 → 1131592, que é a única instância viva no fim. A porta 1420 estava livre antes e depois de C13/C18. Nenhum teste `#[ignore]` rodou, e nada foi escrito no monitor real (C11 usa o backend real só com leituras; C16 usa o monitor simulado).
+- **W-1 (5.10, herdado, fica com a `ci-crossbuild`):** `cargo audit` lista 1 vulnerabilidade e 3 avisos.
+  - Vulnerabilidade: RUSTSEC-2018-0005 (`serde_yaml` 0.7.5).
+  - Avisos: RUSTSEC-2024-0370 (`proc-macro-error`, sem manutenção), RUSTSEC-2024-0320 (`yaml-rust`, sem manutenção), RUSTSEC-2024-0429 (`glib` 0.18.5, unsound).
+  - Nenhuma dependência nova entrou na iter 7.
+
+- **W-2 (Gate 7 / DoD #13, D-2026-09-27-tray-app-7; lacuna só do harness, o produto está limpo):** o check do pseudo-locale aceita um literal colado a uma tradução no mesmo nó de texto ou atributo.
+  - **Onde:** `apps/ddc-tray/tests/e2e/pseudo-locale.spec.mjs:174` (`const marked = value.includes(mark);`) e `:178`. A regra só exige que o texto *contenha* `⟦`. Não exige que todo texto fique entre marcadores.
+  - **Reprodução** (cópia descartável, repo intocado):
+    - Mutação: `const PROBE_SUFFIX = ' (nothing else to try)';` e `t('more.probeEmpty') + PROBE_SUFFIX` em `showProbe` (`src/app.js:857`).
+    - A página mostra `⟦Nenhum ajuste oculto respondeu.⟧ (nothing else to try)`: um literal em inglês no popup pt-BR.
+    - Resultado: `i18n-html.test.mjs` 15/15 pass (o scanner estático não segue a `const`), `pseudo-locale.spec.mjs` 28/28 pass e suíte inteira 88 passed, 6 skipped. Ou seja, as condições do Verify do C13 continuam satisfeitas.
+  - **Isso contradiz o rationale da D-7:** "qualquer literal hardcoded, venha de `const`, helper ou template, aparece sem marcador e reprova".
+  - **Uma variante estrita é viável sem mexer no produto.** Ela remove os segmentos `⟦…⟧` balanceados (inclusive os aninhados) e reprova se sobrar `\p{L}` fora de dado. Resultados:
+    - no produto atual: 28/28 pass;
+    - no mutante: 2 failed, com `has text outside the marks: " (nothing else to try)"`.
+  - **Limite de desenho, só registrado:** um literal colado a um DADO sob `translate="no"` (ex.: nome do monitor + sufixo via `const`) não é pego por nenhum check. A D-7 aceita nós de dado sem verificar o conteúdo.
+  - **Por que é WARN e não BLOCK:** nenhum Verify falha e o produto não viola a D-6. Mas a linha #13 do DoD está parcialmente oca no subcritério "vem de tradução".
+  - **Correção:** exige mudar o spec e refixar o hash do harness (C15). Pela D-7, isso é ato do orquestrador.
+
+- **W-3 (menor, texto da dica i2c):** o espaço entre "Setup guide:"/"Guia de configuração:" e o caminho existe só no visual (`margin-inline-start: 0.3em` em `apps/ddc-tray/src/styles.css:1118`).
+  - `app.js:389` monta `replaceChildren(texto, <code>)` sem nó de espaço. O `innerText` e o texto copiado ficam `…Guia de configuração:docs/linux-ddc-setup.md`.
+  - A árvore de acessibilidade separa `text` e `code`, então leitor de tela não é afetado.
+  - Sugestão: um espaço real, seja no fim do texto do locale, seja num nó `' '`. O scanner e o spec pseudo ignoram texto sem letras.
+
+## Avaliações pedidas pelo orquestrador
+
+**Mudança de texto da dica i2c (en/pt-BR): correta.**
+- `hint.i2c` perdeu o placeholder `{doc}` nos dois locales, o que mantém a paridade de placeholders (C7 OK).
+- Agora termina em "Setup guide:" / "Guia de configuração:", e o caminho vem depois, em `<code translate="no">`.
+- Isso resolve o `.⟧` órfão que a frase partida gerava sob pseudo.
+- As duas traduções são paralelas e naturais. `i2c-dev` e `/dev/i2c-*` continuam dentro da tradução, como identificadores técnicos, o que é aceitável.
+- A dica só aparece nos estados vazio e erro no Linux, fora dos screenshots versionados. Os 6 PNGs têm SHA-1 idêntico antes e depois do C19.
+- Único reparo: W-3.
+
+**`translate="no"` só em dados, nunca em traduções: confirmado.**
+
+Lendo o diff:
+- `markVerbatim(..., true)` / `verbatim(...)` só são aplicados a:
+  - nome do monitor no cabeçalho, só quando há monitor (o título do app segue traduzido);
+  - opções do seletor de monitores, exceto a `header.silent`, que é `t()`;
+  - nomes de valor NC sem chave `value.*` (`optionLabel` → `verbatim: true` só quando `translateOr(..., null)` devolve `null`);
+  - nome MCCS do core sem alias traduzido (`labelVerbatim`);
+  - códigos VCP (`view.hex`);
+  - `#message-detail`, a mensagem técnica do backend, dado do contrato `{kind,message}`;
+  - o caminho do guia.
+- `format.unnamed`, `format.code`, `format.percent`, `header.silent` e `confirm.*` continuam `translate` normais, com marcador.
+- O único dado que não vem do core/contrato é o caminho `docs/linux-ddc-setup.md` (`I2C_DOC`). É nome de arquivo, que por definição não se traduz, e a spec HTML prevê `translate="no"` para esse caso.
+
+Em runtime:
+- O spec reprova tradução sob `translate="no"` (check inverso). Ele passa em 26/26.
+- A mutação M4 do SUMMARY (`<body translate="no">`) reprova 26.
+- O pseudo só liga com `bridge.mode === 'demo'` (`app.js:48`). O teste da origem do app (`tauri.localhost`) prova 0 textos marcados.
 
 ## DoD Checklist (gate 8)
 
+Cada `Verify:` foi extraído do `.md` por script, conferido byte a byte contra o CONTEXT (diff vazio nos 19 Auto) e rodado literalmente com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`. Os 2 itens Manual do CONTEXT repetem os do PROJECT (`Source: PROJECT`) e aparecem uma vez só.
+
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | fmt + clippy `-D warnings` limpos incluindo `ddc-tray` | CONTEXT | Auto | PASS | `OK` (exit 0) |
+| 1 | fmt + clippy `-D warnings` limpos com `ddc-tray` | CONTEXT | Auto | PASS | `OK` |
 | 2 | `ddc-tray` compila em release no Linux | CONTEXT | Auto | PASS | `OK` |
-| 3 | só o composition root constrói `DdcHiMonitorBackend` (1×) | CONTEXT | Auto | PASS | `OK` (`lib.rs:77`) |
-| 4 | `panel.rs` Rust puro sobre `MonitorControl` | CONTEXT | Auto | PASS | `OK` |
-| 5 | `#![forbid(unsafe_code)]` em `src-tauri`, nenhum `unsafe` | CONTEXT | Auto | PASS | `OK` |
-| 6 | `node --test` (debounce com rajada > janela, view-model, bridge demo…) | CONTEXT | Auto | PASS | `OK`: 131 pass, 0 fail/cancelled/skipped/todo, nenhum teste em `src/` |
-| 7 | paridade i18n + nenhum texto hardcoded (inclui `app.js passes no literal text to element() or setText()`) | CONTEXT | Auto | PASS | `OK`: `i18n-html` 15/15, `ok 8` presente |
+| 3 | Só a composition root constrói `DdcHiMonitorBackend` | CONTEXT | Auto | PASS | `OK` (`lib.rs:77`, 1×) |
+| 4 | `panel.rs` puro sobre `MonitorControl` | CONTEXT | Auto | PASS | `OK` |
+| 5 | `#![forbid(unsafe_code)]` em `src-tauri`, nenhum `unsafe` | CONTEXT | Auto | PASS | `OK` (o único hit do 5.5 é o doc comment `lib.rs:146`) |
+| 6 | `node --test` (debounce, view-model, bridge demo…) sem falhas | CONTEXT | Auto | PASS | `OK`, 135 pass, 0 fail/cancelled/skipped/todo |
+| 7 | Paridade i18n + nenhum texto hardcoded no HTML | CONTEXT | Auto | PASS | `OK` |
 | 8 | CSP sem `unsafe-inline`, `script-src 'self'` | CONTEXT | Auto | PASS | `OK` |
-| 9 | capabilities sem `shell`/`fs`/`http`/`opener` | CONTEXT | Auto | PASS | `OK` |
-| 10 | single-instance é o 1º plugin do builder | CONTEXT | Auto | PASS | `OK` |
-| 11 | smoke SNI `--activate` (PID próprio, popup mostrado e mantido, sem panic) | CONTEXT | Auto | PASS | `OK`: PID 1130834, `org.kde.StatusNotifierItem-1130834-1`, `popup shown` e ainda mostrado 1,5 s depois |
-| 12 | teste `#[ignore]` de hardware gated, guard vivo, `DDC_TRAY_FAKE` recusado por teste | CONTEXT | Auto | PASS | `OK` (listado, não executado — regra do reviewer) |
-| 13 | Gate 7: console/axe travados, 10 `critical_paths`, dropdown completo, `dr = 2` | CONTEXT | Auto | PASS | `OK`: 60 passed, 6 skipped (= screenshots), 0 failed/flaky |
-| 14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | CONTEXT | Auto | PASS | `OK` |
-| 15 | nenhum `<select>` nativo em `src/` | CONTEXT | Auto | PASS | `OK` |
-| 16 | `ksni` + ≥3 testes `scroll` + smoke `--fake --scroll` | CONTEXT | Auto | PASS | `OK`: PID 1131344, `75 -> 80` vertical, horizontal sem escrita em 1,5 s, `80 -> 75` |
-| 17 | nenhum TODO/FIXME sem issue em arquivo versionado do produto | CONTEXT | Auto | PASS | `OK` |
-| 18 | screenshots claro/escuro regenerados, nada pulado, byte a byte iguais | CONTEXT | Auto | PASS | `OK`: SHA-1 dos 6 PNGs iguais antes e depois, `git status` limpo |
-| 19 | `cargo test --workspace` exit 0 | PROJECT | Auto | PASS | `OK` (383 passed, 0 failed, 9 ignored) |
-| 20 | cobertura ≥ 80% de linhas | PROJECT | Auto | PASS | literal `cargo llvm-cov --workspace --summary-only`: TOTAL Lines 82.78% (gate com exclusões: 83.22%) |
-| 21 | nenhum TODO/FIXME sem issue em `*.rs` | PROJECT | Auto | PASS | `OK` |
-| 22 | CHANGELOG.md atualizado por release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` (CHANGELOG.md:8) descreve o tray, inclusive o arraste do slider e o scanner de texto literal (`f9e263d`); ainda não há heading de versão |
-| 23 | README descreve o comportamento atual | PROJECT | Manual | MANUAL_REQUIRED | suggested: README cita os testes novos (`f9e263d`); revisar o diff na PR |
+| 9 | Capabilities sem shell/fs/http/opener | CONTEXT | Auto | PASS | `OK` |
+| 10 | `tauri-plugin-single-instance` 1º no builder | CONTEXT | Auto | PASS | `OK` |
+| 11 | Smoke SNI `--activate` | CONTEXT | Auto | PASS | `OK`: PID 1314512, item `org.kde.StatusNotifierItem-1314512-1` do próprio PID, `popup shown` e ainda mostrado 1,5 s depois, sem panic. Backend real, só leituras. |
+| 12 | Teste `#[ignore]` de hardware RTK gated por `DDC_HW_TESTS=1` | CONTEXT | Auto | PASS | `OK` (listado, NÃO executado) |
+| 13 | Gate 7: console/axe limpos nos `critical_paths`, arraste, pseudo-locale | CONTEXT | Auto | PASS | `OK`: 88 passed, 6 skipped = screenshots, n=10, dd=16/16, dr=2, ps=26. Ver W-2 (literal + tradução no mesmo nó passa). |
+| 14 | Bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | CONTEXT | Auto | PASS | `OK` |
+| 15 | Harness de UI = o revisado (hash D-7) | CONTEXT | Auto | PASS | `OK`: `9787e931…3288`, 19 arquivos, última mudança em `0263cc0` |
+| 16 | Nenhum `<select>` nativo em `src/` | CONTEXT | Auto | PASS | `OK` |
+| 17 | SNI `ksni`: roda → percentual testado + smoke `--fake --scroll` | CONTEXT | Auto | PASS | `OK`: PID 1315032, vertical `75 -> 80`, horizontal sem escrita em 1,5 s, `80 -> 75` |
+| 18 | Nenhum TODO/FIXME sem issue em arquivo versionado do produto | CONTEXT | Auto | PASS | `OK` |
+| 19 | Screenshots claro/escuro regenerados e versionados | CONTEXT | Auto | PASS | `OK`: nada pulado, 6 PNGs com SHA-1 idêntico, `git diff --quiet -- docs/screenshots` |
+| 20 | `cargo test --workspace` exit 0 | PROJECT | Auto | PASS | `OK` (383 passed, 0 failed, 9 ignored) |
+| 21 | Cobertura >= 80% de linhas | PROJECT | Auto | PASS | literal `cargo llvm-cov --workspace --summary-only`: TOTAL Lines 82.78% |
+| 22 | Nenhum TODO/FIXME sem issue (`*.rs`) | PROJECT | Auto | PASS | `OK` |
+| 23 | CHANGELOG.md atualizado por release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` com `### Added`, que já descreve o pseudo-locale (iter 7) |
+| 24 | README descreve o comportamento atual | PROJECT | Manual | MANUAL_REQUIRED | suggested: README ganhou o parágrafo `pseudo=1` (l. 345) e o bullet do check pseudo (l. 366) |
 
-**Totals:** 23 items | Auto: 21 (21 PASS, 0 FAIL) | Manual: 2 pending. Os 2 manuais aparecem nas duas DoDs, a do PROJECT e a do CONTEXT (`Source: PROJECT`), e contam uma vez só.
+**Totals:** 24 items | Auto: 22 (22 PASS, 0 FAIL) | Manual: 2 pending
 
 **Manual confirmation required:**
 Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Without that, `/jdi-ship` will refuse the phase.
 
+## Notas de execução
+- **Smokes:** um de cada vez.
+  - Antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário, encerrada com `pkill -x ddc-tray` (nunca `-f`). Logo depois, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu.
+  - PIDs do usuário: 1267586 → 1314750 → 1315274. Só esta última está viva no fim.
+- **Porta 1420:** livre antes e depois dos testes com Playwright.
+- **Monitor real:** nenhuma escrita. `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 usou o monitor simulado.
+- **Gate 5, detalhes:**
+  - 5.6: os hits estão dentro de `#[cfg(test)]` (`kwin_placement.rs:195+`, `lib.rs:239+`, `stop_signals.rs:82+`) ou num doc comment (`worker.rs:141`).
+  - 5.7c: `real_monitor.rs` tem só testes `#[ignore]` com `DDC_HW_TESTS`. O `lib.rs:77` é a composition root.
+  - 5.5c: `[workspace.lints.rust] unsafe_code = "deny"` mais o `forbid` nos crate roots do tray.
+
 ## Recommendation
-Aprovar com os 2 itens manuais pendentes. O que a iteração 6 trouxe resolve as 2 lacunas do critic da iter 5:
-- **Arraste real do slider:** a mutação `now: true`, o throttle e o "sem flush no release" derrubam o teste, reproduzido de forma independente pelo reviewer.
-- **Texto literal no DOM:** o scanner reprova 3 formas novas de texto literal, também testadas pelo reviewer.
-
-O relógio parado não deixa o teste oco. W-1 continua com a `ci-crossbuild`. Os itens Deferred do CONTEXT ficam para o corpo da PR:
-- ancoragem e roda no KDE, na máquina do usuário;
-- o `rtk_qhd_hdr` com `DDC_HW_TESTS=1`, rodado pelo orquestrador;
-- Windows real;
-- GNOME sem AppIndicator.
-
-No ship, tratar o empilhamento sobre `full-osd-control`, porque o usuário faz squash-merge.
-
-## DoD Critic (enhanced)
-
-- DoD row «7 (i18n)»: literal guardado numa `const` local (`const note = … ? 'No other setting answered' : t(…)`, padrão de `app.js:857`) ou devolvido por helper chega ao DOM em inglês no popup pt-BR e o scanner estático não vê (Verify OK).
-- DoD row «13 (Gate 7)»: `if (message.text().startsWith('Failed to load resource')) return;` antes das linhas travadas do coletor esconde um 404 real; e `if (state !== 'empty') await expectAccessible(page);` no loop dos `critical_paths` pula o axe de `/?demo=empty` — Verify OK nos dois casos.
-
-**Verdict:** BLOCKED
+- Os gates 1-7 estão verdes e os 22 itens Auto do DoD passam, rodados literalmente. Faltam os 2 itens Manual (CHANGELOG/README) via `/jdi-confirm-dod tray-app`, ou no PR, conforme a cadeia autônoma.
+- **W-2 é o ponto que um DoD critic tende a apontar:** o spec pseudo aceita `⟦tradução⟧ + literal` no mesmo nó.
+  - O ajuste cabe só no harness: exigir que nada com letra sobre fora dos segmentos `⟦…⟧` em nós que não são dado.
+  - Já foi provado viável: o produto atual passa, o mutante reprova.
+  - Custa um novo hash no C15, que é ato do orquestrador (D-7).
+- **W-3** é cosmético e pode ir junto.
+- **W-1** segue com a `ci-crossbuild`.
+- **Para a validação humana do PR:** o binário instalado em `~/.local/bin/ddc-tray` (03:10) é anterior às iter 5-7. O popup que o usuário vê hoje não tem as mudanças de UI dessas iterações.
