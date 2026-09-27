@@ -41,11 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A 360×560 popup, hidden on focus loss and Esc: brightness, contrast and volume sliders, color preset, input source, power mode, and an "All settings" section loaded on demand, with a read-only probe of the codes the capabilities leave out.
   - Sliders write 80 ms after the last move, coalesced, one write in flight per feature; the popup shows the value the monitor reads back.
   - Every dangerous change (input, power, dangerous "All settings" entries) goes through a confirmation dialog first; `Confirm::Yes` is built only in the app's command layer.
-  - Several monitors: a selector; the popup opens on the last monitor it loaded, else the first whose panel loads.
+  - Several monitors: a selector; the popup opens on the last monitor it loaded, else the first whose panel loads. A panel fails when none of its quick controls can be read, so a monitor whose DDC/CI is mute is skipped and marked "(no DDC/CI)" in the selector.
   - Tray menu in English or Brazilian Portuguese, from the system's locale: "Open panel" and "Quit", plus brightness shortcuts 0/25/50/75/100% on Linux, where the StatusNotifierItem reports no clicks. On Windows a left click toggles the popup anchored above the icon (not built on Windows yet).
   - Popup in English or Brazilian Portuguese, every text from locale keys; light and dark themes; keyboard operable; strict CSP; capabilities limited to the app's own commands; single instance.
   - On Linux, a restart at launch with WebKitGTK's DMA-BUF renderer off (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) unless the variable is already set: that renderer crashed the app on NVIDIA under Wayland.
-  - A browser demo of the popup (`?demo=rtk|two-monitors|empty|error`) without Tauri, checked by a Playwright + axe suite (no console errors, no critical/serious accessibility violations, light and dark) that also takes the README screenshots; `node --test` suites for the UI modules; a golden JSON contract shared by the Rust and JS tests; a StatusNotifierItem smoke script; and an `#[ignore]`d hardware test that writes one safe brightness change and restores it.
+  - A browser demo of the popup (`?demo=rtk|two-monitors|empty|error`) without Tauri, checked by a Playwright + axe suite (no console errors, no critical/serious accessibility violations, light and dark) that also takes the README screenshots; `node --test` suites for the UI modules; golden JSON contracts shared by the Rust and JS tests (the RTK, and a mute monitor's panel error); a StatusNotifierItem smoke script; and `#[ignore]`d hardware tests: one safe brightness change, restored, and a read-only check that a mute monitor fails its panel.
 
 ### Changed
 

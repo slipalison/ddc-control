@@ -307,7 +307,7 @@ Only the Fedora set has been tried (Fedora 44, WebKitGTK 2.54); the Debian/Ubunt
 - Sliders write while they move: 80 ms after the last move, coalesced to the last value, with at most one write in flight per feature, and the final value when released. The popup always shows the value the monitor reads back, not the one asked for; when they differ, the value is highlighted and announced to screen readers ("Brightness: the monitor applied 70%.").
 - **Dangerous changes ask first.** Switching the input, changing the power mode, and any feature the core marks dangerous under **All settings** (OSD lock, for one) open a dialog that says what will happen, with the focus on **Cancel**; Esc cancels. Nothing is sent to the monitor before **Apply**. The core still checks the value; the app confirms a dangerous write only after that dialog.
 - **All settings** loads when it is opened: every read-write feature the capabilities declare besides the quick controls, each with its current value, or a status when it gives none. **Probe hidden settings** reads, once each, the catalogued codes the capabilities leave out (a few seconds, reads only) and adds the ones that answer.
-- **Several monitors:** the monitor's name at the top becomes a selector. On opening, the popup tries the monitor it loaded last, then the others in the system's order, and shows the first whose panel loads; one that fails stays in the selector, marked "(no DDC/CI)", and picking it shows its error with **Try again**. A monitor whose DDC/CI is mute is not always caught this way: see [Known limitations](#known-limitations-of-the-tray-app).
+- **Several monitors:** the monitor's name at the top becomes a selector. On opening, the popup tries the monitor it loaded last, then the others in the system's order, and shows the first whose panel loads; one that fails stays in the selector, marked "(no DDC/CI)", and picking it shows its error with **Try again**. A panel fails when none of its six quick controls can be read, with the error of the first reading: so a monitor listed from its EDID whose DDC/CI is mute (turned off in its menu, or a TV such as the dev machine's LG TV) is skipped: the popup does not open on it, remember it or make it the target of the brightness entries. Trying it costs a few seconds (about 5 s for that TV), so a first opening with it listed first shows the loading state that long; later openings try the monitor loaded last first.
 - **No monitor, or an error:** the popup says so, with **Try again** and the hint to turn DDC/CI on in the monitor's own menu; on Linux it also points to `docs/linux-ddc-setup.md` for `/dev/i2c-*` access. If the DDC/CI backend cannot start at all, the app still runs and the popup reports it.
 - **Language:** English or Brazilian Portuguese, chosen automatically: the menu follows the system's locale and the popup the webview's language. Portuguese gives Brazilian Portuguese; anything else, English.
 
@@ -324,7 +324,7 @@ Then open `http://localhost:1420/?demo=<scenario>`:
 | Scenario | What it shows |
 |---|---|
 | `rtk` (also `/` and any unknown name) | The dev monitor "RTK QHD HDR", with the values of the Rust contract test |
-| `two-monitors` | An LG TV whose DDC/CI is mute (skipped and marked "(no DDC/CI)"), the RTK and a Dell U2723QE |
+| `two-monitors` | An LG TV whose DDC/CI is mute (its panel fails with the transport error the real TV gives, so it is skipped and marked "(no DDC/CI)"), the RTK and a Dell U2723QE |
 | `empty` | No monitor found |
 | `error` | The DDC/CI backend could not start |
 
@@ -338,18 +338,17 @@ node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'
 cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
 ```
 
-- `cargo test` covers the presentation, the commands, the menu and the tray shortcuts against the in-memory backend. Its golden, `apps/ddc-tray/tests/fixtures/contract-rtk.json`, is what the Rust side returns for the RTK; the `node --test` suite checks the demo's RTK against the same file.
+- `cargo test` covers the presentation, the commands, the menu and the tray shortcuts against the in-memory backend. Its goldens are what the Rust side returns: `apps/ddc-tray/tests/fixtures/contract-rtk.json` for the RTK, and `contract-mute.json` for a mute monitor (the LG TV as listed, and the error its panel fails with); the `node --test` suite checks the demo's RTK and mute TV against the same files.
 - `node --test` covers the UI's plain modules (the bridge and its demo, the slider debounce, the view model, i18n key parity, no literal text in the HTML) and needs no install; it runs on Node 24. `--test-reporter=tap` only fixes the output format for scripts.
 - The Playwright suite (`@playwright/test` 1.63.0 and `@axe-core/playwright` 4.13.0, test-only: nothing of it ships) serves `apps/ddc-tray/src` on port 1420 under the app's CSP, in Chromium, light and dark. In every demo scenario it checks the expected state, no console error and no axe `critical`/`serious` violation (WCAG 2.1 A/AA), plus keyboard use, the confirmation dialog and the monitor fallback. It needs Playwright's Chromium once: `npx playwright install chromium` (user-level, no `sudo`).
 - `SCREENSHOTS=1 npx playwright test screenshots` rewrites the screenshots above; without the variable those tests are skipped.
-- Tray icon smoke test and the hardware test: [`docs/hardware-validation.md`](docs/hardware-validation.md#tray-app--phase-tray-app).
+- Tray icon smoke test and the hardware tests: [`docs/hardware-validation.md`](docs/hardware-validation.md#tray-app--phase-tray-app).
 
 ### Known limitations of the tray app
 
 - **No clicks on Linux.** A StatusNotifierItem reports no clicks to the app, so the popup opens from the menu only. It is never anchored to the icon either: the host does not say where the icon is, and Wayland lets no app place its window, so the popup opens where the compositor puts it.
 - **GNOME** shows StatusNotifierItems only with the AppIndicator extension; without it there is no icon. The tray has been tried on KDE Plasma (Wayland) only.
 - **WebKitGTK's DMA-BUF renderer is off on Linux.** On the dev machine (KDE Plasma on Wayland, NVIDIA driver 615, WebKitGTK 2.54) it killed the app with `Error 71 (Protocol error) dispatching to Wayland display` as soon as the popup was shown. So at launch `ddc-tray` replaces itself (same process id, same arguments) with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, unless that variable is already set: a value you set, whatever it is, is kept (D-2026-09-26-tray-app-10). The popup is then drawn without DMA-BUF, a negligible cost for a 360×560 window.
-- **A monitor whose DDC/CI is mute opens as an empty panel.** With the real backend a failed reading only drops its control, so a monitor that is listed but never answers (the dev machine's LG TV) loads a panel with no controls instead of failing like the demo's mute TV: it is not skipped nor marked "(no DDC/CI)", the popup can open on it, and the Linux brightness entries then target it. Pick the monitor you want in the selector; the popup tries the one it loaded last first.
 - **Windows is untested.** The Windows paths (left click, anchoring above the icon, `icon.ico`, no console window in release builds) are written but have never been compiled: checking the tray for Windows from Linux stops in `tauri-winres`, which needs `llvm-rc`. The phase `ci-crossbuild` builds it on Windows. DDC/CI through `dxva2` has not been exercised by the tray.
 - **No autostart, profiles or global hotkeys** yet: phase `profiles-hotkeys`.
 - **No installer** yet: bundling is off, and packages (MSI/NSIS, deb/rpm/AppImage) come with phase `release-packaging`. Build it from source.
@@ -373,7 +372,7 @@ cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
 - `apps/ddc-tray` — the [tray app](#tray-app), a Tauri 2 driving adapter:
   - `src-tauri/` is the `ddc-tray` crate. `panel.rs` is plain Rust over the `MonitorControl` port: it builds the panel, the "All settings" list and the error kinds the UI shows, with every name and risk taken from the core. `dto.rs` holds the serde types of the UI contract, `commands.rs` the thin `async` Tauri commands (each DDC/CI call on a blocking thread), `tray.rs`, `menu.rs` and `i18n.rs` the icon and its bilingual menu, and `popup.rs` the show/hide rule for tray clicks. `lib.rs` is the composition root: `compose_osd()` wires `DdcHiMonitorBackend`, `CachingMonitorBackend` and `SoftwareOsd` as the CLI does, and `run()` adds the single-instance and positioner plugins. `#![forbid(unsafe_code)]`, a strict CSP and capabilities that allow only the app's own commands and events.
   - `src/` is the popup: static HTML, CSS and ES modules, no bundler and no npm at runtime. `bridge.js` calls the Tauri commands, or the in-memory demo in a plain browser; `debounce.js`, `view-model.js` and `i18n/` (English and Brazilian Portuguese) hold the logic the tests reach.
-  - `tests/` holds the `node --test` suites (`ui/`), the Playwright suite (`e2e/`) and the contract golden (`fixtures/`); `scripts/smoke-sni.sh` is the Linux tray smoke test. `package.json` lists only the test tools.
+  - `tests/` holds the `node --test` suites (`ui/`), the Playwright suite (`e2e/`) and the contract goldens (`fixtures/`); `scripts/smoke-sni.sh` is the Linux tray smoke test. `package.json` lists only the test tools.
 
 Still to come:
 
@@ -428,7 +427,7 @@ cargo check -p ddc-adapters --locked --features ddc-hi --target x86_64-pc-window
 cargo check -p ddc-cli --locked --target x86_64-pc-windows-msvc
 ```
 
-Hardware tests are `#[ignore]`d and do nothing unless `DDC_HW_TESTS=1`. They expect the dev monitor "RTK QHD HDR" to be attached. CI and reviewers never run them. The `ddc-adapters` ones only read; the tray's makes one safe brightness change and restores it.
+Hardware tests are `#[ignore]`d and do nothing unless `DDC_HW_TESTS=1`. They expect the dev monitor "RTK QHD HDR" to be attached. CI and reviewers never run them. The `ddc-adapters` ones only read; of the tray's two, one makes a single safe brightness change and restores it, and the other only reads.
 
 ```sh
 DDC_HW_TESTS=1 cargo test -p ddc-adapters --locked --test real_monitor -- --ignored --test-threads=1 --nocapture

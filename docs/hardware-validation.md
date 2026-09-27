@@ -168,18 +168,26 @@ DDC_HW_TESTS=1 cargo test -p ddc-tray --locked -- --ignored rtk_qhd_hdr --test-t
 ddcutil --bus 5 getvcp 10
 ```
 
-The test goes through the app's own composition root (`compose_osd()`: the real backend with the capabilities cache) and never confirms a write:
+The command runs two tests. Both go through the app's own composition root (`compose_osd()`: the real backend with the capabilities cache), and neither confirms a write.
+
+`rtk_qhd_hdr_panel_loads_and_one_safe_brightness_write_is_restored`:
 
 1. It lists the monitors and picks the RTK by manufacturer and model.
 2. It loads the RTK's panel, reads only: exactly `0x10 0x12 0x62 0x60 0x14 0xD6`, with 7 input sources, 7 color presets and 3 power modes.
 3. It writes brightness once: the original value +10, or −10 when +10 would pass the maximum, and expects that value read back.
 4. A guard writes the original value back, also when an assertion failed first, and expects both the value read back and a fresh read to equal it.
 
-Expected: `1 passed`, with the timings, the monitors, the panel, `brightness <original> -> <target> (max 100): read back Ok(ReadBackDto { current: <target>, max: 100 })` and `restored brightness: Ok(ReadBackDto { current: <original>, max: 100 })`; both `ddcutil` reads show the same brightness. On 2026-09-26: `list_monitors` 1.17 s, `load_panel` 0.51 s, the write and the restore about 146 ms each, brightness 100 → 90 → 100. Without `DDC_HW_TESTS=1` the test prints `skipped: …` and passes without touching a monitor. If the second `ddcutil` read differs from the first, put the value back with `$B -m RTK set brightness <original>` (step 0 builds `$B`).
+`rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads`, reads only:
+
+1. It lists the monitors and expects exactly one RTK, plus at least one other monitor (the LG TV).
+2. It loads the panel of every other monitor and expects it to fail with `transport` or `timeout`, as the popup needs to skip a mute monitor.
+3. It loads the RTK's panel and expects the six quick controls.
+
+Expected: `2 passed`, with the timings, the monitors, the panel, `brightness <original> -> <target> (max 100): read back Ok(ReadBackDto { current: <target>, max: 100 })`, `restored brightness: Ok(ReadBackDto { current: <original>, max: 100 })`, `LG TV SSCR2: Err(UiError { kind: Transport, message: "transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)" })` and `RTK panel codes: [10, 12, 62, 60, 14, D6]`; both `ddcutil` reads show the same brightness. On 2026-09-26: `list_monitors` 1.17 s, `load_panel` 0.51 s, the write and the restore about 146 ms each, brightness 100 → 90 → 100. On 2026-09-27 the same, and the TV's `load_panel` failed in 4.83 s, the RTK's loaded in 0.76 s. Without `DDC_HW_TESTS=1` the tests print `skipped: …` and pass without touching a monitor. If the second `ddcutil` read differs from the first, put the value back with `$B -m RTK set brightness <original>` (step 0 builds `$B`).
 
 ### 8. The popup by hand (optional)
 
-Start `target/release/ddc-tray` and choose **Open panel** in its tray menu. On the dev machine the LG TV is listed first and, since a mute monitor loads as a panel with no controls (see the README's known limitations of the tray app), the popup may open on it: pick the RTK in the selector at the top. Then only:
+Start `target/release/ddc-tray` and choose **Open panel** in its tray menu. On the dev machine the LG TV is listed first, and its DDC/CI is mute, so its panel fails: check that the popup opens on the RTK (after about 5 s the first time, while it tries the TV) and that the selector at the top lists the TV as "LG TV SSCR2 (no DDC/CI)". Then only:
 
 - move brightness, contrast and volume and change the color preset, putting each back to its step 0 value right after;
 - use the menu's **Brightness** entries only while the popup shows the RTK (they set the monitor the popup last loaded), then put brightness back;
