@@ -112,7 +112,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
   - `cargo llvm-cov` TOTAL ≥ 80% com o glue do Tauri, com o número colado no SUMMARY.
 - **Dependencies:** T-3
 - **Test:** Verify da CONTEXT do smoke SNI + `cargo test -p ddc-tray --locked`
-- **Status:** pending
+- **Status:** completed
 
 #### T-6: UI do popup: HTML, CSS Fluent-like, `app.js` e diálogo de confirmação
 - **Specialist:** jdi-doer-ddc-control

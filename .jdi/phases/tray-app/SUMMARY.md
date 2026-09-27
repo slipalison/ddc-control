@@ -1,13 +1,14 @@
 # Phase 5: Tray app — Summary  (slug: tray-app)
 
 **Status:** partial
-**Tasks:** 4/8 complete, 0 blocked
+**Tasks:** 5/8 complete, 0 blocked
 
 ## Executed tasks
 - T-1: scaffold do crate `ddc-tray` (lib `ddc_tray` + bin `ddc-tray`) no workspace, com a config Tauri, a capability mínima, o `icon.svg` próprio, o conjunto de ícones gerado e o `tray.png`. Commits `e91a453` (build) e `4c93104` (docs).
 - T-2: apresentação pura (`panel.rs`) genérica em `M: MonitorControl + ?Sized`, DTOs serde do contrato A-1 (`dto.rs`), 42 testes com o fake RTK e o golden `apps/ddc-tray/tests/fixtures/contract-rtk.json`. Commit `72d274e` (feat).
 - T-3: os 7 comandos Tauri (`async fn` + `spawn_blocking`), o composition root (`compose_osd()`/`run()` com single-instance, blur/close escondem, `popup-shown`), o gate puro `popup.rs`, as permissões `allow-*` por comando e o teste de hardware `rtk_qhd_hdr`, rodado no RTK (brilho 100 → 90 → 100, conferido com `ddcutil`). Commit `e033137` (feat).
 - T-4: módulos ES puros e sem dependências (`bridge.js` Tauri/demo, `demo-data.js`, `debounce.js`, `view-model.js`, `i18n/` en + pt-BR) e 63 testes `node --test` fora de `src/`, incluindo o RTK da demo `deepStrictEqual` ao golden. Commit `35c5ffd` (feat).
+- T-5: bandeja com `tray.png`, tooltip e menu nativo bilíngue (`i18n.rs` + `menu.rs` puros), clique esquerdo no Windows alternando o popup ancorado pelo positioner com o gate de `popup.rs`, atalhos de brilho Safe em thread bloqueante com `panel-changed`, "Sair" → `app.exit(0)`, e `scripts/smoke-sni.sh`, que passa no KDE Wayland e falha nos 7 casos provocados. 26 testes novos. Commit `380a691` (feat).
 
 ## Blocked tasks
 - nenhuma
@@ -335,8 +336,103 @@ Todos são ES modules sem dependências, com `window`/`navigator`/timers injetad
 | `node --test 'apps/ddc-tray/tests/ui/i18n*.test.mjs'` (Verify como está) | FAIL: só o formato (`ℹ pass 13`) |
 | mesmo Verify com `--test-reporter=tap` | OK: `# tests 13`, `# pass 13`, `# fail 0` |
 
+## T-5 — Bandeja: ícone, menu bilíngue, eventos, positioner + smoke SNI
+
+### O que foi feito
+- **`i18n.rs`** (puro; D-2026-09-26-tray-app-6):
+  - `Locale { En, PtBr }`; `Locale::from_tag` usa a mesma regra do `resolveLocale` da UI: tag que começa com `pt` (sem diferenciar maiúsculas) → pt-BR, qualquer outra → en.
+  - `Labels { tooltip, open_panel, brightness, quit }`, um `const` por locale. A paridade vem por construção: um locale sem um rótulo não compila.
+  - `brightness_label(pct)` → `Brightness 25%` / `Brilho 25%`.
+- **`menu.rs`** (puro; D-2026-09-26-tray-app-5):
+  - `Platform { Windows, Linux }` e `Platform::current()` (`cfg!(windows)`).
+  - `MenuAction { OpenPanel, Brightness(u8), Quit }`, com ids estáveis e iguais nos 2 idiomas (`open-panel`, `brightness-N`, `quit`).
+  - `from_id` é derivado de `id()`: só aceita ids que o menu mostra de fato (`brightness-025`, `brightness-+25`, `brightness-10` → `None`).
+  - `menu_entries(locale, platform)`: no Windows, Abrir painel │ Sair; no Linux, Abrir painel │ Brilho 0/25/50/75/100% │ Sair (│ = separador). `BRIGHTNESS_STEPS = [0, 25, 50, 75, 100]`.
+- **`tray.rs`** (glue do Tauri, com um helper genérico testado):
+  - `install(app)`: `sys_locale::get_locale()` só aqui; `TrayIconBuilder::with_id("ddc-control")` com `tauri::include_image!("icons/tray.png")` (decodificado na compilação, sem caminho de erro em runtime), tooltip do locale, o menu de `menu_entries`, `show_menu_on_left_click(false)`, `on_menu_event` e `on_tray_icon_event`.
+  - Eventos da bandeja: todo evento passa por `tauri_plugin_positioner::on_tray_event`. `Click { Left, Up }` (`is_left_click`) chama `toggle_popup`, que consulta o `PopupGate` com `Visibility` do `is_visible()`: `Show` → `open_panel`, `Hide` → `hide()`, `Nothing` → nada.
+  - `open_panel`: `move_window_constrained(Position::TrayCenter)` e depois `show_popup`. O erro de posição só vai para o log no Windows; no SNI/Wayland, onde o positioner nunca recebe o retângulo do ícone, ele é esperado e ignorado.
+  - Atalho de brilho: `tauri::async_runtime::spawn` → `on_blocking_thread` da T-3 (`spawn_blocking`; sem backend, dá `backend_unavailable`) → `brightness_shortcut(osd, selected, pct)` = `shortcut_target` + `panel::set_brightness_percent` (Safe, `Confirm::No`) → `emit(PANEL_CHANGED, PanelChangedDto { monitorId })`. Um erro só vai para o stderr (`ddc-tray: could not …: Kind: mensagem`).
+  - "Sair" → `app.exit(0)`.
+- **`lib.rs`** (composition root): `pub mod i18n/menu/tray`; `tauri_plugin_positioner::init()` como 2º plugin, depois do single-instance (obrigatório: sem ele, o `on_tray_event` do positioner entra em pânico no `state::<Tray>()`); `tray::install(app.handle())?` no `setup`, depois do `AppState` e do `PopupGate`.
+- **`apps/ddc-tray/scripts/smoke-sni.sh <bin>`** (bash, `set -euo pipefail`, 100755):
+  - sem watcher → falha com mensagem clara; lista os itens antes, sobe o app com o stderr num temporário e sonda a cada 250 ms, com prazo de 15 s em ms (`date +%s%N`; o `SECONDS` do bash tem granularidade de segundo e dava 14,6 s);
+  - aceita item `:1.N/caminho` e nome bem conhecido (`serviço[/caminho]`), e confere o PID via `GetConnectionUnixProcessID`;
+  - exige o processo vivo 2 s depois do registro; falha com status e mensagem explícitos se o app sai antes do registro (com a dica "outra instância?") ou depois dele; falha se o stderr tiver `panicked`, antes e depois do SIGTERM;
+  - `trap cleanup EXIT`: SIGTERM, até 5 s de espera, SIGKILL e `wait`. O app é encerrado em qualquer caminho.
+
+### Testes novos (26, todos por igualdade)
+- `i18n` (6): tags pt (`pt-BR`, `pt_BR.UTF-8`, `pt`, `PT-br`, `pt-PT`) → pt-BR; outras (`en-US`, `C`, `POSIX`, `de-DE`, `es_ES.UTF-8`, `""`) → en; rótulos en e pt-BR exatos; rótulo de brilho com o percentual; nenhum rótulo vazio.
+- `menu` (10): os passos 0/25/50/75/100; o menu exato do Windows e do Linux em en e pt-BR; ids estáveis; ida e volta `MenuAction` ↔ id para todo item das 2 plataformas; 7 ids únicos; 12 ids que o menu não mostra → `None`; `Platform::current()`.
+- `tray` (10, com o fake RTK da T-2):
+  - atalho no monitor selecionado (`WriteVcp(DEL, 0x10, 75)`, devolve `{monitorId: DEL}`);
+  - sem seleção, no 1º listado (`WriteVcp(RTK, 0x10, 25)`);
+  - 0% e 100% → 0 e 100;
+  - sem monitor → `not_found` "no monitor is reachable", sem escrita;
+  - selecionado que sumiu → `not_found` "monitor GONE not found", sem escrita;
+  - `Timeout` na leitura do max → `timeout`, sem escrita;
+  - `Click{Left,Up}` alterna; `Left/Down`, `Right`, `Middle`, `Enter`, `Move`, `Leave` e `DoubleClick` não alternam;
+  - id do ícone estável.
+
+### Smoke SNI (KDE Plasma Wayland, Fedora 44)
+Verify da CONTEXT, como está:
+```
+$ cargo build -p ddc-tray --release --locked -q && bash apps/ddc-tray/scripts/smoke-sni.sh target/release/ddc-tray && echo OK
+smoke-sni: started target/release/ddc-tray as PID 248086
+smoke-sni: org.kde.StatusNotifierWatcher lists :1.2354/org/ayatana/NotificationItem/tray_icon_tray_app_ddc_control, owned by PID 248086
+smoke-sni: OK — PID 248086 registered its tray item, was alive 2 s later and never panicked
+OK
+```
+O PID conferido é o do processo lançado, então o re-exec sem DMA-BUF (D-2026-09-26-tray-app-10) mantém o PID, como previsto.
+
+Falhas provocadas (script final, todas com exit 1 e o app encerrado; os wrappers ficaram no scratchpad, fora do repo):
+
+| Caso | Saída |
+|---|---|
+| `/bin/true` (sai cedo) | `FAIL: the app exited before registering a tray item with status 0 — is another instance already running?` |
+| sem watcher (`dbus-run-session -- bash smoke-sni.sh target/release/ddc-tray`) | `FAIL: no org.kde.StatusNotifierWatcher on the session bus: run this in a desktop session with a StatusNotifierItem host (KDE Plasma, or GNOME with the AppIndicator extension)` |
+| outra instância já rodando | `FAIL: the app exited before registering a tray item with status 0 — is another instance already running?` (a 1ª recebeu o popup pelo single-instance; SIGTERM → 143) |
+| processo vivo que nunca registra (`exec sleep 60`) | `FAIL: no StatusNotifierItem owned by PID 238416 within 15 s` (15,1 s) |
+| item registrado por um PID filho (wrapper sem `exec`) | `FAIL: no StatusNotifierItem owned by PID 240026 within 15 s`: prova a checagem de PID |
+| morre ~2 s depois de subir (wrapper com `exec` + SIGTERM agendado) | registra `:1.2380/…` e depois `FAIL: the app exited within 2 s of registering its tray item with status 143` |
+| `panicked` no stderr (wrapper escreve e faz `exec` do app) | registra `:1.2391/…` e depois `FAIL: the app's stderr says 'panicked'`, com o fim do stderr |
+| sem argumento / não executável | `FAIL: usage: …` / `FAIL: not an executable file: Cargo.toml` |
+
+### Validação manual no KDE (release, via D-Bus, o mesmo caminho do Plasma)
+- Watcher: `busctl --user get-property org.kde.StatusNotifierWatcher … RegisteredStatusNotifierItems` lista `:1.2400/org/ayatana/NotificationItem/tray_icon_tray_app_ddc_control`; `GetConnectionUnixProcessID` → `u 249170` = PID do app; `Status` `Active`.
+- Menu (`com.canonical.dbusmenu.GetLayout`, com `LANG=pt_BR.UTF-8`): `Abrir painel`, separador, `Brilho 0%`, `Brilho 25%`, `Brilho 50%`, `Brilho 75%`, `Brilho 100%`, separador, `Sair`.
+- `Event(2, "clicked")` (Abrir painel): o app continua vivo 3 s depois, sem nada no stderr além do `Gtk-Message … appmenu-gtk-module` de sempre (a ancoragem falha em silêncio, como previsto), e `/proc/<pid>/environ` tem `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+- `Event(10, "clicked")` (Sair): o processo termina com **status 0** (`wait`), 0 `panicked`.
+- **Atalho de brilho não foi acionado no hardware, de propósito.** Sem seleção no popup, o alvo é o 1º monitor listado, que nesta máquina é a LG TV (`GSM-LG-TV-SSCR2-01010101`, pela saída da T-3), não o RTK autorizado. O caminho está coberto pelos testes com o fake. Brilho do RTK intocado: `ddcutil --bus 5 getvcp 10` continua `100`. Nota para a T-6 e o PR: o popup deve chamar `select_monitor` ao carregar, para os atalhos seguirem o monitor que o usuário vê.
+- Nenhuma instância ficou rodando (`pgrep -fa 'target/(release|debug)/ddc-tray$'` vazio).
+
+### Desvios do plano
+- **`Position::TrayCenter` em vez de `TrayBottomCenter`.** No positioner 2.4.0, `TrayBottomCenter` põe o topo do popup no topo do ícone, crescendo para baixo, por cima da barra de tarefas do Windows. `TrayCenter` o põe acima do ícone (com fallback para baixo quando falta espaço em cima, no Windows), que é o que a D-2026-09-26-tray-app-5 trava ("ancorado acima dele"). O `move_window_constrained` mantém o popup dentro da tela do ícone.
+- Os testes do `tray.rs` ficaram inline (`#[cfg(test)] mod tests { … }`), porque `src/tray/tests.rs` não estava no `files_modified`.
+- Rótulo do tooltip: "DDC Control — monitor settings" / "DDC Control — ajustes do monitor" (o nome do produto não se traduz). No Linux/SNI o tooltip é ignorado pelo `tray-icon`.
+- O helper `brightness_shortcut` mora em `tray.rs`, porque `commands.rs`/`panel.rs` não estavam no `files_modified`. Ele só compõe `shortcut_target` (T-3) e `set_brightness_percent` (T-2).
+- O caminho do atalho reusa o `on_blocking_thread` da T-3 (`spawn_blocking` + `backend_unavailable`), em vez de um `spawn_blocking` próprio.
+- O Windows continua sem compilação local (D-2026-09-26-tray-app-9): o clique, o `is_visible` e a ancoragem só são provados na `ci-crossbuild`.
+
+### Verificação
+| Comando | Resultado |
+|---|---|
+| Verify smoke SNI da CONTEXT | OK (acima) |
+| Verify adapter único / `forbid` / single-instance / `panel.rs` puro | OK / OK / OK / OK |
+| Gate 5.7 `Confirm::Yes` fora de `commands*` | nenhum |
+| Gate 5.6 `unwrap`/`expect`/`panic!` fora de testes nos arquivos da T-5 | nenhum |
+| `sys_locale` fora de `tray.rs` | nenhum |
+| `cargo fmt --all --check` | OK |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | OK (só o aviso future-incompat de `nom v3.2.1`, pré-existente) |
+| `cargo test -p ddc-tray --locked` | 92 passed, 0 failed, 1 ignored (hardware) |
+| `cargo test --workspace --locked` | 339 passed, 0 failed, 8 ignored (hardware) |
+| `cargo check -p ddc-cli -p ddc-adapters --locked --target x86_64-pc-windows-msvc` | OK |
+| `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked --target x86_64-unknown-linux-gnu` | OK |
+| `cargo build -p ddc-tray --release --locked` | OK |
+| `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` | **TOTAL lines 88.70%** (2726 linhas, 308 sem cobertura); `i18n.rs` 100%, `menu.rs` 98.63% (só o ramo `Windows` de `Platform::current`), `tray.rs` 62.65% (o glue do Tauri), `popup.rs`/`dto.rs` 100%, `panel.rs` 99.04%, `commands.rs` 52.14%, `lib.rs` 0% |
+
 ## Tests
-- Total: 313
-- Passing: 313
-- Coverage: 90.77% (`cargo llvm-cov --summary-only`, TOTAL lines)
-- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 63 passing, 0 failing
+- Total: 339
+- Passing: 339
+- Coverage: 88.70% (`cargo llvm-cov --summary-only`, TOTAL lines)
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 63 passing, 0 failing (medido na T-4; a T-5 não toca JS)
