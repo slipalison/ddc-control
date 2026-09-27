@@ -1708,3 +1708,113 @@ Estabilidade: o spec rodou `--repeat-each=5`, 140/140 passed.
   - chave inexistente agora volta sem interpolação (nenhuma chave tem `{}`);
   - um nome do core vazio (`''`) cai em `format.code` em vez de mostrar vazio.
 - **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. Os smokes usaram o backend real só com leituras (C11) e o monitor simulado (C17).
+
+## Iteração 8 (rodada 2) — warnings W-2/W-3
+
+Modo fix, cadeia autônoma do `/jdi-issue`, iter 8 (rodada 2, rodada de warnings). A iter 7 foi aprovada (APPROVED_PENDING_MANUAL). Esta iteração trata o W-2 e o W-3 do REVIEW; o W-1 (`cargo audit`) segue com a `ci-crossbuild`. Não editei o CONTEXT: o C15 ainda tem o hash da iter 7, e quem refixa é o orquestrador (D-2026-09-27-tray-app-7). As 8 tasks do PLAN continuam `completed`.
+
+### Commits
+| Commit | Tipo | O quê |
+|---|---|---|
+| `06ea05b` | test | W-2: o check do pseudo-locale fica estrito. Fora de `translate="no"`, tira todos os `⟦…⟧` do texto e reprova se sobrar letra. |
+| `1693cec` | fix | W-3: um nó de texto `' '` real entre a frase da dica i2c e o `<code>` do caminho. Sai o `margin-inline-start: 0.3em`. O cenário vazio/erro passa a conferir o texto copiado. |
+| `8907c8e` | docs | README (l. 366) e CHANGELOG descrevem a regra estrita. |
+
+Depois do `1693cec`, `playwright.config.mjs`, `tests/e2e/*.mjs` e `tests/ui/*.mjs` não mudaram mais.
+
+### W-2 — checagem estrita (`tests/e2e/pseudo-locale.spec.mjs`)
+- **Regra nova do `judge`**, igual para nós de texto visíveis e atributos legíveis:
+  - sob `translate="no"` (o `[translate]` mais próximo): dado. Se contém `⟦`, reprova com `is a translation under translate="no"` (regra mantida);
+  - fora dele, sem `⟦`: reprova com `is neither translated nor under translate="no"` (regra mantida);
+  - fora dele, com `⟦`: remove os segmentos `⟦…⟧` balanceados, do mais interno para fora e em laço até estabilizar (cobre os aninhados). Se sobra qualquer `\p{L}`, reprova com `has text outside the marks: "<o que sobrou>"`.
+- Uma marca sem par não "lava" o texto: em `⟦No Linux, o` nada é removido e as letras sobram.
+- Os marcadores continuam escritos no spec. `textsOf` recebe `{ open, close, attributes }` por uma constante `READING`.
+- `::before`/`::after`, o título do documento, os mínimos de leitura, o axe e o teste da origem do app não mudaram.
+- **Produto atual:** 28/28 no spec e 88 passed + 6 skipped na suíte inteira. A regra estrita não achou texto real no produto, então o produto não precisou mudar por causa dela.
+- **Estabilidade:** `pseudo-locale.spec.mjs` + `scenarios.spec.mjs` com `--repeat-each=5`: 220/220 passed.
+
+### Provas negativas (mutações não commitadas)
+- **Onde rodaram:** numa cópia descartável de `apps/ddc-tray` no scratchpad. `src/` e `tests/` foram copiados; `node_modules` e `src-tauri` entraram por symlink, só para leitura.
+- Na cópia rodei também o spec do `HEAD` da iter 7 (`git show 5919fb0:…/pseudo-locale.spec.mjs`) para comparar.
+- `src/` foi recopiado do repo antes de cada mutação, e a cópia foi apagada no fim. O repo não foi tocado (`git status` limpo).
+- "`node`" = `i18n-html` + `view-model`, 41 testes, com o scanner estático. O `i18n-parity` lê arquivos de fora de `apps/ddc-tray` e não roda na cópia; no repo, os 135 passam.
+
+| Mutação (`src/app.js`) | `node` | Spec antigo (iter 7) | Spec estrito |
+|---|---|---|---|
+| **M1, a pedida:** `t('more.probeEmpty') + ' (nothing else to try)'` em `showProbe` | 41 pass | **28 passed** | **2 failed** (DELL sondado × 2 temas): `text "⟦Nenhum ajuste oculto respondeu.⟧ (nothing else to try)" in <p#probe-note.probe-note> has text outside the marks: " (nothing else to try)"` |
+| M1b, a do reviewer: o mesmo sufixo via `const PROBE_SUFFIX` | 41 pass | 28 passed | 2 failed, mesma mensagem |
+| M2, atributo: `aria-valuetext` = `` `${view.valueText} level` `` | 1 fail (o scanner pega o template no `setAttribute`) | 28 passed | **20 failed**: `[aria-valuetext] "⟦30%⟧ level" in <input#control-98.range> has text outside the marks: " level"` |
+| M3, prefixo: `metaText()` devolve `` `DDC · ${t('header.meta', …)}` `` | 41 pass | 28 passed | **18 failed** (os 9 estados `ready` × 2): `text "DDC · ⟦RTK · DDC/CI⟧" … has text outside the marks` |
+| M4, tradução partida: a dica i2c cortada em `slice(0, 12)` + `<span>` + `slice(12)` | 41 pass | 6 failed (só a metade `…⟧`, como `neither translated`) | 6 failed, e agora também `text "⟦No Linux, o" … has text outside the marks` |
+
+- O M1 é o mutante do W-2: o spec antigo o aceitava e o estrito o reprova.
+
+### W-3 — espaço real antes do caminho do guia
+- **Teste primeiro:**
+  - Em `tests/e2e/scenarios.spec.mjs`, o `showsI2cHintOnLinux` (estados `empty` e `error` dos `critical_paths`) seleciona o `#message-hint` inteiro com a Selection API e lê `selection.toString()`, que é o que uma cópia dá. Ele exige `` `${t('hint.i2c')} docs/linux-ddc-setup.md` ``.
+  - Antes da correção: **4 failed**, com `Received: "…Guia de configuração:docs/linux-ddc-setup.md"`.
+- **Correção:**
+  - em `app.js`, `replaceChildren(status.hint.text, ' ', verbatim('code', '', status.hint.doc))`, com uma linha de WHY;
+  - em `styles.css`, sai o `margin-inline-start` do `.message-hint code`;
+  - os locales e o view-model não mudaram.
+- **Depois da correção:** 88 passed + 6 skipped, e `node` com 135 pass. O texto copiado fica `…Guia de configuração: docs/linux-ddc-setup.md`.
+- **Pseudo-locale:** o nó `' '` fica fora do `translate="no"`, mas não tem letra, e o spec ignora texto vazio após `trim`. O spec estrito segue 28/28.
+- **Visual:**
+  - Screenshots de rascunho no scratchpad, antes e depois: pt-BR `empty`, pseudo `empty` e `error`, nos 2 temas. Mesmas dimensões (310 × 74/75), e a olho não há diferença: o espaço da fonte substitui os 0.3em.
+  - Os PNGs versionados não mostram a dica. O C19 regenerou os 6 com SHA-1 idênticos (`git diff --quiet -- docs/screenshots`), então não houve screenshot para commitar.
+
+### Harness
+- Nesta iteração mudaram `tests/e2e/pseudo-locale.spec.mjs` (W-2) e `tests/e2e/scenarios.spec.mjs` (teste do W-3). Nada foi enfraquecido:
+  - todas as regras anteriores continuam;
+  - o `showsI2cHintOnLinux` só ganhou asserções.
+- O coletor de console/pageerror, o axe e o `playwright.config.mjs` não mudaram.
+- **Hash novo do harness:** `0566f41628d9be1004bf1fceac666ee721135502929c005185fae3d3dd04518a`. São 19 arquivos, com a última mudança em `1693cec`. Foi calculado com `cd apps/ddc-tray && sha256sum playwright.config.mjs tests/e2e/*.mjs tests/ui/*.mjs | sha256sum | cut -c1-64`.
+
+### Verify do CONTEXT.md e do PROJECT.md (extraídos por script do `.md`, rodados com `bash` a partir da raiz, sem `DDC_HW_TESTS` nem `DDC_TRAY_FAKE`)
+| # | Critério | Resultado |
+|---|---|---|
+| C1 | fmt + clippy `-D warnings` | `OK` |
+| C2 | build release `ddc-tray` | `OK` |
+| C3 | só `lib.rs` constrói `DdcHiMonitorBackend` (1×) | `OK` |
+| C4 | `panel.rs` puro sobre `MonitorControl` | `OK` |
+| C5 | `#![forbid(unsafe_code)]`, nenhum `unsafe` | `OK` |
+| C6 | `node --test` por módulo e total | `OK` (135 pass, 0 fail/cancelled/skipped/todo) |
+| C7 | i18n paridade/HTML + scanner | `OK` |
+| C8 | CSP | `OK` |
+| C9 | capabilities | `OK` |
+| C10 | single-instance 1º no builder | `OK` |
+| C11 | smoke `--activate` | `OK` (PID 1410485, `org.kde.StatusNotifierItem-1410485-1`, `popup shown` e ainda mostrado 1,5 s depois; backend real só com leituras) |
+| C12 | teste de hardware `#[ignore]` gated | `OK` (listado, não executado) |
+| C13 | Gate 7 | `OK`: 88 passed, 6 skipped (= screenshots), 0 failed/flaky; n = 10, dd = 16/16, dr = 2, ps = 26 |
+| C14 | bridge nunca cai no demo fora de servidor local + `withGlobalTauri` | `OK` |
+| C15 | hash do harness | **não rodado, como pedido.** O CONTEXT tem o hash da iter 7 (`9787e931…3288`), e o novo está acima |
+| C16 | nenhum `<select>` em `src/` | `OK` |
+| C17 | `ksni` + testes `scroll` + smoke `--fake --scroll` | `OK` (PID 1411677, `75 -> 80` vertical, horizontal sem escrita em 1,5 s, `80 -> 75`) |
+| C18 | TODO/FIXME em todo arquivo versionado do produto | `OK` |
+| C19 | screenshots regenerados, nada pulado, byte a byte iguais | `OK` (6 PNGs, SHA-1 inalterados) |
+| P1 | `cargo test --workspace --locked` | `OK` (383 passed, 0 failed, 9 ignored) |
+| P2 | cobertura ≥ 80 % (literal `cargo llvm-cov --workspace --summary-only`) | TOTAL lines 82.84 % (gate com exclusões e `--fail-under-lines 80`: 83.22 %, exit 0) |
+| P3 | TODO/FIXME em `*.rs` | `OK` |
+
+- **Protocolo dos smokes (C11, C17):** um de cada vez.
+  - Antes de cada um, `pgrep -xa ddc-tray` mostrava a instância do usuário, encerrada com `pkill -x ddc-tray` (nunca `-f`).
+  - Logo depois, `setsid -f /home/slipalison/.local/bin/ddc-tray` a reabriu.
+  - PIDs do usuário: 1315274 → 1410705 → 1411926, que é a instância viva no fim. Nada em `~/.local` foi tocado.
+- **Porta 1420:** livre antes e depois do C13/C19.
+
+### Gates (números finais)
+| Gate | Resultado |
+|---|---|
+| `cargo fmt --check` / `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 / exit 0 |
+| `cargo test --workspace --locked` | **383 passed**, 0 failed, 9 ignored (nenhum `.rs` mudou) |
+| `node --test` (todos) | **135 pass**, 0 fail/cancelled/skipped/todo |
+| Playwright | **88 passed**, 6 skipped (screenshots sem `SCREENSHOTS=1`) |
+| cobertura (gate) | TOTAL lines **83.22 %** |
+| `Cargo.lock` / `package-lock.json` | intocados |
+
+### Desvios e observações
+- **README/CHANGELOG** (`8907c8e`) não estavam na lista da iteração. Mudei 1 frase em cada porque descreviam a regra frouxa, e o DoD manual #24 pede o README fiel ao comportamento atual.
+- **`scenarios.spec.mjs` também mudou**, além do spec pseudo: é o teste de regressão do W-3 (o bugfix começa por um teste que falha). Por isso ele entra no hash novo.
+- **Limite de desenho que segue (registrado pelo reviewer):** um literal colado a um *dado* sob `translate="no"` continua sem check. A D-7 aceita nós de dado sem ler o conteúdo, e a regra estrita vale só fora de `translate="no"`.
+- **Cobertura literal:** 82.84 % contra os 82.78 % da iter 7, sem nenhum `.rs` alterado. É variação de execução do `llvm-cov` (testes com threads e timers). O gate ficou igual (83.22 %).
+- **Monitor real:** nenhuma escrita. O `rtk_qhd_hdr` não foi executado. O C11 usou o backend real só com leituras, e o C17 o monitor simulado.
