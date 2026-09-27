@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import en from '../../src/i18n/en.js';
 import ptBR from '../../src/i18n/pt-BR.js';
@@ -31,6 +31,9 @@ const READABLE_ATTRIBUTES = [
   'aria-roledescription',
   'aria-valuetext',
   'aria-placeholder',
+  'aria-braillelabel',
+  'aria-brailleroledescription',
+  'aria-keyshortcuts',
   'title',
   'alt',
   'placeholder',
@@ -104,6 +107,77 @@ test('app.js never writes a literal string as text', () => {
   assert.deepEqual(literalText, []);
 });
 
+// The DOM the scripts build takes its texts from keys or from the monitor's
+// data: a literal handed to a helper, a text property or a readable
+// attribute would be the one text a translation never reaches.
+test('app.js passes no literal text to element() or setText()', () => {
+  const scans = new Map(domModules().map(([name, code]) => [name, literalDomText(code)]));
+
+  assert.deepEqual(
+    ['app.js', 'dropdown.js', 'icons.js'].filter((name) => !scans.has(name)),
+    [],
+    'modules that build the DOM',
+  );
+  const { sites } = scans.get('app.js');
+  for (const [how, least] of [
+    ['element()', 8],
+    ['setText()', 4],
+    ['.textContent =', 10],
+    ['setAttribute()', 10],
+  ]) {
+    assert.ok((sites.get(how) ?? 0) >= least, `only ${sites.get(how) ?? 0} ${how} in app.js`);
+  }
+  assert.ok((scans.get('dropdown.js').sites.get('element()') ?? 0) >= 1, 'the dropdown element() was read');
+  const found = [...scans].flatMap(([name, { found: literals }]) =>
+    literals.map(({ line, how, literal }) => `${name}:${line} ${how} ${JSON.stringify(literal)}`),
+  );
+  assert.deepEqual(found, []);
+});
+
+test('the literal-text scan flags each way a text reaches the DOM, and nothing else', () => {
+  const code = [
+    "function element(tag, className = '', text = null) {}",
+    'function setText(node, text) {}',
+    "element('span', 'tag', 'Undeclared');",
+    "element('span', 'tag', t('tag.dangerous'));",
+    "element('span', 'tag', view.label);",
+    "setText(ui.note, busy ? 'Saving' : null);",
+    'setText(ui.note, `${count} left`);',
+    "node.textContent = 'Hello';",
+    "node.textContent = text ?? '';",
+    'node.title = "Close";',
+    "node.setAttribute('aria-label', 'Close');",
+    "node.setAttribute('title', t('action.close'));",
+    "node.setAttribute('aria-hidden', 'true');",
+    "node.setAttribute('aria-controls', `${id}-list`);",
+    "node.setAttribute('aria-live', 'Loud');",
+    "Object.assign(node, { type: 'button', textContent: 'Go' });",
+    "node.append(createIcon('check'), 'Done');",
+    "// element('span', 'tag', 'In a comment');",
+    "const quote = /'/; node.textContent = 'After a regex'; const again = /'/;",
+    "const half = width / 2; node.ariaLabel = 'After a division';",
+    "node.textContent += ' more';",
+    "/* element('span', 'tag', 'In a block comment'); */",
+  ].join('\n');
+
+  const found = literalDomText(code).found.map(({ line, how, literal }) => `${line} ${how} ${JSON.stringify(literal)}`);
+
+  assert.deepEqual(found, [
+    '3 element() "Undeclared"',
+    '6 setText() "Saving"',
+    '7 setText() "${} left"',
+    '8 .textContent = "Hello"',
+    '10 .title = "Close"',
+    '11 setAttribute() "Close"',
+    '15 setAttribute() "Loud"',
+    '16 Object.assign() "Go"',
+    '17 append() "Done"',
+    '19 .textContent = "After a regex"',
+    '20 .ariaLabel = "After a division"',
+    '21 .textContent += " more"',
+  ]);
+});
+
 test('the only script is the app module, and nothing is inline', () => {
   const scriptTags = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
 
@@ -174,3 +248,320 @@ test('every icon the page and the app ask for exists', () => {
     [],
   );
 });
+
+// ------------------------------------------------ literal text in the DOM
+//
+// A small tokenizer, enough of JavaScript for the sources of `src/` (not a
+// parser): it drops comments and tells strings, templates and regexes
+// apart, so a quote in a regex or a call in a comment never throws off the
+// scan of the places a text reaches the page.
+
+const LETTER = /\p{L}/u;
+const OPENERS = new Set(['(', '[', '{']);
+const CLOSERS = new Set([')', ']', '}']);
+/** Tokens of more than one character, longest first. */
+const PUNCTUATORS = '... === !== ??= ||= &&= => == != <= >= && || ?? ?. += -='.split(' ');
+/** Assignments that can put a text into a property. */
+const ASSIGNMENTS = new Set(['=', '+=', '??=', '||=', '&&=']);
+/** Words after which a `/` opens a regex rather than divides. */
+const REGEX_AFTER_WORDS = new Set('return typeof case in of new delete void throw else do yield await'.split(' '));
+
+/** DOM properties whose value a person reads or hears. */
+const TEXT_PROPERTIES = new Set([
+  'textContent',
+  'innerText',
+  'outerText',
+  'nodeValue',
+  'title',
+  'alt',
+  'placeholder',
+  'ariaLabel',
+  'ariaDescription',
+  'ariaRoleDescription',
+  'ariaValueText',
+  'ariaPlaceholder',
+  'ariaKeyShortcuts',
+]);
+/** ARIA attributes that hold element ids, never read out. */
+const ARIA_IDREFS = new Set([
+  'aria-activedescendant',
+  'aria-controls',
+  'aria-describedby',
+  'aria-details',
+  'aria-errormessage',
+  'aria-flowto',
+  'aria-labelledby',
+  'aria-owns',
+]);
+/** Every token value of ARIA's enumerated and true/false attributes. */
+const ARIA_TOKENS = new Set(
+  (
+    'true false mixed undefined off polite assertive horizontal vertical none inline list both ' +
+    'ascending descending other menu listbox tree grid dialog page step location date time ' +
+    'grammar spelling additions removals text all'
+  ).split(' '),
+);
+/** Methods that add their arguments as children: a string one is a text node. */
+const CHILD_METHODS = new Set(['append', 'prepend', 'replaceChildren', 'before', 'after', 'replaceWith']);
+const STATEMENT_END = new Set([';', ',']);
+
+/** The scripts of `src/` that build the DOM, by path: `[path, source]`. */
+function domModules() {
+  const root = new URL('../../src/', import.meta.url);
+  return readdirSync(root, { recursive: true })
+    .filter((path) => path.endsWith('.js'))
+    .sort()
+    .map((path) => [path, readFileSync(new URL(path, root), 'utf8')])
+    .filter(([, code]) => buildsDom(tokenize(code).tokens));
+}
+
+function buildsDom(tokens) {
+  return tokens.some(
+    ({ kind, text }) =>
+      kind === 'word' && ['document', 'createElement', 'createElementNS', 'textContent', 'setAttribute'].includes(text),
+  );
+}
+
+/**
+ * The places `code` puts literal text into the page: a call of one of its
+ * own helpers with a `text` parameter (`element()`, `setText()`…), a text
+ * property, a readable attribute, `Object.assign` or a child added as a
+ * string. `found` lists them as `{ line, how, literal }`; `sites` counts
+ * the places read, by `how`. Only `t(…)` may hold a literal: its key.
+ */
+function literalDomText(code) {
+  const { tokens } = tokenize(code);
+  const helpers = textHelpers(tokens);
+  const found = [];
+  const sites = new Map();
+  const read = (how, literals) => {
+    sites.set(how, (sites.get(how) ?? 0) + 1);
+    for (const literal of literals) found.push({ line: lineOf(code, literal.at), how, literal: literal.text });
+  };
+  tokens.forEach((token, index) => {
+    if (token.kind !== 'word') return;
+    const before = tokens[index - 1]?.text;
+    const after = tokens[index + 1]?.text;
+    const member = before === '.' || before === '?.';
+    const args = () => callArguments(tokens, index + 1);
+    if (after === '(' && !member && before !== 'function' && helpers.has(token.text)) {
+      read(`${token.text}()`, literalTexts(args()[helpers.get(token.text)] ?? []));
+    } else if (ASSIGNMENTS.has(after) && member && TEXT_PROPERTIES.has(token.text)) {
+      read(`.${token.text} ${after}`, literalTexts(expressionFrom(tokens, index + 2)));
+    } else if (after === '(' && member && token.text === 'setAttribute') {
+      read('setAttribute()', attributeLiterals(args()));
+    } else if (after === '(' && member && token.text === 'assign' && tokens[index - 2]?.text === 'Object') {
+      read('Object.assign()', args().slice(1).flatMap(propertyLiterals));
+    } else if (after === '(' && member && CHILD_METHODS.has(token.text)) {
+      read(`${token.text}()`, args().flatMap((arg) => literalTexts(arg, { skipCalls: true })));
+    } else if (after === '(' && member && token.text === 'createTextNode') {
+      read('createTextNode()', literalTexts(args()[0] ?? []));
+    } else if (after === '(' && member && token.text === 'insertAdjacentText') {
+      read('insertAdjacentText()', literalTexts(args()[1] ?? []));
+    }
+  });
+  return { found, sites };
+}
+
+/** The module's functions with a `text` parameter, and its position. */
+function textHelpers(tokens) {
+  const helpers = new Map();
+  tokens.forEach((token, index) => {
+    if (token.text !== 'function' || tokens[index + 1]?.kind !== 'word' || tokens[index + 2]?.text !== '(') return;
+    const at = callArguments(tokens, index + 2).findIndex((param) => param[0]?.text === 'text');
+    if (at >= 0) helpers.set(tokens[index + 1].text, at);
+  });
+  return helpers;
+}
+
+function attributeLiterals([name = [], value = []]) {
+  const attribute = name.length === 1 && name[0].kind === 'string' ? name[0].text : null;
+  if (attribute === null || READABLE_ATTRIBUTES.includes(attribute)) return literalTexts(value);
+  if (!attribute.startsWith('aria-') || ARIA_IDREFS.has(attribute)) return [];
+  return literalTexts(value).filter(({ text }) => !text.split(/\s+/).every((word) => ARIA_TOKENS.has(word)));
+}
+
+/** The literals of the text properties of an object literal argument. */
+function propertyLiterals(arg) {
+  if (arg[0]?.text !== '{') return [];
+  return callArguments(arg, 0)
+    .filter(([key, colon]) => colon?.text === ':' && TEXT_PROPERTIES.has(key.text))
+    .flatMap((entry) => literalTexts(entry.slice(2)));
+}
+
+/**
+ * The string and template literals in `tokens` that hold a letter, but
+ * those in `t(…)`; with `skipCalls`, those in any call.
+ */
+function literalTexts(tokens, { skipCalls = false } = {}) {
+  const found = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const called = token.kind === 'word' && tokens[index + 1]?.text === '(';
+    const member = ['.', '?.'].includes(tokens[index - 1]?.text);
+    if (called && (skipCalls || (token.text === 't' && !member))) {
+      index = closing(tokens, index + 1);
+    } else if (token.kind === 'string' || token.kind === 'template') {
+      if (LETTER.test(token.text)) found.push(token);
+      for (const expression of token.expressions ?? []) found.push(...literalTexts(expression, { skipCalls }));
+    }
+  }
+  return found;
+}
+
+/** The arguments of the call (or entries of the literal) opened at `open`, each a token list. */
+function callArguments(tokens, open) {
+  const end = closing(tokens, open);
+  const args = [];
+  let current = [];
+  let depth = 0;
+  for (let index = open + 1; index < end; index += 1) {
+    const token = tokens[index];
+    if (token.kind === 'punct' && OPENERS.has(token.text)) depth += 1;
+    if (token.kind === 'punct' && CLOSERS.has(token.text)) depth -= 1;
+    if (depth === 0 && token.text === ',' && token.kind === 'punct') {
+      args.push(current);
+      current = [];
+    } else {
+      current.push(token);
+    }
+  }
+  if (current.length > 0) args.push(current);
+  return args;
+}
+
+/** The expression from `start` to the end of its statement, argument or bracket. */
+function expressionFrom(tokens, start) {
+  const expression = [];
+  let depth = 0;
+  for (const token of tokens.slice(start)) {
+    if (token.kind === 'punct' && depth === 0 && (STATEMENT_END.has(token.text) || CLOSERS.has(token.text))) break;
+    if (token.kind === 'punct' && OPENERS.has(token.text)) depth += 1;
+    if (token.kind === 'punct' && CLOSERS.has(token.text)) depth -= 1;
+    expression.push(token);
+  }
+  return expression;
+}
+
+/** The index of the token that closes the bracket opened at `open`. */
+function closing(tokens, open) {
+  let depth = 0;
+  for (let index = open; index < tokens.length; index += 1) {
+    const { kind, text } = tokens[index];
+    if (kind !== 'punct') continue;
+    if (OPENERS.has(text)) depth += 1;
+    if (CLOSERS.has(text)) depth -= 1;
+    if (depth === 0) return index;
+  }
+  return tokens.length;
+}
+
+function lineOf(code, at) {
+  return code.slice(0, at).split('\n').length;
+}
+
+/**
+ * The tokens of `code` from `start`, comments left out: `string`,
+ * `template` (its static text, `${}` where each expression was, and the
+ * tokens of each), `regex`, `word`, `number` and `punct`, each with its
+ * offset `at`. With `closer`, stops after the `}` that closes a `${`.
+ */
+function tokenize(code, start = 0, closer = false) {
+  const tokens = [];
+  let index = start;
+  let depth = 0;
+  const push = (kind, end, extra = {}) => {
+    tokens.push({ kind, text: code.slice(index, end), at: index, ...extra });
+    index = end;
+  };
+  while (index < code.length) {
+    const char = code[index];
+    const rest = code.slice(index, index + 3);
+    if (/\s/.test(char)) index += 1;
+    else if (rest.startsWith('//')) index = endOfLine(code, index);
+    else if (rest.startsWith('/*')) index = endOfComment(code, index);
+    else if (char === "'" || char === '"') {
+      const end = stringEnd(code, index);
+      tokens.push({ kind: 'string', text: code.slice(index + 1, end - 1), at: index });
+      index = end;
+    } else if (char === '`') {
+      const template = readTemplate(code, index);
+      tokens.push(template);
+      index = template.end;
+    } else if (char === '/' && regexAllowed(tokens.at(-1))) push('regex', regexEnd(code, index));
+    else if (/[A-Za-z_$]/.test(char)) push('word', matchEnd(code, index, /[\w$]*/y));
+    else if (/\d/.test(char)) push('number', matchEnd(code, index, /[\w.]*/y));
+    else if (closer && char === '}' && depth === 0) return { tokens, end: index + 1 };
+    else {
+      const text = PUNCTUATORS.find((candidate) => code.startsWith(candidate, index)) ?? char;
+      if (OPENERS.has(text)) depth += 1;
+      if (CLOSERS.has(text)) depth -= 1;
+      push('punct', index + text.length);
+    }
+  }
+  return { tokens, end: index };
+}
+
+function readTemplate(code, start) {
+  const parts = [];
+  const expressions = [];
+  let text = '';
+  let index = start + 1;
+  while (index < code.length && code[index] !== '`') {
+    if (code[index] === '\\') {
+      text += code.slice(index, index + 2);
+      index += 2;
+    } else if (code.startsWith('${', index)) {
+      parts.push(text);
+      text = '';
+      const inner = tokenize(code, index + 2, true);
+      expressions.push(inner.tokens);
+      index = inner.end;
+    } else {
+      text += code[index];
+      index += 1;
+    }
+  }
+  parts.push(text);
+  return { kind: 'template', text: parts.join('${}'), expressions, at: start, end: index + 1 };
+}
+
+function stringEnd(code, start) {
+  let index = start + 1;
+  while (index < code.length && code[index] !== code[start]) index += code[index] === '\\' ? 2 : 1;
+  return index + 1;
+}
+
+function regexAllowed(previous) {
+  if (!previous) return true;
+  if (previous.kind === 'word') return REGEX_AFTER_WORDS.has(previous.text);
+  return previous.kind === 'punct' && !CLOSERS.has(previous.text);
+}
+
+function regexEnd(code, start) {
+  let index = start + 1;
+  let inClass = false;
+  while (index < code.length && (inClass || code[index] !== '/')) {
+    if (code[index] === '\n') throw new Error(`unterminated regex at offset ${start}`);
+    if (code[index] === '[') inClass = true;
+    if (code[index] === ']') inClass = false;
+    index += code[index] === '\\' ? 2 : 1;
+  }
+  return matchEnd(code, index + 1, /[a-z]*/y);
+}
+
+function matchEnd(code, start, sticky) {
+  sticky.lastIndex = start;
+  sticky.test(code);
+  return sticky.lastIndex;
+}
+
+function endOfComment(code, start) {
+  const end = code.indexOf('*/', start + 2);
+  return end < 0 ? code.length : end + 2;
+}
+
+function endOfLine(code, start) {
+  const end = code.indexOf('\n', start);
+  return end < 0 ? code.length : end;
+}
