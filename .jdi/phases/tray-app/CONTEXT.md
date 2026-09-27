@@ -47,10 +47,10 @@ App Tauri 2 `apps/ddc-tray`: ícone na bandeja (Linux + Windows), popup com sele
       **Verify:** `grep -RIlq '#!\[forbid(unsafe_code)\]' apps/ddc-tray/src-tauri/src/lib.rs && echo OK`
       **Source:** CONTEXT
 - [ ] `node --test` cobre debounce/coalescência do slider, o view-model de apresentação e o bridge demo, com zero falhas (testes FORA de `src/`, que é o `frontendDist` embutido no binário).
-      **Verify:** `o=$(node --test 'apps/ddc-tray/tests/ui/**/*.test.mjs' 2>&1); echo "$o" | grep -qE '^# pass ([2-9][0-9]|[1-9][0-9]{2,})$' && echo "$o" | grep -qE '^# fail 0$' && ! find apps/ddc-tray/src -name '*.test.*' | grep -q . && echo OK`
+      **Verify:** `o=$(node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs' 2>&1); echo "$o" | grep -qE '^# pass ([2-9][0-9]|[1-9][0-9]{2,})$' && echo "$o" | grep -qE '^# fail 0$' && ! find apps/ddc-tray/src -name '*.test.*' | grep -q . && echo OK`
       **Source:** CONTEXT
 - [ ] Paridade de chaves i18n entre `en` e `pt-BR` e ausência de texto hardcoded no HTML fora das chaves.
-      **Verify:** `o=$(node --test 'apps/ddc-tray/tests/ui/i18n*.test.mjs' 2>&1); echo "$o" | grep -qE '^# pass [1-9]' && echo "$o" | grep -qE '^# fail 0$' && echo OK`
+      **Verify:** `o=$(node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/i18n*.test.mjs' 2>&1); echo "$o" | grep -qE '^# pass [1-9]' && echo "$o" | grep -qE '^# fail 0$' && echo OK`
       **Source:** CONTEXT
 - [ ] CSP do tray não permite `unsafe-inline` em script e restringe `script-src` a `'self'`.
       **Verify:** csp=$(jq -r '.app.security.csp' apps/ddc-tray/src-tauri/tauri.conf.json); echo "$csp" | grep -qE "script-src[^;]*'self'" && ! echo "$csp" | grep -q 'unsafe-inline' && echo OK
