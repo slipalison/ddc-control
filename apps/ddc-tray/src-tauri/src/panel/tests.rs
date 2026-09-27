@@ -35,8 +35,9 @@ const TV_FAILURE: &str =
 /// 0x0C — colour temperature request, declared by the dev monitor.
 const COLOR_TEMP: VcpCode = VcpCode(0x0C);
 
-/// Set to regenerate the golden on purpose, after a deliberate contract
-/// change: `DDC_TRAY_UPDATE_GOLDEN=1 cargo test -p ddc-tray --locked golden`.
+/// Set to regenerate the goldens on purpose, after a deliberate contract
+/// change: `DDC_TRAY_UPDATE_GOLDEN=1 cargo test -p ddc-tray --locked golden`
+/// (or name one test, such as `mute_contract`, to rewrite only its file).
 const UPDATE_GOLDEN: &str = "DDC_TRAY_UPDATE_GOLDEN";
 
 pub(crate) type Osd = SoftwareOsd<InMemoryMonitorBackend>;
@@ -754,8 +755,8 @@ fn a_brightness_shortcut_on_an_unreachable_monitor_writes_nothing() {
     assert_eq!(writes(&backend), []);
 }
 
-/// What the golden pins: the three answers the popup needs to open on the
-/// RTK scenario.
+/// What the RTK golden pins: the three answers the popup needs to open on
+/// the RTK scenario.
 #[derive(Serialize)]
 struct Contract {
     monitors: Vec<MonitorDto>,
@@ -763,8 +764,19 @@ struct Contract {
     features: Vec<FeatureDto>,
 }
 
-fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/contract-rtk.json")
+/// What the mute golden pins: the mute TV as listed, and the error its
+/// panel fails with — which the demo's mute TV must answer too.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MuteContract {
+    monitor: MonitorDto,
+    load_panel: UiError,
+}
+
+fn golden_path(file: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/fixtures")
+        .join(file)
 }
 
 fn pretty(value: &Value) -> String {
@@ -793,6 +805,25 @@ fn line_at<'a>(lines: &[&'a str], index: usize) -> &'a str {
     lines.get(index).copied().unwrap_or("<end of document>")
 }
 
+/// Checks `contract` against the golden `file`, after rewriting it when
+/// [`UPDATE_GOLDEN`] is set.
+fn assert_matches_golden(file: &str, contract: &impl Serialize) {
+    if std::env::var_os(UPDATE_GOLDEN).is_some() {
+        let document = serde_json::to_string_pretty(contract).unwrap();
+        std::fs::write(golden_path(file), format!("{document}\n")).unwrap();
+    }
+
+    let golden: Value =
+        serde_json::from_str(&std::fs::read_to_string(golden_path(file)).unwrap()).unwrap();
+    let actual = serde_json::to_value(contract).unwrap();
+
+    assert!(
+        actual == golden,
+        "{}",
+        first_difference(&pretty(&golden), &pretty(&actual))
+    );
+}
+
 #[test]
 fn rtk_contract_matches_the_golden() {
     let (osd, _) = osd_with([rtk_monitor()]);
@@ -801,18 +832,18 @@ fn rtk_contract_matches_the_golden() {
         panel: load_panel(&osd, &rtk_id()).unwrap(),
         features: load_features(&osd, &rtk_id()).unwrap(),
     };
-    if std::env::var_os(UPDATE_GOLDEN).is_some() {
-        let document = serde_json::to_string_pretty(&contract).unwrap();
-        std::fs::write(golden_path(), format!("{document}\n")).unwrap();
-    }
 
-    let golden: Value =
-        serde_json::from_str(&std::fs::read_to_string(golden_path()).unwrap()).unwrap();
-    let actual = serde_json::to_value(&contract).unwrap();
+    assert_matches_golden("contract-rtk.json", &contract);
+}
 
-    assert!(
-        actual == golden,
-        "{}",
-        first_difference(&pretty(&golden), &pretty(&actual))
-    );
+#[test]
+fn mute_contract_matches_the_golden() {
+    let (osd, _) = osd_with([mute_tv(), rtk_monitor()]);
+    let listed = monitors(&osd).unwrap();
+    let contract = MuteContract {
+        monitor: listed.into_iter().next().unwrap(),
+        load_panel: load_panel(&osd, &tv_id()).unwrap_err(),
+    };
+
+    assert_matches_golden("contract-mute.json", &contract);
 }

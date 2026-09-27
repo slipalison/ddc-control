@@ -132,10 +132,11 @@ function monitorOf(monitors, monitorId) {
   return monitor;
 }
 
-// A silent monitor is listed, but every DDC/CI transaction with it times out.
+// A mute monitor is listed, but every DDC/CI transaction with it fails with
+// its error — for `load_panel`, exactly what the Rust side answers.
 function answering(monitors, monitorId) {
   const monitor = monitorOf(monitors, monitorId);
-  if (monitor.silent) throw uiError('timeout', 'monitor did not respond in time');
+  if (monitor.mute) throw uiError(monitor.mute.kind, monitor.mute.message);
   return monitor;
 }
 

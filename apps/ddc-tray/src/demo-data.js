@@ -1,7 +1,8 @@
 // The demo's monitors (D-2026-09-26-tray-app-8), written out as the Rust
 // side would read them. `rtk` mirrors the fake of `panel/tests.rs` (plan
 // A-2) — the contract test pins it to the golden — and its probe mirrors the
-// probe test there. Every name is the core's catalog name, verbatim.
+// probe test there; the mute TV's error is pinned the same way, to the mute
+// golden. Every name is the core's catalog name, verbatim.
 
 export const SCENARIOS = Object.freeze(['rtk', 'two-monitors', 'empty', 'error']);
 
@@ -19,13 +20,14 @@ export function scenarioName(search) {
 /**
  * Fresh monitors of scenario `name`, in enumeration order. Each entry holds
  * the raw reading (`current`, `max`) a write changes, and `options` when
- * the feature is non-continuous; a `silent` monitor never answers DDC/CI.
+ * the feature is non-continuous; a monitor with a `mute` error fails every
+ * DDC/CI call with it.
  * @param {string} name
  */
 export function scenarioMonitors(name) {
   switch (name) {
     case 'two-monitors':
-      return [silentTv(), rtk(), dell()];
+      return [muteTv(), rtk(), dell()];
     case 'empty':
     case 'error':
       return [];
@@ -144,8 +146,9 @@ function rtk() {
 }
 
 // A TV listed first, as on the development machine: its EDID reads, but
-// it never answers DDC/CI, so the popup has to move on to the next monitor.
-function silentTv() {
+// it never answers DDC/CI, so its panel fails with the error the real
+// backend gives for it, and the popup has to move on to the next monitor.
+function muteTv() {
   return {
     info: {
       id: 'GSM-LG-TV-SSCR2-01010101',
@@ -153,7 +156,11 @@ function silentTv() {
       manufacturer: 'GSM',
       model: 'LG TV SSCR2',
     },
-    silent: true,
+    mute: {
+      kind: 'transport',
+      message:
+        'transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)',
+    },
     controls: [],
     features: [],
     probe: [],

@@ -1,7 +1,8 @@
 //! The contract between the popup and the Rust side
 //! (D-2026-09-26-tray-app-4): what commands return and events carry, in
-//! camelCase, each shape built from core types. The golden
-//! `apps/ddc-tray/tests/fixtures/contract-rtk.json` pins them for the UI.
+//! camelCase, each shape built from core types. The goldens
+//! `apps/ddc-tray/tests/fixtures/contract-rtk.json` (the RTK) and
+//! `contract-mute.json` (a mute monitor's panel error) pin them for the UI.
 
 use ddc_core::domain::mccs_catalog::{catalog_entry, value_name};
 use ddc_core::domain::{

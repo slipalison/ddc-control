@@ -48,7 +48,7 @@ test('?demo= picks a scenario and falls back to rtk when unknown', () => {
   assert.equal(scenarioName(undefined), 'rtk');
 });
 
-test('two-monitors lists a silent TV first, then both monitors; the DELL has no volume and an unnamed input', async () => {
+test('two-monitors lists a mute TV first, then both monitors; the DELL has no volume and an unnamed input', async () => {
   const { bridge } = demo('?demo=two-monitors');
 
   const monitors = await bridge.listMonitors();
@@ -77,14 +77,18 @@ test('two-monitors lists a silent TV first, then both monitors; the DELL has no 
   });
 });
 
-test('the silent TV is listed but every DDC/CI call to it times out', async () => {
+test('the mute TV is listed but every DDC/CI call to it fails over the transport', async () => {
   const { win, bridge } = demo('?demo=two-monitors');
-  const timeout = { kind: 'timeout', message: 'monitor did not respond in time' };
+  const mute = {
+    kind: 'transport',
+    message:
+      'transport error: DDC/CI I2C error: Input/output error (os error 5) (gave up after attempt 3 of 3)',
+  };
 
-  assert.deepEqual(await rejection(bridge.loadPanel(TV)), timeout);
-  assert.deepEqual(await rejection(bridge.loadFeatures(TV)), timeout);
-  assert.deepEqual(await rejection(bridge.probeFeatures(TV)), timeout);
-  assert.deepEqual(await rejection(bridge.setFeature(TV, BRIGHTNESS, 10)), timeout);
+  assert.deepEqual(await rejection(bridge.loadPanel(TV)), mute);
+  assert.deepEqual(await rejection(bridge.loadFeatures(TV)), mute);
+  assert.deepEqual(await rejection(bridge.probeFeatures(TV)), mute);
+  assert.deepEqual(await rejection(bridge.setFeature(TV, BRIGHTNESS, 10)), mute);
   assert.equal(await bridge.selectMonitor(TV), null);
   assert.deepEqual(win.__ddcDemo.writes, []);
   assert.equal((await bridge.loadPanel(RTK)).monitorId, RTK);

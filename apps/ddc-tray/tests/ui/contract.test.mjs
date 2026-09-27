@@ -4,11 +4,13 @@ import { readFileSync } from 'node:fs';
 
 import { createBridge } from '../../src/bridge.js';
 
-// Written by the Rust side from the fake RTK (plan A-1/A-2); the demo must
-// answer exactly the same, so the browser shows what the app would.
-const golden = JSON.parse(
-  readFileSync(new URL('../fixtures/contract-rtk.json', import.meta.url), 'utf8'),
-);
+// Written by the Rust side from its fakes (plan A-1/A-2): the RTK, and the
+// mute TV with the error its panel fails with. The demo must answer exactly
+// the same, so the browser shows what the app would.
+const fixture = (name) =>
+  JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf8'));
+const golden = fixture('contract-rtk.json');
+const muteGolden = fixture('contract-mute.json');
 
 const keys = (value) => Object.keys(value).sort();
 
@@ -41,6 +43,19 @@ test('the default demo is the golden RTK scenario', async () => {
     panel: golden.panel,
     features: golden.features,
   });
+});
+
+test('the demo mute TV is listed first and fails its panel exactly as the Rust side does', async () => {
+  const bridge = demo('?demo=two-monitors');
+  const monitors = await bridge.listMonitors();
+
+  assert.deepStrictEqual(monitors[0], muteGolden.monitor);
+  await assert.rejects(bridge.loadPanel(muteGolden.monitor.id), (error) => {
+    assert.deepStrictEqual(error, muteGolden.loadPanel);
+    return true;
+  });
+  const rtkPanel = await bridge.loadPanel(golden.monitors[0].id);
+  assert.deepStrictEqual(rtkPanel.controls, golden.panel.controls);
 });
 
 test('two-monitors keeps the golden RTK and shapes the other monitor like the contract', async () => {

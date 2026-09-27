@@ -51,7 +51,7 @@ test('picking the TV shows its error, and "Try again" tries the TV again', async
   await loadEnds(page, () => monitorPicker(page).selectOption(MONITORS.tv));
 
   await expect(page.locator('#app')).toHaveAttribute('data-state', 'error');
-  await expect(page.getByRole('heading', { name: t('error.timeout'), exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: t('error.transport'), exact: true })).toBeVisible();
   await expect(page.locator('#message-tip')).toHaveText(t('hint.ddc'));
   await expect(page.locator('#monitor-meta')).toHaveText(t('header.noAnswer'));
   await expect(retryButton(page)).toBeVisible();
