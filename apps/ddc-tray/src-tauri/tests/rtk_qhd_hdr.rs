@@ -11,7 +11,9 @@
 //! even when an assertion fails first. Nothing dangerous (input, power,
 //! OSD lock, resets) is ever written. The mute-monitor test only reads: on
 //! the dev machine an LG TV is listed next to the RTK, and its DDC/CI never
-//! answers.
+//! answers. Both refuse to run with `DDC_TRAY_FAKE` set: the simulated
+//! monitor has the RTK's id and model, and would pass for it
+//! (D-2026-09-27-tray-app-6).
 
 use std::time::Instant;
 
@@ -23,6 +25,9 @@ use ddc_tray::dto::{ControlDto, ControlValueDto, ErrorKind, MonitorDto, PanelDto
 use ddc_tray::panel;
 
 const REASON: &str = "needs the dev monitor attached; run with DDC_HW_TESTS=1";
+/// Why a hardware run refuses the simulated monitor of `DDC_TRAY_FAKE`.
+const NOT_SIMULATED: &str = "DDC_TRAY_FAKE is set: the app would serve its simulated RTK, \
+    and this run would be no evidence of the real monitor; unset it";
 /// The quick controls the popup shows for the dev monitor, in order.
 const RTK_PANEL: [u8; 6] = [0x10, 0x12, 0x62, 0x60, 0x14, 0xD6];
 /// How far the one test write moves brightness away from its value.
@@ -118,6 +123,10 @@ fn rtk_qhd_hdr_panel_loads_and_one_safe_brightness_write_is_restored() {
     if !hardware_enabled() {
         return;
     }
+    assert!(
+        std::env::var_os("DDC_TRAY_FAKE").is_none(),
+        "{NOT_SIMULATED}"
+    );
     let osd = compose_osd().expect("the DDC/CI backend starts");
     let monitors = timed("list_monitors", || panel::monitors(&*osd)).unwrap();
     println!("monitors: {monitors:#?}");
@@ -162,6 +171,10 @@ fn rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads() {
     if !hardware_enabled() {
         return;
     }
+    assert!(
+        std::env::var_os("DDC_TRAY_FAKE").is_none(),
+        "{NOT_SIMULATED}"
+    );
     let osd = compose_osd().expect("the DDC/CI backend starts");
     let monitors = timed("list_monitors", || panel::monitors(&*osd)).unwrap();
     println!("monitors: {monitors:#?}");
