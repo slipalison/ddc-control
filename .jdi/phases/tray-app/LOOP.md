@@ -3,7 +3,7 @@ phase_slug: tray-app
 phase_position: 5
 iter: 4
 total_resets: 0
-status: running
+status: converged
 max_iter_per_round: 5
 max_resets: 3
 created_at: 2026-09-27T10:29:21-03:00
@@ -22,3 +22,4 @@ created_at: 2026-09-27T10:29:21-03:00
 - iter 3 aggregate after DoD critic: BLOCKED (critic: 1 row objective — apostrophes in a pt-BR.js comment defeat the regex string stripping; D-15 replaces it with a JS tokenizer and per-occurrence issue refs), ts=2026-09-27T11:33:55-03:00
 - iter 4: doer no-op (nenhum código a mudar; só os Verify de TODO revisados pelo orquestrador, D-15), ts=2026-09-27T11:33:55-03:00
 - iter 4: APPROVED_PENDING_MANUAL (W-1 audit, W-3 rebase, W-6 tokenizer limits → fixed by orchestrator D-16), hash=d57e295cf45d, commit=c8578ab, ts=2026-09-27T11:42:41-03:00
+- iter 4 aggregate after DoD critic: APPROVED_PENDING_MANUAL (critic: 0 objective hollow; 1 suspicion on row 18 covered by the pt-BR string exemption), ts=2026-09-27T11:52:17-03:00

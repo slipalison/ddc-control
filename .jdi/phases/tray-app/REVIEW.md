@@ -103,3 +103,9 @@ Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Witho
 ## Nota do orquestrador (pós-review, antes do critic)
 
 W-6 era do `Verify:` do C18 (orquestrador): D-2026-09-27-tray-app-16 exige que o `pt-BR.js` seja dado puro (esqueleto `export default Object.freeze({ k: v, … });`, sem crase) antes do tokenizador. OK em `LC_ALL=C`/`pt_BR.UTF-8`; mutantes (regex com aspa, `${/* todo */}`, comentário com apóstrofos) reprovam; strings portuguesas aceitas.
+
+## DoD Critic (enhanced)
+
+- DoD row «18 (TODO)» — suspeita, não objetiva: um placeholder `'todo: traduzir'` como VALOR de string do `pt-BR.js` passa (isenção decidida em D-13/D-15: strings do locale são português; `'TODO: traduzir'` e `fixme` reprovam), e grafias fora do padrão sem `:`/`(` (`TO-DO fix`, `FIX-ME:`, `Fix me:`) também. Todas as demais formas testadas reprovam em todos os tipos de arquivo.
+
+**Verdict:** APPROVED_WITH_WARNINGS
