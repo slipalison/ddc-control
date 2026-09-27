@@ -27,7 +27,7 @@ GitHub Actions no `slipalison/ddc-control`, a cada PR e push na `main`, em `ubun
 - **Máquina local.** Nunca `sudo`; nunca VCP em monitor real (esta phase não roda teste de hardware). O actionlint 1.7.12 fica no scratchpad.
 - **Gates locais em todo commit de código do ddc-control:** `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`; `cargo test --workspace --locked`; cobertura ≥ 80 (ver Test requirements); `node --test`; Gate 7 quando `apps/ddc-tray` mudar; `cargo check -p ddc-cli -p ddc-adapters --locked --target x86_64-pc-windows-msvc` quando `crates/` mudar.
 - **Runs.** Nunca `gh run rerun` para gerar evidência: o reutilizável fica preso à resolução original (README do gw). Nunca dar push enquanto um run que vai virar evidência não terminou, porque o `cancel-in-progress` o cancela. Falhas se leem com `gh run view <id> --log-failed`.
-- **Custo do verify.** O crítico do DoD roda forçado a cada verify, então o doer só entrega depois do ensaio dos 8 `Verify:` com `OK`.
+- **Custo do verify.** O crítico do DoD roda forçado a cada verify, então o doer só entrega depois do ensaio dos 9 `Verify:` com `OK` (8 até a iteração 1).
 
 ## Tasks
 Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos arquivos `gw:`.
@@ -169,5 +169,63 @@ Specialist único: `jdi-doer-ddc-control` (glob `**/*`), que também cuida dos a
 - Cobertura: `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'` (local) e o painel `**Aprovado:** ≥ 80` do `rust-linux` (CI).
 - UI: `cd apps/ddc-tray && npm test` e o Gate 7 (`npm ci --ignore-scripts && npx playwright test`).
 - Auditoria: `cargo audit` sai 0 no HEAD, e o Verify do DoD 8 roda com o worktree descartável.
-- CI: os 8 Verify do DoD da CONTEXT imprimem `OK` contra o `ci-evidence.env` commitado.
+- CI: os 9 Verify do DoD da CONTEXT (8 até a iteração 1) imprimem `OK` contra o `ci-evidence.env` commitado.
 - Mínimo de cobertura: 80% de linhas (PROJECT.md).
+
+## Iteração 2 (ralph loop: rodada de avisos da REVIEW iter 1)
+Entrada: a REVIEW iter 1 (W-1..W-5 e o DoD Critic) e o DoD da CONTEXT, agora com 9 linhas. A W-1 já tinha sido corrigida pelo orquestrador. Os commits seguem as regras de execução acima.
+
+#### I2-1 (gw, W-2): `so: windows-*` só com `linguagem: rust`
+- **Files modified:** `gw:.github/workflows/qualidade.yml`, `gw:README.md`, `gw:exemplos/ci-rust-desktop.yml`
+- **Feito:**
+  - O `Conferir componente` reprova com `::error::` qualquer `windows-*` com linguagem diferente de `rust`. O comentário diz por quê: só rust foi medido lá, e o `go test -race` pede cgo/gcc.
+  - Cabeçalho, tabela do README, seção "Windows só com `rust`" e exemplo dizem a mesma regra.
+  - O script, extraído do YAML, rodou em 20 combinações: 6 passam e 14 reprovam, e 5 delas são `windows-*` fora de rust.
+  - Commit `33e00c7` `fix(qualidade): windows-* so com rust, a unica linguagem medida la`.
+- **Status:** completed
+
+#### I2-2 (gw, W-5): nome do passo de release sem o campo
+- **Files modified:** `gw:.github/workflows/qualidade.yml`
+- **Feito:**
+  - `name: ${{ matrix.c.build_release && format('Build {0} (release)', matrix.c.build_release) || 'Build de release' }}`.
+  - No run 36345684775: `Build ddc-tray (release)` nos dois jobs rust, e `Build de release` (skipped) no `node-ui`.
+  - Commit `9e91d1a`. É o novo `WORKFLOWS_SHA`, com o CI do gw verde no run 36345116982.
+- **Status:** completed
+
+#### I2-3 (gw, W-4 + W-3): corpo do PR #13
+- **Feito:**
+  - `gh pr edit 13 --body-file`, com a tabela de runs por head (`2335b52`, `afc20cc`, `9e91d1a`).
+  - Nota para o squash: não citar a ponte `python3` que o `afc20cc` tirou, com uma mensagem sugerida.
+  - Seção "Follow-up, fora deste PR" com a W-3: `matrix.c.projeto` interpolado em `run:` e `gocover-cobertura@latest`. Esses caminhos ficam sem mudança nesta phase.
+- **Status:** completed
+
+#### I2-4: repin do `ci.yml`
+- **Files modified:** `.github/workflows/ci.yml`
+- **Feito:** os 2 `uses:` passam para `@9e91d1ac9604aa581ac17438c54d75a2fcc213fa`. Commit `384def7` `ci(ci-crossbuild): pin workflows to 9e91d1a`, com os gates locais verdes.
+- **Status:** completed
+
+#### I2-5 (fora do escopo pedido, achado pelo run NEG): teste com panic sensível a tempo no Windows
+- **Files modified:** `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs` (escopo da T-6: testes que dependem de SO/ambiente)
+- **Sintoma:**
+  - No run NEG 36345194940, o `rust-windows` falhou em `cargo test com cobertura`.
+  - Os testes `a_panic_inside_one_transaction_fails_only_that_call_and_the_worker_keeps_serving` e `maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors` deram `Timeout` em vez de `Transport("ddc-hi panicked: …")`.
+  - Os 3 testes que provocam panic terminaram juntos, 1,2 s depois do início, inclusive o de relógio virtual. O próprio panic foi lento naquele runner; nos runs verdes anteriores, os mesmos testes levaram ~8 ms.
+- **Reprodução:** um panic hook temporário que dorme 1,3 s faz os dois testes falharem localmente com a asserção exata do CI. Com a correção, os dois passam sob o mesmo hook, que depois foi removido.
+- **Correção:**
+  - `const UNHURRIED = 10 s`, que só limita um travamento, nas chamadas cuja resposta não depende de tempo.
+  - O `stuck` continua com 250 ms, porque o `Timeout` dele é o que o teste prova.
+  - Nenhuma asserção mudou, e nenhum teste foi ignorado.
+  - Commit `2871dc6` `test(ci-crossbuild): give panic tests a budget that only bounds a hang`.
+- **Status:** completed
+
+#### I2-6: sequência de evidência refeita
+- **Files modified:** `.cargo/audit.toml` (2 commits), `.jdi/phases/ci-crossbuild/ci-evidence.env`
+- **Feito:**
+  1. NEG `9ef86cc`: só apaga as 8 linhas da exceção RUSTSEC-2018-0005.
+  2. O run NEG 36345194940 terminou `failure` antes de qualquer outro push. O passo `cargo audit` do `rust-linux` falhou com o advisory no log.
+  3. Reversão `3446dd2` (`git checkout 9ef86cc^ -- .cargo/audit.toml`).
+  4. I2-5 (`2871dc6`).
+  5. O run verde 36345684775 no `HEAD_SHA` `2871dc6` usou o mesmo `ci.yml` do NEG.
+  6. `ci-evidence.env` reescrito num commit só de `.jdi/`.
+- Os 9 `Verify:` do DoD, rodados literalmente, imprimem `OK`.
+- **Status:** completed
