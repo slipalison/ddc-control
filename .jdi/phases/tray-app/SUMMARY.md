@@ -1,7 +1,7 @@
 # Phase 5: Tray app — Summary  (slug: tray-app)
 
 **Status:** partial
-**Tasks:** 6/8 complete, 0 blocked
+**Tasks:** 7/8 complete, 0 blocked
 
 ## Executed tasks
 - T-1: scaffold do crate `ddc-tray` (lib `ddc_tray` + bin `ddc-tray`) no workspace, com a config Tauri, a capability mínima, o `icon.svg` próprio, o conjunto de ícones gerado e o `tray.png`. Commits `e91a453` (build) e `4c93104` (docs).
@@ -10,6 +10,7 @@
 - T-4: módulos ES puros e sem dependências (`bridge.js` Tauri/demo, `demo-data.js`, `debounce.js`, `view-model.js`, `i18n/` en + pt-BR) e 63 testes `node --test` fora de `src/`, incluindo o RTK da demo `deepStrictEqual` ao golden. Commit `35c5ffd` (feat).
 - T-5: bandeja com `tray.png`, tooltip e menu nativo bilíngue (`i18n.rs` + `menu.rs` puros), clique esquerdo no Windows alternando o popup ancorado pelo positioner com o gate de `popup.rs`, atalhos de brilho Safe em thread bloqueante com `panel-changed`, "Sair" → `app.exit(0)`, e `scripts/smoke-sni.sh`, que passa no KDE Wayland e falha nos 7 casos provocados. 26 testes novos. Commit `380a691` (feat).
 - T-6: UI do popup em cartões Fluent com o gradiente do ícone: sliders, predefinição, entrada em chips, energia no cabeçalho, "Todos os ajustes" sob demanda com sondagem, diálogo `<dialog>` para todo `dangerous`, estados carregando/vazio/erro, claro/escuro, e o fallback de monitor pedido pelo orquestrador (lembra o último que respondeu e pula os mudos). 83 testes JS (+20). Commit `6e1273c` (feat).
+- T-7: suíte Playwright do popup em `apps/ddc-tray/` (Gate 7): 18 testes × 2 temas = 36 verdes, com a CSP do Tauri injetada, console limpo e axe critical/serious `toEqual([])`, mais os screenshots claro/escuro (e o diálogo claro) em `docs/screenshots/`. O Verify do Gate 7 deu OK 3× seguidas. Commit `e677dd1` (test).
 
 ## Blocked tasks
 - nenhuma
@@ -564,8 +565,101 @@ Depois de reverter: `cmp` idêntico às cópias e `# pass 83`, `# fail 0`.
 | `node --check apps/ddc-tray/src/app.js` | OK |
 | Golden `contract-rtk.json` | intocado |
 
+## T-7 — Suíte Playwright (Gate 7) + screenshots claro/escuro
+
+### O que foi feito
+- **Pacote** (D-2026-09-26-tray-app-2, -8):
+  - `apps/ddc-tray/package.json`: `private`, `"type": "module"`, só `devDependencies` exatas (`@playwright/test` 1.63.0 e `@axe-core/playwright` 4.13.0) e `scripts.test = "playwright test"`;
+  - `package-lock.json` gerado por `npm install --ignore-scripts`, com 5 pacotes: os 2 acima, `playwright`, `playwright-core` 1.63.0 e `axe-core` 4.13.0;
+  - `.gitignore` com `node_modules/`, `test-results/` e `playwright-report/`;
+  - nada entra em `src/`, que é o `frontendDist` embutido: o popup continua sem npm de runtime.
+- **`playwright.config.mjs`:**
+  - `testDir: tests/e2e`, então os `tests/ui/*.test.mjs` do `node --test` ficam de fora;
+  - `webServer` `python3 -m http.server 1420 --directory src` com `reuseExistingServer: true`, e o stdout/stderr do servidor descartados para o log de requisições não poluir o `--reporter=list`;
+  - `baseURL` `http://localhost:1420`, viewport 360×560, Chromium e `locale: 'pt-BR'`;
+  - projetos `light` e `dark` por `colorScheme`;
+  - `retries: 0` (um flaky não fica mascarado), `forbidOnly: true`, e trace e screenshot só em falha.
+- **`tests/e2e/support.mjs`** (compartilhado):
+  - toda resposta sai com a CSP lida do `tauri.conf.json` (D-2026-09-26-tray-app-7), via `page.route`, então o que o webview recusaria falha aqui também;
+  - a fixture `page` junta `console.error` e `pageerror` em `pageErrors` e, no teardown, exige `toEqual([])` em todo teste;
+  - `expectAccessible`: axe com as tags `wcag2a`, `wcag2aa` e `wcag21aa`. Critical/serious → `expect(...).toEqual([])` com `{id, impact, help, targets}` no diff; moderate/minor → anotação no teste e uma linha no stdout (o reviewer classifica como WARN);
+  - os textos saem das chaves via `translator('pt-BR')` de `src/i18n/index.js`, sem strings duplicadas nos specs;
+  - `loadEnds`: um `MutationObserver` no botão atualizar espera o fim da carga que uma ação dispara (determinístico, sem `waitForTimeout`);
+  - locators por papel e nome acessível (`slider`, `radiogroup`/`radio`, `combobox`, `dialog`, botões).
+
+### Testes (18 por tema, 36 no total; mais 2 de screenshot por tema, em `skip` sem `SCREENSHOTS=1`)
+- **`scenarios.spec.mjs` (8):**
+  - os 5 `critical_paths` (`/`, `?demo=rtk`, `two-monitors`, `empty` e `error`), cada um com o estado esperado visível:
+    - RTK: 75/50/30 com o `aria-valuetext`, 7 entradas com DisplayPort-1 marcada, preset sRGB e o botão de energia;
+    - `two-monitors`: o seletor com 3 monitores, parado no RTK;
+    - `empty`: o título, a dica de DDC/CI e "Tentar de novo";
+    - `error`: `error.backend_unavailable` com o detalhe;
+    - no Linux, a dica `<code>docs/linux-ddc-setup.md</code>`;
+  - com os diálogos de entrada e de energia abertos: texto do efeito, foco em Cancelar e 0 escritas;
+  - "Todos os ajustes" aberto e sondado: 7 ajustes, 2 encontrados e "Códigos sem resposta: 7";
+  - em todos: axe critical/serious `toEqual([])` e `pageErrors` `toEqual([])`, ambos como assert explícito no corpo do teste.
+- **`keyboard.spec.mjs` (2):**
+  - Tab (só Tab) chega ao brilho; `ArrowRight` muda para 76 e o `aria-valuetext` para `76%`; `__ddcDemo.writes` fica exatamente em `[{monitorId: RTK, code: 0x10, value: 76, confirmed: false}]`, conferido de novo depois de mais uma janela de debounce e latência (`2×80 + 60` ms, constantes importadas de `src/`);
+  - no radiogroup, a seta só move o foco (DisplayPort-2 focado, DisplayPort-1 ainda marcado, sem diálogo); Espaço abre o diálogo com foco em Cancelar; Esc cancela, com 0 escritas.
+- **`confirm.spec.mjs` (5):**
+  - outra entrada abre o diálogo (texto do efeito, a nota de como voltar e foco em Cancelar) com 0 escritas;
+  - Cancelar e Esc deixam 0 escritas e DisplayPort-1 marcada;
+  - Aplicar → exatamente `[{code: 0x60, value: 0x11, confirmed: true}]`, e HDMI-1 marcada sem `is-pending` (o chip só é marcado quando o read-back chega);
+  - **read-back divergente:** um `bridge.js` alterado só no teste, via `route`, com uma guarda que falha se a linha alterada mudar em `src/`, faz o monitor manter a entrada. A escrita confirmada sai, mas a UI mantém DisplayPort-1 e anuncia "Entrada: o monitor aplicou DisplayPort-1.";
+  - energia: o diálogo lista os 2 outros modos, com "Em espera (DPM)" marcado; Cancelar → 0 escritas; escolher "Desligado (botão de energia)" atualiza o texto, e Aplicar → `[{code: 0xD6, value: 0x05, confirmed: true}]`.
+- **`fallback.spec.mjs` (3):**
+  - a TV muda vem 1º na lista e o popup abre no RTK sem erro. O seletor mostra `["LG TV SSCR2 (sem DDC/CI)", "RTK QHD HDR", "DELL U2723QE"]` na ordem do sistema, sem aviso e sem toast, e `__ddcDemo.selected` = RTK;
+  - escolher a TV mostra `error.timeout`, a dica de DDC/CI, "Sem resposta via DDC/CI" e "Tentar de novo", com o seletor ainda lá e sem o botão de energia; o axe passa nesse estado;
+    - "Tentar de novo" tenta a TV de novo e continua em erro com a TV. Um `refresh` abriria o RTK, então isso distingue os dois caminhos;
+    - `selected` continua RTK: um monitor mudo nunca vira alvo dos atalhos;
+  - da TV em erro, escolher a DELL mostra o painel dela (brilho 40, sem volume, entrada `Valor 0x1B`), e `selected` e o `localStorage` passam a ser a DELL; depois do `reload`, ela abre direto.
+- **`screenshots.spec.mjs` (2 por tema, A-7):** só com `SCREENSHOTS=1`, em `en-US` (o README é em inglês), `reducedMotion: 'reduce'`, `animations: 'disabled'` e `deviceScaleFactor: 2`. Gera:
+  - `docs/screenshots/tray-popup-light.png` e `tray-popup-dark.png`, PNG 720×1120;
+  - `tray-popup-dialog-light.png`, o diálogo de entrada, para o README, só no tema claro.
+
+### Mutações (provadas e revertidas com `git checkout`, `src/` limpo depois; nada commitado)
+| Mutação | Resultado |
+|---|---|
+| **Sem o diálogo de confirmação** (`app.js`: `if (entry.dto.dangerous && !(await confirmChange(…)))` → `if (false)`, e a energia sem `askDialog`, gravando o 1º modo) | `confirm`: **10 failed** (os 5 × 2 temas). O 1º falha em `expect(confirmDialog).toBeVisible()`, "element(s) not found"; a energia falha em `toHaveCount(2)`, com 0 recebidos |
+| Slider sem a fila de debounce (`bridge.setFeature` direto no `input` e no `change`) | `keyboard`: o teste de 1 escrita falha, porque recebe 2 escritas `{0x10, 76}`; o do radiogroup passa |
+| `console.error("mutant")` no `start()` | `scenarios`: falha com `"console.error: mutant"` no diff de `pageErrors` |
+| `document.body.setAttribute("style", …)` no `start()` | `scenarios`: falha com o console error "Applying inline style violates … 'style-src 'self''", ou seja, a CSP injetada está ativa |
+| Botão atualizar sem `aria-label` (`index.html`) | `scenarios`: falha no assert do axe, com `{id: "button-name", impact: "critical", targets: ["#refresh"]}` |
+
+### Achados de UI
+- Nenhum bug encontrado; `apps/ddc-tray/src/` ficou intocado.
+
+### Desvios do plano
+- **Arquivos além do `files_modified`,** todos de teste ou de docs:
+  - `tests/e2e/support.mjs`: fixtures e helpers comuns, para não duplicar CSP, coleta de erros e axe em 5 specs;
+  - `tests/e2e/fallback.spec.mjs`: o fallback de monitor pedido pelo orquestrador, sem arquivo nomeado no plano;
+  - `docs/screenshots/tray-popup-dialog-light.png`: opcional, pedido pelo orquestrador.
+- **CSP do Tauri injetada como header** em toda resposta. Não foi pedido, mas fortalece o gate: uma regressão de CSP (estilo ou script inline) vira console error, como provado pela 4ª mutação. O axe continua funcionando sob a CSP, porque o Playwright injeta o script via CDP.
+- **Testes além do pedido:**
+  - o read-back divergente, que prova "a UI mostra o read-back" com valores diferentes do pedido;
+  - a confirmação da energia (A-3);
+  - o radiogroup por teclado;
+  - "Todos os ajustes" sondado sob axe;
+  - DELL + memória no fallback.
+- **Idioma:** a suíte roda em pt-BR, com os textos vindos das chaves, e os screenshots são em inglês, para o README (en) da T-8.
+- **`"type": "module"` no `package.json`** passa a valer também para os `src/*.js` no Node. Antes, o Node detectava a sintaxe ESM. Sem efeito prático: `node --test` segue com 83/83, e o Tauri não lê o `package.json` (`frontendDist` estático).
+- **O lock não tem o `fsevents`,** opcional do `playwright`, só para macOS: o npm 11 no Linux não o registra. No macOS, o `npm ci` só não instala um opcional. Fica como nota para a `ci-crossbuild`.
+
+### Verificação
+| Comando | Resultado |
+|---|---|
+| Verify do Gate 7 da CONTEXT (`npm ci … && npx playwright test --reporter=list`, `grep` de passed/failed/flaky), 3× seguidas | **OK, OK, OK**: `36 passed`, `4 skipped` em cada, em 6,0 s, 6,3 s e 5,4 s |
+| `npx playwright test --repeat-each=5` | `180 passed`, `20 skipped` (20,7 s) |
+| `npx playwright test --repeat-each=3 --workers=24` | `108 passed`, `12 skipped` (12,7 s) |
+| axe moderate/minor nas 3 execuções | 0 (`grep -c 'axe moderate'` = 0) |
+| `SCREENSHOTS=1 npx playwright test screenshots` | `3 passed`, `1 skipped` (o diálogo no tema escuro) |
+| Verify dos screenshots da CONTEXT (`test -s` + `file` → `PNG image`) | OK |
+| Verify `node --test` e i18n da CONTEXT (`--test-reporter=tap`) | OK: `# pass 83`, `# fail 0` |
+| `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked` | limpos; 339 passed, 0 failed, 8 ignored (hardware) |
+
 ## Tests
 - Total: 339
 - Passing: 339
-- Coverage: 88.70% (`cargo llvm-cov --summary-only`, TOTAL lines; medido na T-5, a T-6 não toca Rust)
-- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 83 passing, 0 failing (medido na T-6)
+- Coverage: 88.70% (`cargo llvm-cov --summary-only`, TOTAL lines; medido na T-5, e nem a T-6 nem a T-7 tocam Rust)
+- JS (`node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs'`): 83 passing, 0 failing (medido na T-7)
+- Playwright (`cd apps/ddc-tray && npx playwright test --reporter=list`): 36 passing, 0 failing, 4 skipped (screenshots sem `SCREENSHOTS=1`), estável em 3 execuções + `--repeat-each=5`

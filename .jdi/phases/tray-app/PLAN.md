@@ -145,7 +145,7 @@ Lições das phases anteriores: teste fixa valor por igualdade (o critic da phas
   - **`screenshots`** (A-7): `?demo=rtk`, animações desligadas → `docs/screenshots/tray-popup-{light,dark}.png`, commitados.
 - **Dependencies:** T-6
 - **Test:** Verify da CONTEXT do Gate 7 e dos screenshots
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 6
 
