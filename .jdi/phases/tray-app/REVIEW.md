@@ -1,106 +1,103 @@
 # Phase 5: Review  (slug: tray-app)
 
-**Verdict:** BLOCKED
+**Verdict:** APPROVED_PENDING_MANUAL
 
-Iteração 1. Revisor: `jdi-reviewer-ddc-control`, 2026-09-26, branch `phase/tray-app` (HEAD `2d13758`), host Linux (Fedora 44, KDE Plasma Wayland). Baseline do lock/diff: `6f4341b` (último commit antes da phase).
+Iteração 2. Revisor: `jdi-reviewer-ddc-control`, 2026-09-27, branch `phase/tray-app` (HEAD `12c7ddb`), host Linux (Fedora 44, KDE Plasma Wayland). Re-verificação completa (gates 1-8) depois das correções `b110026..12c7ddb` e do endurecimento dos `Verify:` em `9bc74c0`. O REVIEW da iter 1 (BLOCKED) está no histórico (`git show 86f93c9:.jdi/phases/tray-app/REVIEW.md`).
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
-| Build | PASS | `cargo build --workspace --locked` exit 0 (inclui `ddc-tray`); cross-check `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked --target x86_64-pc-windows-msvc` exit 0; `--target x86_64-unknown-linux-gnu` exit 0. `ddc-tray` fora do msvc de propósito (D-2026-09-26-tray-app-9). Só o aviso future-incompat de `nom v3.2.1` (via `ddc-hi`, anterior à phase). |
-| Tests | PASS | 339 passed, 0 failed, 8 ignored (hardware). Início da phase: 247 (T-1), ou seja, +92, sem queda. |
-| Coverage | PASS | 88.70% lines, threshold 80% (TOTAL row, main.rs/build.rs excluded) |
-| Lint | PASS | `cargo fmt --all --check` exit 0; `cargo clippy --workspace --all-targets --locked -- -D warnings` exit 0; nenhum `#[allow(...)]` fora de testes |
-| Hexagonal/Safety/Hygiene | WARN | 5.1–5.9 e 5.11 limpos; 5.10: `cargo audit` sai ≠0 (1 vulnerabilidade anterior à phase + 2 avisos novos, via Tauri/GTK). Ver W-1. |
-| Consistency | BLOCK | B-1: um monitor com DDC/CI mudo carrega como painel "pronto" e vazio (D-2026-09-26-tray-app-5, -4). Os desvios de plano estão documentados (W-3). |
-| UI Validation | PASS | apps/ddc-tray Playwright suite: 36 passed, 4 skipped (screenshots sem `SCREENSHOTS=1`); console errors 0; axe critical/serious 0 (moderate/minor 0) |
-| DoD | PASS_PENDING_MANUAL | 17/17 auto, 2 manual pending |
+| Build | PASS | `cargo build --workspace --locked` exit 0 (inclui `ddc-tray`). Cross-check `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked` exit 0 em `--target x86_64-unknown-linux-gnu` e em `x86_64-pc-windows-msvc`. `ddc-tray` fica fora do msvc de propósito (D-2026-09-26-tray-app-9). Único aviso: o future-incompat de `nom v3.2.1` (via `ddc-hi`), anterior à phase. |
+| Tests | PASS | 344 passed, 0 failed, 9 ignored (hardware). Na iter 1 eram 339 + 8: entraram +5 (2 do B-1, 1 do golden mudo, 2 do W-4) e +1 ignored de hardware. Nenhuma queda. |
+| Coverage | PASS | 88.79% lines, threshold 80% (TOTAL row, main.rs/build.rs excluded). `main.rs` do tray inalterado, só a cola `run()` → `ExitCode`. |
+| Lint | PASS | `cargo fmt --all --check` exit 0; `cargo clippy --workspace --all-targets --locked -- -D warnings` exit 0; nenhum `#[allow(...)]` fora de testes. |
+| Hexagonal/Safety/Hygiene | WARN | 5.1–5.9 e 5.11 limpos (ver abaixo). 5.10: `cargo audit` sai ≠0 com os mesmos 4 advisories da iter 1 (W-1). O `Cargo.lock` não mudou na iter 2. |
+| Consistency | PASS | O B-1 da iter 1 está resolvido e conforme a D-2026-09-26-tray-app-4/-5. Nenhuma violação de D-1, D-2, D-2026-09-26-tray-app-3/-7/-10. Todos os `files_modified` do PLAN aparecem no log, e os 26 commits usam o escopo `tray-app` com tipo coerente. |
+| UI Validation | PASS | Suíte Playwright de `apps/ddc-tray`: 36 passed, 4 skipped (screenshots sem `SCREENSHOTS=1`). Console errors 0, axe critical/serious 0, moderate/minor 0 (nenhuma linha `axe moderate/minor` impressa). A porta 1420 ficou livre depois. |
+| DoD | PASS_PENDING_MANUAL | 18/18 auto, 2 manual pending |
+
+### Gate 5 em detalhe
+- **5.1–5.4 (hexagonal):**
+  - `ddc-core` continua só com `thiserror`, sem I/O e sem `cfg` de plataforma;
+  - nenhum `impl MonitorBackend` no core e nenhum `pub trait` fora dele;
+  - nenhum adapter é construído fora dos composition roots. `DdcHiMonitorBackend::new` aparece uma única vez, em `apps/ddc-tray/src-tauri/src/lib.rs:47` (`compose_osd`).
+  - `crates/` não foi tocado na iter 2 (`git diff 86f93c9..HEAD -- crates/` vazio).
+- **5.5 (`unsafe`):** a única ocorrência é o comentário `lib.rs:95`. `#![forbid(unsafe_code)]` está em `lib.rs:8` e em `main.rs`.
+- **5.6 (pânicos):** o único hit fora de testes é o doc comment `crates/ddc-adapters/src/ddc_hi_backend/worker.rs:141`, anterior à phase. Os `unwrap`/`expect` de `tests/rtk_qhd_hdr.rs` estão em arquivo de teste.
+- **5.7 (escrita segura):**
+  - a classificação `Dangerous` existe no domínio;
+  - `Confirm::Yes` só aparece em `commands.rs:90`;
+  - os 7 testes de `crates/ddc-adapters/tests/real_monitor.rs` e os 2 de `apps/ddc-tray/src-tauri/tests/rtk_qhd_hdr.rs` são `#[ignore]` e gated por `hardware_enabled()` / `DDC_HW_TESTS`;
+  - o teste novo `rtk_qhd_hdr_mute_monitor_fails_its_panel_and_the_rtk_loads` só lê. O revisor não rodou nenhum deles.
+- **5.8 / 5.9 / 5.11:**
+  - nenhum caminho de dispositivo no core;
+  - nenhum `#[tauri::command]` sem `async fn`;
+  - nenhum segredo e nenhum TODO/FIXME sem issue, nem em `*.rs` nem nos arquivos não-Rust do tray.
 
 ## Blockers (if any)
-
-- **B-1 — Gate 6 / D-2026-09-26-tray-app-5 (+ D-2026-09-26-tray-app-4): `apps/ddc-tray/src-tauri/src/panel.rs:49-60`.** `load_panel` devolve `Ok(PanelDto { controls: [] })` quando TODAS as leituras dos 6 controles rápidos falham com qualquer erro diferente de `MonitorNotFound` (`Err(_) => {}`, linha 54). O próprio doer provou isso na T-8 (`load_panel(mute TV) = Ok(... controls: [])`), e a leitura do código confirma.
-  - **O que acontece no app real** (lido em `app.js`/`view-model.js`, com a LG TV listada em 1º, como na saída de hardware da T-3):
-    - `firstAnswering` (`view-model.js:77-88`) só pula um monitor quando a promessa rejeita. Com o `Ok` vazio, a TV "responde".
-    - `showLoaded` (`app.js:261-274`) chama `select_monitor(TV)`, e os atalhos de brilho do menu passam a mirar a TV. No Linux/SNI esses atalhos são a interação principal, e aqui falham em silêncio, só com uma linha no stderr.
-    - `rememberMonitor` grava a TV no `localStorage`, então toda abertura seguinte tenta a TV primeiro e para nela.
-    - `showState('ready')` pinta um painel sem nenhum controle. O cabeçalho mostra "LG TV SSCR2" / "GSM · DDC/CI", ou seja, afirma DDC/CI. Sobra só o "All settings" recolhido, sem mensagem, sem dica e sem "Try again".
-  - **Por que contradiz as decisões travadas:**
-    - A D-5 trava o estado de erro com "Tentar de novo" e as dicas de DDC/CI e de `/dev/i2c`. `statusView` mostra a dica de i2c para `timeout|transport`, e as chaves `header.noAnswer`, `header.silent` e `hint.ddc` existem justamente para esse caso. Com o backend real, nenhuma delas é alcançável para um monitor listado e mudo.
-    - O caso mais comum é ainda pior: um único monitor com DDC/CI desligado no OSD. A enumeração só lê EDID (D-2026-09-25-ddc-backends-4), então ele é sempre listado e abre em branco, sem a dica "ative o DDC/CI".
-    - A D-4 exige erros em `{kind,message}`, mas uma falha total não chega à UI como erro.
-    - Critério "intuitivo" do card: na máquina do usuário, a experiência padrão é um painel vazio na TV e atalhos de brilho que não fazem nada.
-  - **O Gate 7 não pega o defeito:** o `fallback.spec.mjs` fica verde porque o bridge demo (`bridge.js:136-140`) rejeita o monitor silencioso com `timeout`, coisa que o `load_panel` em Rust nunca faz (ele só rejeita com `not_found`). O golden `contract-rtk.json` cobre só o RTK, então a divergência demo↔Rust passa sem detecção. O fallback anunciado no CHANGELOG ("else the first whose panel loads") não funciona na máquina para a qual foi construído.
-  - **Correção (pequena e no escopo da phase):**
-    1. Em `load_panel`, guardar o 1º erro que não seja `MonitorNotFound`. Se nenhum controle carregar, devolver `Err(ui_error(primeiro_erro))`. A falha parcial continua como está, conforme o texto da D-4.
-    2. Teste por igualdade em `panel/tests.rs`: os 6 códigos rápidos em `Transport` → `Err(UiError { kind: Transport, message: … })`. O teste de falha parcial atual (contraste em `Timeout` → 5 controles) continua.
-    3. Recomendado: alinhar o kind do monitor silencioso da demo ao que o Rust devolve (a TV real dá `Transport`) e fixar o caso mudo no contrato, com teste Rust e `contract.test.mjs`, para a demo não voltar a divergir.
-    4. Retirar a limitação "A monitor whose DDC/CI is mute opens as an empty panel" (`README.md:352`), a ressalva de `README.md:310` e a nota de `docs/hardware-validation.md:182`.
-    
-    Um monitor que responda `unsupported` para os 6 códigos também passaria a ser erro (`unsupported`). Isso é aceitável, porque não haveria nada a mostrar no painel rápido.
+- Nenhum.
 
 ## Warnings (if any)
-
-- **W-1 — 5.10 supply chain (`cargo audit` sai ≠0).**
+- **W-1 — 5.10 supply chain (`cargo audit` 0.22.2 sai ≠0).** Continua como na iter 1. O endereçamento é conhecido e fica com a phase `ci-crossbuild` (`audit.toml`, com cada ignore justificado).
   - **Novos nesta phase**, via tauri 2.12 → gtk-rs 0.18, só no Linux:
-    - RUSTSEC-2024-0429: `glib 0.18.5` unsound (`VariantStrIter`);
-    - RUSTSEC-2024-0370: `proc-macro-error 1.0.4` sem manutenção (build-time, via `glib-macros`).
-  - **Anteriores à phase**, via `ddc-hi 0.4.1` → `mccs-db 0.1.3`:
-    - RUSTSEC-2018-0005: `serde_yaml 0.7.5` (abort por recursão; só lê o DB embutido do `mccs-db`, não entrada do usuário);
-    - RUSTSEC-2024-0320: `yaml-rust 0.4.5` sem manutenção.
-  - Não há correção possível do lado do tray, porque depende do upstream do Tauri e do `ddc-hi`. Na `ci-crossbuild`, um passo de audit vai falhar: registre um `audit.toml` com cada ignore justificado.
-- **W-2 — Gate 8, item C9 (capabilities): o `Verify` é oco.**
-  - `jq -r '.. .identifier? // empty'` nunca lê as permissões, que no arquivo são strings. Uma capability mutante com `"shell:allow-execute"`, `"fs:default"` e `"opener:default"` passou no Verify (JSON de teste montado no scratchpad).
-  - A capability real está limpa: conferida à mão, tem só `core:event:default` e os 7 `allow-*`. Por isso o item fica PASS.
-  - Sugestão de Verify: `! jq -r '.permissions[] | if type=="string" then . else .identifier end' apps/ddc-tray/src-tauri/capabilities/*.json | grep -qE '^(shell|fs|http|opener):' && echo OK`.
-- **W-3 — Gate 6, consistência do plano:** os desvios estão todos documentados no SUMMARY, então não há ação a tomar.
-  - Arquivos fora do `files_modified`: `tests/e2e/support.mjs`, `tests/e2e/fallback.spec.mjs`, `src-tauri/.gitignore`, `docs/screenshots/tray-popup-dialog-light.png` e `demo-data.js` alterado na T-6.
-  - `Position::TrayCenter` no lugar de `TrayBottomCenter`, justificado pela D-5 ("acima do ícone").
-  - O re-exec sem DMA-BUF, que virou a D-2026-09-26-tray-app-10.
-  - Todos os commits usam o escopo `tray-app` com tipo coerente, e todo arquivo do plano aparece no log.
-- **W-4 — Gate 3 (baixa prioridade):** `lib.rs` tem 0% (74 linhas), `commands.rs` 52.14% e `tray.rs` 62.65%. É a cola do Tauri, prevista no R-3, e o TOTAL fica folgado. A única decisão sem teste ali é a checagem da variável em `restart_without_dmabuf_renderer` (`lib.rs:95-110`). Se o arquivo for mexido de novo, vale extraí-la para uma função pura.
+    - RUSTSEC-2024-0429: `glib 0.18.5` unsound;
+    - RUSTSEC-2024-0370: `proc-macro-error 1.0.4` sem manutenção.
+  - **Anteriores à phase**, via `ddc-hi` → `mccs-db`:
+    - RUSTSEC-2018-0005: `serde_yaml 0.7.5`;
+    - RUSTSEC-2024-0320: `yaml-rust 0.4.5`.
 
 Observações sem severidade:
-- **Hexagonal:**
-  - `ddc-core` continua só com `thiserror`;
-  - `panel.rs` é puro sobre `MonitorControl`;
-  - `DdcHiMonitorBackend::new` só aparece em `compose_osd` (`lib.rs:43`);
-  - `Confirm::Yes` só aparece em `commands.rs:90`;
-  - os 7 `#[tauri::command]` são `async fn`, e os que tocam DDC passam por `spawn_blocking`;
-  - não há `unsafe`: a única ocorrência é um comentário em `lib.rs:91`;
-  - `#![forbid(unsafe_code)]` está em `lib.rs` e em `main.rs`.
-- **Teste de hardware (5.7):** `rtk_qhd_hdr` é `#[ignore]` e fica inerte sem `DDC_HW_TESTS=1`. O revisor não o rodou, conforme a regra.
-- **`demo-data.js`:** traz nomes MCCS literais como fixture da demo, não como tabela de consulta. Só o `bridge.js` o importa em modo demo, e o `contract.test.mjs` o prende ao golden. Isso é compatível com a D-3 e com o A-2.
-- **Gate 7 (julgamento manual):**
-  - sliders são `input[type=range]` nativos com `aria-valuetext`;
-  - `prefers-color-scheme` e `prefers-reduced-motion` estão presentes em `styles.css`;
-  - há foco visível e nenhuma string fora dos locales (testes i18n verdes);
-  - o CSP do Tauri é injetado pela suíte, e o axe dá `toEqual([])` nos 5 `critical_paths`, nos 2 diálogos e em "All settings" sondado.
+- **B-1 (iter 1) resolvido.** `load_panel` (`apps/ddc-tray/src-tauri/src/panel.rs:48-70`) guarda o 1º erro que não seja `MonitorNotFound` (linha 59). Quando nenhum controle rápido é lido, devolve `Err(ui_error(..))` (linha 64); a falha parcial continua `Ok`.
+  - Os testes são por igualdade:
+    - `a_mute_monitor_fails_its_panel_instead_of_loading_it_empty` (`panel/tests.rs:355`);
+    - `a_panel_with_no_control_fails_with_its_first_reading_error` (`:371`), em que brilho `Transport`, contraste `Timeout` e resto `unsupported` provam que é o 1º erro, e não o último;
+    - `mute_contract_matches_the_golden` (`:840`);
+    - o teste de falha parcial (`:343`) continua verde.
+  - A demo (`demo-data.js`/`bridge.js`) agora rejeita a TV com o mesmo `{kind,message}` do Rust. O `contract.test.mjs` a prende ao `contract-mute.json`, e o `fallback.spec.mjs` fica verde pelo caminho certo (`error.transport` + `hint.ddc` + `header.noAnswer`).
+  - O README não traz mais a limitação "mute opens as an empty panel".
+- **W-4 (iter 1) resolvido.**
+  - A decisão do re-exec é a função pura `dmabuf_switch_to_set` (`lib.rs:120`), conforme a D-2026-09-26-tray-app-10: só `None` → `"1"`, e qualquer valor do usuário, inclusive vazio ou não-UTF-8, é mantido.
+  - Ela tem 2 testes sem `set_var` (`lib.rs:173`).
+  - `lib.rs` foi de 0% para 17.78%. O resto é cola do Tauri, como `commands.rs` (52.14%) e `tray.rs` (62.65%), previsto no R-3.
+- **W-2 (iter 1) resolvido** pelo `9bc74c0`: o Verify de capabilities agora lê as permissões em forma de string. As 8 permissões reais são `core:event:default` e os 7 `allow-*`.
+- **DRY (menor, só em teste).** A mensagem real da TV (`transport error: DDC/CI I2C error: … (gave up after attempt 3 of 3)`) aparece literal em 4 lugares:
+  - `panel/tests.rs:33`, que é a fonte;
+  - `contract-mute.json`, que é gerado;
+  - `demo-data.js:162`, uma cópia inevitável, porque `src/` não lê `tests/fixtures`, e presa pelo `contract.test.mjs`;
+  - `tests/ui/bridge-demo.test.mjs:85`.
+  
+  A última poderia ler o `contract-mute.json`, como o `contract.test.mjs` já faz. Não é bloqueio: uma divergência derruba os testes.
+- **Teste de hardware do monitor mudo:** `rtk_qhd_hdr.rs:169-171` trata todo monitor que não seja o RTK como mudo e exige pelo menos um. Em outra máquina, com um 2º monitor que responda, ele falharia. É específico da máquina de dev por desenho e está documentado no passo 7 de `docs/hardware-validation.md`. O revisor não o rodou.
+- **UX conhecida:** na 1ª abertura com a TV listada em 1º, o popup fica cerca de 5 s em "carregando" antes de cair no RTK. Está documentado no `README.md:310` e no passo 8 do roteiro, e a otimização fica para uma phase futura (SUMMARY, iter 2).
 
 ## DoD Checklist (gate 8)
 
+Cada `Verify:` do CONTEXT.md foi extraído literalmente e executado com `bash` a partir da raiz do repo. Os itens 1 e 2 do PROJECT reaproveitam a saída dos Gates 2 e 3.
+
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | `OK` — 339 passed, 0 failed, 8 ignored |
-| 2 | Coverage >= 80% of lines | PROJECT | Auto | PASS | TOTAL lines 88.70% (saída do Gate 3, reaproveitada) |
-| 3 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | exit 0, `OK` |
+| 1 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | exit 0 (Gate 2): 344 passed, 0 failed, 9 ignored |
+| 2 | Coverage >= 80% of lines | PROJECT | Auto | PASS | TOTAL lines 88.79% (Gate 3, exit 0 com `--fail-under-lines 80`) |
+| 3 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | exit 0 |
 | 4 | fmt + clippy `-D warnings` limpos incluindo `ddc-tray` | CONTEXT | Auto | PASS | `OK` |
 | 5 | `ddc-tray` compila em release no Linux | CONTEXT | Auto | PASS | `OK` |
-| 6 | Composition root é o único ponto que constrói `DdcHiMonitorBackend` | CONTEXT | Auto | PASS | `OK` (1 ocorrência, `lib.rs:43`) |
-| 7 | `panel.rs` é Rust puro, sem runtime do Tauri | CONTEXT | Auto | PASS | `OK` |
-| 8 | `#![forbid(unsafe_code)]` em `src-tauri` | CONTEXT | Auto | PASS | `OK` (`lib.rs:8`) |
-| 9 | `node --test` (debounce, view-model, bridge demo), 0 falhas, testes fora de `src/` | CONTEXT | Auto | PASS | `OK` — `# tests 83`, `# pass 83`, `# fail 0`; nenhum `*.test.*` em `src/` |
-| 10 | Paridade i18n en/pt-BR e HTML sem texto literal | CONTEXT | Auto | PASS | `OK` — `# pass 24`, `# fail 0` |
+| 6 | Composition root é o único ponto que constrói `DdcHiMonitorBackend` | CONTEXT | Auto | PASS | `OK` (1 ocorrência, `lib.rs:47`) |
+| 7 | `panel.rs` é Rust puro sobre `MonitorControl`, sem o runtime do Tauri | CONTEXT | Auto | PASS | `OK` (`use ddc_core::ports::MonitorControl;`, 5 `pub fn …<M: MonitorControl + ?Sized>`) |
+| 8 | `#![forbid(unsafe_code)]` em `src-tauri` | CONTEXT | Auto | PASS | `OK` (`lib.rs:8` e `main.rs`, sem `allow(unsafe_code)` nem `unsafe {`) |
+| 9 | `node --test` (debounce, view-model, bridge demo…), 0 falhas, testes fora de `src/` | CONTEXT | Auto | PASS | `OK`: os 6 módulos passam, e o total dá `# tests 84`, `# pass 84`, `# fail 0` |
+| 10 | Paridade i18n en/pt-BR e HTML sem texto literal | CONTEXT | Auto | PASS | `OK`: `# pass 24`, `# fail 0` |
 | 11 | CSP sem `unsafe-inline`, `script-src 'self'` | CONTEXT | Auto | PASS | `OK` |
-| 12 | Capabilities sem `shell`/`fs`/`http`/`opener` | CONTEXT | Auto | PASS | `OK`; Verify oco (W-2), critério conferido à mão |
-| 13 | `tauri-plugin-single-instance` no composition root | CONTEXT | Auto | PASS | `OK` |
-| 14 | Smoke Linux/KDE via StatusNotifierWatcher (PID conferido, vivo, sem `panicked`) | CONTEXT | Auto | PASS | `OK` — PID 394307 dono de `:1.3103/org/ayatana/NotificationItem/tray_icon_tray_app_ddc_control`; `pgrep -x ddc-tray` vazio depois |
-| 15 | Teste `#[ignore]` de hardware RTK existe, compila, gated por `DDC_HW_TESTS=1` | CONTEXT | Auto | PASS | `OK` (não executado pelo revisor; o orquestrador roda com `DDC_HW_TESTS=1` e cola a saída no PR) |
-| 16 | Gate 7: zero erros de console e zero axe critical/serious | CONTEXT | Auto | PASS | `OK` — 36 passed, 4 skipped |
-| 17 | Screenshots claro/escuro versionados | CONTEXT | Auto | PASS | `OK` — 2 PNGs de 720×1120 |
-| 18 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` → Added com o item `ddc-tray` (`CHANGELOG.md:40-48`); ainda não há heading `## [version]` (nenhum release) |
-| 19 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## Tray app` (`README.md:265`) e `### Known limitations of the tray app` (`README.md:347`); `README.md:352` descreve o defeito B-1 e deve sair junto com a correção |
+| 12 | Capabilities sem `shell`/`fs`/`http`/`opener` | CONTEXT | Auto | PASS | `OK` (`core:event:default` + 7 `allow-*`) |
+| 13 | `tauri-plugin-single-instance` registrado no composition root | CONTEXT | Auto | PASS | `OK` (1º `.plugin(` em `lib.rs:68`) |
+| 14 | Smoke Linux/KDE via StatusNotifierWatcher (PID conferido, vivo, sem `panicked`) | CONTEXT | Auto | PASS | `OK`: o PID 488781 é dono de `:1.3413/org/ayatana/NotificationItem/tray_icon_tray_app_ddc_control`, estava vivo 2 s depois e nunca entrou em pânico; `pgrep -x ddc-tray` vazio antes e depois |
+| 15 | Teste `#[ignore]` de hardware RTK existe, compila, gated por `DDC_HW_TESTS=1`, sem escrita Dangerous | CONTEXT | Auto | PASS | `OK`: `--ignored --list` mostra os 2 testes `rtk_qhd_hdr*`. Não foram executados pelo revisor; o orquestrador cola a saída no PR |
+| 16 | Gate 7: zero erros de console e zero axe critical/serious nos `critical_paths` | CONTEXT | Auto | PASS | `OK`: exit 0, 10/10 `critical_paths` × tema com ✓, `36 passed`, `4 skipped` |
+| 17 | Nenhum `TODO`/`FIXME` sem issue nos arquivos não-Rust do tray | CONTEXT | Auto | PASS | `OK` |
+| 18 | Screenshots claro/escuro versionados, 720×1120, diferentes, claro claro e escuro escuro | CONTEXT | Auto | PASS | `OK` (média de cinza: light 0.938, dark 0.167) |
+| 19 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` (`CHANGELOG.md:8`) com o item `ddc-tray` (`:40`); ainda não há heading `## [version]` (nenhum release) |
+| 20 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## Tray app` (`README.md:265`), o fallback de monitor mudo em `:310`, os goldens em `:341` e `### Known limitations of the tray app` (`:347`) sem a limitação do B-1 |
 
-**Totals:** 19 items | Auto: 17 (17 PASS, 0 FAIL) | Manual: 2 pending
+**Totals:** 20 items | Auto: 18 (18 PASS, 0 FAIL) | Manual: 2 pending
 
 Os 2 itens Manual aparecem nas duas DoD (PROJECT e CONTEXT, `Source: PROJECT`) e foram contados uma vez.
 
@@ -109,35 +106,31 @@ Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Witho
 
 ## Recommendation
 
-Uma rodada curta de correção resolve o bloqueio.
-- **B-1:**
-  - `load_panel` passa a devolver o 1º erro quando nenhum controle rápido é lido;
-  - 1 teste Rust por igualdade;
-  - de preferência, a demo alinhada ao kind real e o caso mudo fixado no contrato;
-  - retirar a limitação do README e do roteiro de hardware.
-  
-  Depois da correção, validar à mão, nesta máquina, que o popup abre no RTK com a TV listada em 1º, marcada "(no DDC/CI)", e que os atalhos de brilho miram o RTK. Isso é só leitura mais o fluxo já coberto. Nenhuma escrita perigosa.
-- **Opcionais para a mesma rodada:**
-  - W-2: consertar o Verify de capabilities na CONTEXT;
-  - W-1: registrar os advisories para a `ci-crossbuild`.
-- Os demais gates estão verdes e não há regressão em `crates/`.
-- Antes do `/jdi-ship`:
-  - o orquestrador roda o teste de hardware com `DDC_HW_TESTS=1` e cola a saída no PR;
-  - os 2 itens Manual vão para `/jdi-confirm-dod tray-app`.
+A phase está pronta para o ship, pendente só das confirmações humanas.
+- **O B-1 está corrigido com testes por igualdade** e contrato fixado dos 2 lados (Rust e demo). Os gates 1–4 e 6–7 estão verdes, sem regressão em `crates/`.
+- **Antes do `/jdi-ship`:**
+  1. `/jdi-confirm-dod tray-app` para os 2 itens Manual (CHANGELOG/README).
+  2. O orquestrador roda `DDC_HW_TESTS=1 cargo test -p ddc-tray --locked --test rtk_qhd_hdr -- --ignored --test-threads=1 --nocapture` e cola a saída no PR. A saída da iter 2 já está no SUMMARY, e o PR pode reaproveitá-la se nada mudar.
+  3. Validação manual sugerida para o PR (passo 8 de `docs/hardware-validation.md`): o popup abre no RTK com a TV marcada "(no DDC/CI)".
+- **Opcional, em qualquer rodada futura:** fazer o `bridge-demo.test.mjs:85` ler a mensagem do `contract-mute.json` em vez de repeti-la.
+- **W-1** segue para a `ci-crossbuild`.
 
 ## DoD Critic (enhanced)
 
-- DoD row «15 (teste de hardware)»: `grep -qi 'rtk_qhd_hdr'` casa com a linha `Running tests/rtk_qhd_hdr.rs` do próprio cargo (stderr juntado); sem `#[ignore]`, sem o gate `if !hardware_enabled()` ou até com erro de compilação o Verify imprime OK (3 mutações demonstradas).
-- DoD row «12 (capabilities)»: `.. .identifier?` não lê permissões em forma de string — `shell:allow-execute`/`fs:default`/`http:default`/`opener:default` passaram (confirma W-2).
-- DoD row «11 (CSP)»: `script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net *` passa; o critério é "restringe a 'self'".
-- DoD row «16 (Gate 7)»: a leitura da saída ignora exit code e `skipped` — `test.skip(true)` no loop de critical paths dá OK sem axe nos 5 caminhos.
-- DoD row «3 (TODO/FIXME)»: `--include='*.rs'` não lê os 34 arquivos JS/HTML/CSS/MJS/SH da phase — `// TODO` sem issue em `src/app.js` passou.
-- DoD row «8 (forbid unsafe)»: casa com o atributo comentado (`// #![forbid(unsafe_code)]`) + `#[allow(unsafe_code)] unsafe {…}` compila e passa.
-- DoD row «13 (single-instance)»: `.plugin(tauri_plugin_single_instance::init(..))` comentado ainda passa.
-- DoD row «7 (panel.rs puro)»: não cobre "sobre `MonitorControl`" — `pub type RealOsd = SoftwareOsd<CachingMonitorBackend<DdcHiMonitorBackend>>` em `panel.rs` passa.
-- DoD row «17 (screenshots)»: dark = cópia do light, ou PNG preto 1×1, passam; não confere versionamento.
-- DoD row «9 (node --test)»: só conta ≥20 pass — apagar `debounce.test.mjs` e `bridge-demo.test.mjs` ainda dá 52 pass e OK.
+- DoD row «3 (TODO/FIXME em *.rs — PROJECT)»: `grep -vE '#[0-9]+'` trata `{code:#04X}`/ids `…#2` como link de issue — `// TODO` numa linha que já tem `#04X` passa.
+- DoD row «6 (composition root)»: `use ddc_adapters::DdcHiMonitorBackend as RealBackend;` + `RealBackend::new()` em `commands.rs` compila e passa (só conta a string `DdcHiMonitorBackend::new`).
+- DoD row «7 (panel.rs puro)»: `use crate::{AppHandle, Runtime}` (reexport privado de `lib.rs`) ou submódulo `panel/runtime.rs` com `use tauri::…` passam.
+- DoD row «8 (forbid)»: o atributo dentro de comentário de bloco `/* … */` passa; o scan de `unsafe` não lê `tests/`.
+- DoD row «9 (node --test)»: ignora exit code e `# cancelled` — teste que estoura timeout dá `# fail 0` + `# cancelled 1` + exit 1 e o Verify imprime OK; `src/*.spec.mjs` escapa do `find`.
+- DoD row «10 (i18n)»: mesma cegueira a `# cancelled`; o glob só exige 1 pass.
+- DoD row «11 (CSP)»: `tauri.linux.conf.json` com CSP permissiva é mesclada pelo Tauri e embutida no binário; o Verify só lê `tauri.conf.json`.
+- DoD row «12 (capabilities)»: capability em lista nomeada, em subdiretório de `capabilities/`, ou inline em `tauri.linux.conf.json` passam (o `jq` falha em silêncio).
+- DoD row «13 (single-instance)»: registro sob `#[cfg(not(target_os = "linux"))]` passa.
+- DoD row «15 (hardware)»: o gate só precisa aparecer uma vez no arquivo; um segundo teste sem gate escrevendo `RESTORE_FACTORY_DEFAULTS` pela porta driven passa.
+- DoD row «16 (Gate 7)»: `reuseExistingServer: true` na porta fixa 1420 — um servidor antigo servindo outro `src/` faz a suíte validar a UI errada.
+- DoD row «17 (TODO não-Rust)»: cor hex `#22d3ee` mascara TODO em CSS; `*.toml` e `.gitignore` fora do `--include`.
+- DoD row «18 (screenshots)»: PNGs brancos/pretos 720×1120 passam — não prova que o conteúdo é o popup atual.
 
-O código real atende os 17 critérios (conferido linha a linha pelo critic); a oquidão é dos comandos `Verify:` — correção a cargo do orquestrador no CONTEXT.md antes da iter 2.
+Todos demonstrados em cópias descartáveis; a árvore real atende os 18 critérios. Correção dos `Verify:` a cargo do orquestrador (+ D-XX para o Verify de TODO do PROJECT, que é LOCKED); ajustes de código pequenos (Playwright sem reuso de servidor) vão para a iter 3.
 
 **Verdict:** BLOCKED
