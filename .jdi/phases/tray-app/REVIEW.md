@@ -85,3 +85,9 @@ Run `/jdi-confirm-dod tray-app` to confirm each manual item with evidence. Witho
 ## Nota do orquestrador (pós-review, antes do critic)
 
 W-2 (C11): o orquestrador rodou o smoke `--activate` mais 3 vezes seguidas com o mesmo protocolo — 3/3 `OK` (PIDs 2612270, 2612759, 2613290: popup mostrado e ainda aberto 1,5 s depois). A falha única do reviewer (foco perdido logo após o `popup focused`, sem `tray activated` externo) é compatível com outra janela do desktop ao vivo tomando o foco — a regra "esconde ao perder o foco" (D-2026-09-26-tray-app-5) está funcionando como desenhado. C11 conta como PASS (4 de 5 execuções verdes; a vermelha explicada pelo ambiente). W-3 (rebase antes do PR) será feito no ship.
+
+## DoD Critic (enhanced)
+
+- DoD row «18/22 (TODO)»: `// Hotplug is not handled yet; todo re-list …` (sem dois-pontos, no meio do comentário), `// … Fixme once hotplug lands.` e `todo …` numa linha de continuação de comentário de bloco CSS passam nos Verify do PROJECT e da phase (D-12 só pegava `todo:`/`todo(`).
+
+**Verdict:** BLOCKED
