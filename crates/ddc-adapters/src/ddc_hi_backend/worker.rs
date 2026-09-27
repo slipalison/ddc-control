@@ -12,8 +12,14 @@
 //! (D-2026-09-26-ddc-backends-1): the worker never enumerates inside a
 //! transaction's budget. An unknown id is reported back at once, and the
 //! client enumerates under the enumeration budget before asking again.
+//!
+//! A panic inside one attempt of a transaction fails only that transaction
+//! (D-2026-09-26-full-osd-control-6): the worker keeps its display table and
+//! serves the next job.
 
+use std::any::Any;
 use std::fmt;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -40,11 +46,39 @@ pub(crate) trait DdcHandle {
     /// Raw capabilities reply.
     fn read_capabilities(&mut self) -> Result<Vec<u8>, HandleError>;
 
-    /// Get VCP Feature.
-    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpValue, HandleError>;
+    /// Get VCP Feature, as the monitor answered it: the worker checks which
+    /// code the reply is for.
+    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpReply, HandleError>;
 
     /// Set VCP Feature.
     fn write_vcp(&mut self, code: VcpCode, value: u16) -> Result<(), HandleError>;
+}
+
+/// A Get VCP Feature reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VcpReply {
+    /// Current value and maximum.
+    pub(crate) value: VcpValue,
+    /// The VCP code the monitor echoes in the reply; `None` where the
+    /// platform backend does not hand it over.
+    pub(crate) echoed: Option<VcpCode>,
+}
+
+impl VcpReply {
+    /// The value, when the reply answers `code`. A reply for another code is
+    /// a late reply to an earlier request, left on the bus when that one
+    /// gave up. Taking it would report, and bound writes by, another
+    /// feature's value; like any garbled reply it is a transient failure, so
+    /// the read is tried again (D-2026-09-26-full-osd-control-10). A reply
+    /// with no echo is taken as it is.
+    pub(crate) fn answering(self, code: VcpCode) -> Result<VcpValue, HandleError> {
+        match self.echoed {
+            Some(other) if other != code => Err(HandleError::new(format_args!(
+                "reply answers VCP code {other}, not {code}"
+            ))),
+            _ => Ok(self.value),
+        }
+    }
 }
 
 /// A failed transaction, reduced to its message so no transport error type
@@ -61,6 +95,8 @@ enum HandleErrorKind {
     Transient,
     /// The monitor answered that it does not support the VCP code.
     Unsupported,
+    /// The transport panicked; the same request would panic again.
+    Panicked,
 }
 
 impl HandleError {
@@ -77,6 +113,13 @@ impl HandleError {
         Self::of_kind(HandleErrorKind::Unsupported, error)
     }
 
+    /// A panic caught inside the transaction: final, since the same request
+    /// would panic again (D-2026-09-26-full-osd-control-6). Keeps the panic
+    /// message when it is text.
+    pub(crate) fn panicked(payload: &(dyn Any + Send)) -> Self {
+        Self::of_kind(HandleErrorKind::Panicked, panic_text(payload))
+    }
+
     fn of_kind(kind: HandleErrorKind, error: impl fmt::Display) -> Self {
         Self {
             kind,
@@ -88,6 +131,30 @@ impl HandleError {
     pub(crate) fn is_unsupported(&self) -> bool {
         self.kind == HandleErrorKind::Unsupported
     }
+
+    /// Whether the transport panicked during the request.
+    pub(crate) fn is_panic(&self) -> bool {
+        self.kind == HandleErrorKind::Panicked
+    }
+}
+
+/// The message of a panic: `panic!` hands over a `&str` or a `String`.
+fn panic_text(payload: &(dyn Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("panic payload is not text")
+}
+
+/// Runs one attempt of a transaction, turning a panic inside it into a
+/// final [`HandleError`], so a bug in the transport never unwinds the
+/// worker (D-2026-09-26-full-osd-control-6).
+// WHY AssertUnwindSafe: after a panic the handle is only ever asked for
+// whole new transactions, each of which resends its request from scratch.
+fn isolated<T>(attempt: impl FnOnce() -> Result<T, HandleError>) -> Result<T, HandleError> {
+    panic::catch_unwind(AssertUnwindSafe(attempt))
+        .unwrap_or_else(|payload| Err(HandleError::panicked(payload.as_ref())))
 }
 
 /// Why the worker ended a transaction without a value.
@@ -204,7 +271,7 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         let policy = self.policies.vcp;
         let refused = move |_| DdcError::UnsupportedFeature(code);
         self.transact(id, deadline, policy, refused, |handle| {
-            handle.read_vcp(code)
+            handle.read_vcp(code)?.answering(code)
         })
     }
 
@@ -222,10 +289,10 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         })
     }
 
-    /// Runs `op` on the handle of `id` under `policy`. An unknown id is
-    /// reported at once, without enumerating inside this `deadline`. A
-    /// request the monitor refuses as unsupported answers `refused` of the
-    /// refusal's message.
+    /// Runs `op` on the handle of `id` under `policy`, each attempt
+    /// [`isolated`] from panics. An unknown id is reported at once, without
+    /// enumerating inside this `deadline`. A request the monitor refuses as
+    /// unsupported answers `refused` of the refusal's message.
     fn transact<T>(
         &mut self,
         id: &MonitorId,
@@ -235,14 +302,15 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         mut op: impl FnMut(&mut S::Handle) -> Result<T, HandleError>,
     ) -> Result<T, TransactError> {
         let handle = handle_of(&mut self.displays, id).ok_or(TransactError::UnknownMonitor)?;
-        let outcome = policy.run(&self.clock, deadline, || op(handle));
+        let outcome = policy.run(&self.clock, deadline, || isolated(|| op(handle)));
         outcome
             .map_err(|failure| TransactError::Failed(self.explain(id, failure, deadline, refused)))
     }
 
     /// The caller's error for a give-up. A refusal is the monitor's final
-    /// answer, reported at once as `refused` says (D-2026-09-26-cli-4).
-    /// Otherwise, when one more enumeration fits before `deadline`, the
+    /// answer, reported at once as `refused` says (D-2026-09-26-cli-4). A
+    /// panic is a transport failure, reported at once with its message
+    /// (D-2026-09-26-full-osd-control-6). Otherwise, when one more enumeration fits before `deadline`, the
     /// monitor is looked up again: an unplugged one is reported missing,
     /// not as a transport failure the core would remember against its id.
     /// Else the transport failure is reported at once, so a mute display
@@ -257,6 +325,9 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         let (attempts, max_attempts, last) = match failure {
             Failure::Expired => return DdcError::Timeout,
             Failure::Unsupported(refusal) => return refused(refusal.message),
+            Failure::Panicked(panic) => {
+                return DdcError::Transport(format!("ddc-hi panicked: {}", panic.message));
+            }
             Failure::Exhausted {
                 attempts,
                 max_attempts,
@@ -404,8 +475,8 @@ impl<S: DisplaySource> MonitorBackend for WorkerClient<S> {
     }
 }
 
-/// The worker thread ended (a bug in the transport panicked it); every later
-/// call fails the same way.
+/// The worker thread ended: a panic outside any transaction, such as during
+/// an enumeration, unwound it. Every later call fails the same way.
 fn worker_gone() -> DdcError {
     DdcError::Transport("the DDC worker thread is not running".to_owned())
 }

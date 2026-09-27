@@ -9,8 +9,8 @@ use ddc_hi::{Backend, DisplayInfo};
 use super::super::DdcHiBudgets;
 use super::super::identity::{DisplayIdentity, EdidIdentity};
 use super::super::retry::RetryPolicies;
-use super::super::worker::{DdcHandle, DisplaySource, HandleError, WorkerClient};
-use super::{capabilities_text, display_identity, transaction_error, vcp_value};
+use super::super::worker::{DdcHandle, DisplaySource, HandleError, VcpReply, WorkerClient};
+use super::{capabilities_text, display_identity, transaction_error, vcp_reply, vcp_value};
 
 fn reply(mh: u8, ml: u8, sh: u8, sl: u8) -> ddc_hi::VcpValue {
     ddc_hi::VcpValue {
@@ -19,6 +19,15 @@ fn reply(mh: u8, ml: u8, sh: u8, sl: u8) -> ddc_hi::VcpValue {
         ml,
         sh,
         sl,
+    }
+}
+
+/// 0x70 at 80 of 100, as `ddc` 0.2.2 decodes it under `ddc-i2c`: the code
+/// the monitor echoes sits in `ty`.
+fn reply_for_blue_black_level() -> ddc_hi::VcpValue {
+    ddc_hi::VcpValue {
+        ty: 0x70,
+        ..reply(0, 100, 0, 80)
     }
 }
 
@@ -38,6 +47,34 @@ fn maps_ddc_hi_vcp_reply_to_core_current_and_max() {
             max: 100
         }
     );
+}
+
+/// On Linux the reply hands the worker the code the monitor echoed, which
+/// `ddc` 0.2.2 never compares with the request
+/// (D-2026-09-26-full-osd-control-10).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_linux_reply_carries_the_code_the_monitor_echoed() {
+    let value = VcpValue {
+        current: 80,
+        max: 100,
+    };
+
+    assert_eq!(
+        vcp_reply(reply_for_blue_black_level()),
+        VcpReply {
+            value,
+            echoed: Some(VcpCode(0x70)),
+        }
+    );
+}
+
+/// On Windows `ddc-winapi` puts the value type in `ty`, not an echo, so the
+/// reply carries none and the worker takes the value as it is.
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn a_reply_off_linux_carries_no_echo() {
+    assert_eq!(vcp_reply(reply_for_blue_black_level()).echoed, None);
 }
 
 #[test]
@@ -144,7 +181,7 @@ impl DdcHandle for BrokenHandle {
         Err(transaction_error(self.0()))
     }
 
-    fn read_vcp(&mut self, _code: VcpCode) -> Result<VcpValue, HandleError> {
+    fn read_vcp(&mut self, _code: VcpCode) -> Result<VcpReply, HandleError> {
         Err(transaction_error(self.0()))
     }
 

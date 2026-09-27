@@ -8,11 +8,15 @@ use super::worker::HandleError;
 
 /// Attempts per transaction, the first one included (D-3).
 const MAX_ATTEMPTS: u32 = 3;
-/// Pause between two attempts of a Get or Set VCP Feature (D-3).
-const VCP_BACKOFF: Duration = Duration::from_millis(50);
+/// Pause between two attempts of a Get or Set VCP Feature. Read back to
+/// back, the dev monitor now and then fails a VCP read three times in a
+/// row 50 ms apart, and 200 ms apart it recovers
+/// (D-2026-09-26-full-osd-control-9, amending D-3). Three attempts still fit
+/// the 1 s VCP budget.
+const VCP_BACKOFF: Duration = Duration::from_millis(200);
 /// Pause between two attempts of a capabilities read. The dev monitor keeps
 /// refusing capabilities reads for a few hundred milliseconds after one
-/// fails, so 50 ms apart all three attempts fail (D-2026-09-26-cli-2).
+/// fails, so attempts 50 ms apart all failed (D-2026-09-26-cli-2).
 const CAPABILITIES_BACKOFF: Duration = Duration::from_millis(500);
 
 /// Time as the worker sees it; virtual in tests, so retries are checked
@@ -43,7 +47,8 @@ impl Clock for SystemClock {
 ///
 /// `ddc-hi` does not tell a NAK from any other failure, so every failure
 /// counts as transient, except the monitor's answer that it does not support
-/// the VCP code, which is never retried (D-2026-09-26-cli-4). Retrying a
+/// the VCP code (D-2026-09-26-cli-4) and a panic inside the transport
+/// (D-2026-09-26-full-osd-control-6), which are never retried. Retrying a
 /// write is safe: Set VCP Feature carries an absolute value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RetryPolicy {
@@ -63,8 +68,9 @@ pub(crate) struct RetryPolicies {
 }
 
 impl Default for RetryPolicies {
-    /// Three attempts each: VCP ones 50 ms apart (D-3), capabilities ones
-    /// 500 ms apart (D-2026-09-26-cli-2).
+    /// Three attempts each: VCP ones 200 ms apart
+    /// (D-2026-09-26-full-osd-control-9), capabilities ones 500 ms apart
+    /// (D-2026-09-26-cli-2).
     fn default() -> Self {
         Self {
             vcp: RetryPolicy {
@@ -98,7 +104,7 @@ impl RetryPolicies {
 
 impl RetryPolicy {
     /// Runs `op` until it succeeds, the monitor refuses it as unsupported,
-    /// the attempts run out, or the next backoff would end at or past
+    /// the transport panics, the attempts run out, or the next backoff would end at or past
     /// `deadline`. Nothing is attempted once `deadline` has passed.
     pub(crate) fn run<T>(
         &self,
@@ -117,6 +123,9 @@ impl RetryPolicy {
             };
             if last.is_unsupported() {
                 return Err(Failure::Unsupported(last));
+            }
+            if last.is_panic() {
+                return Err(Failure::Panicked(last));
             }
             if attempts >= self.max_attempts || clock.now() + self.backoff >= deadline {
                 return Err(Failure::Exhausted {
@@ -139,6 +148,9 @@ pub(crate) enum Failure {
     /// The monitor refused the request as unsupported. Asking again gets
     /// the same answer, so no other attempt was made.
     Unsupported(HandleError),
+    /// The transport panicked. The same request would panic again, so no
+    /// other attempt was made.
+    Panicked(HandleError),
     /// Attempt number `attempts` failed with `last`, and no other was made.
     Exhausted {
         /// Attempts made.

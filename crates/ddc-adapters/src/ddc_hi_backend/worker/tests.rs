@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -8,7 +9,7 @@ use ddc_core::ports::MonitorBackend;
 use super::super::DdcHiBudgets;
 use super::super::identity::DisplayIdentity;
 use super::super::retry::{Clock, RetryPolicies, SystemClock};
-use super::{DdcHandle, DisplaySource, HandleError, TransactError, Worker, WorkerClient};
+use super::{DdcHandle, DisplaySource, HandleError, TransactError, VcpReply, Worker, WorkerClient};
 
 /// Holds a transaction until the test opens it.
 #[derive(Debug, Clone, Default)]
@@ -43,6 +44,9 @@ enum Behaviour {
     Vanish,
     Block(Gate),
     Crash,
+    /// Panics on every read of this code, like `ddc-i2c` 0.2.2 on the dev
+    /// monitor's reply to 0x7E; answers everything else.
+    CrashOn(VcpCode),
 }
 
 const FLAKY: &str = "flaky i2c bus";
@@ -80,11 +84,24 @@ enum Call {
     Write(&'static str, VcpCode, u16),
 }
 
+impl Call {
+    /// The VCP code a read is about.
+    fn read_code(&self) -> Option<VcpCode> {
+        match self {
+            Self::Read(_, code) => Some(*code),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Bus {
     displays: Vec<FakeDisplay>,
     calls: Vec<Call>,
     enumerations: usize,
+    /// Replies left behind by requests that gave up: each read that gets an
+    /// answer takes the oldest of them instead of its own.
+    stale: VecDeque<VcpReply>,
 }
 
 /// Fake [`DisplaySource`]; clones share the same bus, so a test keeps one to
@@ -105,6 +122,11 @@ impl FakeDisplays {
 
     fn calls(&self) -> Vec<Call> {
         lock(&self.0).calls.clone()
+    }
+
+    /// Queues `replies` to arrive, in order, for the next reads.
+    fn leave_on_the_bus(&self, replies: &[VcpReply]) {
+        lock(&self.0).stale.extend(replies);
     }
 
     fn enumerations(&self) -> usize {
@@ -163,6 +185,7 @@ impl FakeHandle {
     /// Logs `call`, then answers as the display's behaviour says. A display
     /// unplugged since enumeration fails like a dead bus.
     fn transact<T>(&self, call: Call, answer: T) -> Result<T, HandleError> {
+        let read = call.read_code();
         match self.turn(call) {
             None => Err(HandleError::new("no such device")),
             Some(Behaviour::Answer | Behaviour::Flaky(_)) => Ok(answer),
@@ -179,6 +202,8 @@ impl FakeHandle {
                 Ok(answer)
             }
             Some(Behaviour::Crash) => crash(),
+            Some(Behaviour::CrashOn(code)) if read == Some(code) => crash_on(code),
+            Some(Behaviour::CrashOn(_)) => Ok(answer),
         }
     }
 
@@ -192,10 +217,30 @@ impl FakeHandle {
     }
 }
 
-// reason: simulates a bug inside the transport, which unwinds the worker.
+// reason: simulates a bug inside the transport; its payload is a `&str`.
 #[allow(clippy::panic)]
 fn crash() -> ! {
     panic!("scripted transport bug")
+}
+
+// reason: simulates the out-of-bounds panic of `ddc-i2c` 0.2.2; a formatted
+// message makes its payload a `String`.
+#[allow(clippy::panic)]
+fn crash_on(code: VcpCode) -> ! {
+    panic!("index out of bounds reading {code}")
+}
+
+/// Displays whose enumeration panics: a bug outside any transaction, which
+/// unwinds the worker thread.
+#[derive(Debug)]
+struct CrashingDisplays;
+
+impl DisplaySource for CrashingDisplays {
+    type Handle = FakeHandle;
+
+    fn enumerate(&mut self) -> Vec<(DisplayIdentity, FakeHandle)> {
+        crash()
+    }
 }
 
 const FAKE_CAPABILITIES: &[u8] = b"(prot(monitor)vcp(10 12))\0";
@@ -209,8 +254,13 @@ impl DdcHandle for FakeHandle {
         self.transact(Call::Capabilities(self.name), FAKE_CAPABILITIES.to_vec())
     }
 
-    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpValue, HandleError> {
-        self.transact(Call::Read(self.name, code), FAKE_VALUE)
+    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpReply, HandleError> {
+        let own = VcpReply {
+            value: FAKE_VALUE,
+            echoed: Some(code),
+        };
+        let answer = self.transact(Call::Read(self.name, code), own)?;
+        Ok(lock(&self.bus).stale.pop_front().unwrap_or(answer))
     }
 
     fn write_vcp(&mut self, code: VcpCode, value: u16) -> Result<(), HandleError> {
@@ -283,7 +333,19 @@ fn on_worker<T>(
     budget: Duration,
     op: impl FnOnce(&mut InstantWorker, &MonitorId, Instant) -> Result<T, TransactError>,
 ) -> Run<T> {
-    let source = FakeDisplays::with([FakeDisplay::new("a", behaviour)]);
+    on_bus(
+        &FakeDisplays::with([FakeDisplay::new("a", behaviour)]),
+        budget,
+        op,
+    )
+}
+
+/// [`on_worker`] over `source`, which must list display "a".
+fn on_bus<T>(
+    source: &FakeDisplays,
+    budget: Duration,
+    op: impl FnOnce(&mut InstantWorker, &MonitorId, Instant) -> Result<T, TransactError>,
+) -> Run<T> {
     let clock = VirtualClock::new();
     let mut worker = Worker::new(source.clone(), RetryPolicies::default(), clock.clone());
     worker.enumerate();
@@ -395,6 +457,12 @@ fn maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors()
         FakeDisplay::new("buggy", Behaviour::Crash),
     ]);
     let client = spawn(&source, budgets(Duration::from_millis(250)));
+    let doomed = WorkerClient::spawn(
+        CrashingDisplays,
+        budgets(Duration::from_secs(1)),
+        no_backoff(),
+    )
+    .unwrap();
 
     let failures = [
         client.read_capabilities(&id("mute")).map(drop),
@@ -405,13 +473,83 @@ fn maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors()
     gate.open();
     let crashed = client.read_vcp(&id("buggy"), VcpCode::BRIGHTNESS);
     let after_crash = client.enumerate().map(drop);
+    let enumeration_crashed = doomed.enumerate().map(drop);
+    let after_worker_died = doomed.read_vcp(&id("a"), VcpCode::BRIGHTNESS);
 
     for failure in &failures {
         assert_transport(failure, NAK);
     }
     assert_eq!(stuck, Err(DdcError::Timeout));
-    assert_transport(&crashed, "worker");
-    assert_transport(&after_crash, "worker");
+    assert_eq!(
+        crashed,
+        Err(DdcError::Transport(
+            "ddc-hi panicked: scripted transport bug".to_owned()
+        ))
+    );
+    assert_eq!(after_crash, Ok(()));
+    assert_transport(&enumeration_crashed, "worker thread is not running");
+    assert_transport(&after_worker_died, "worker thread is not running");
+}
+
+/// `ddc-i2c` 0.2.2 panics on the dev monitor's reply to 0x7E; the panic
+/// fails that one read, after one attempt, and the same worker keeps
+/// serving other codes and enumerations (D-2026-09-26-full-osd-control-6).
+#[test]
+fn a_panic_inside_one_transaction_fails_only_that_call_and_the_worker_keeps_serving() {
+    let trapezoid = VcpCode(0x7E);
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::CrashOn(trapezoid))]);
+    let client = spawn(&source, budgets(Duration::from_secs(1)));
+
+    let crashed = client.read_vcp(&id("a"), trapezoid);
+    let next = client.read_vcp(&id("a"), VcpCode::BRIGHTNESS);
+    let written = client.write_vcp(&id("a"), VcpCode::BRIGHTNESS, 40);
+    let listed = client.enumerate();
+
+    assert_eq!(
+        crashed,
+        Err(DdcError::Transport(
+            "ddc-hi panicked: index out of bounds reading 0x7E".to_owned()
+        ))
+    );
+    assert_eq!(next, Ok(FAKE_VALUE));
+    assert_eq!(written, Ok(()));
+    assert_eq!(listed.map(|monitors| monitors.len()), Ok(1));
+    assert_eq!(
+        source.calls(),
+        [
+            Call::Read("a", trapezoid),
+            Call::Read("a", VcpCode::BRIGHTNESS),
+            Call::Write("a", VcpCode::BRIGHTNESS, 40),
+        ]
+    );
+    assert_eq!(source.enumerations(), 2);
+}
+
+/// A panic is final: no retry, no pause and no presence check, even where
+/// one fits the budget.
+#[test]
+fn a_panic_is_never_retried_nor_followed_by_a_presence_check() {
+    let run = on_slow_worker(Behaviour::Crash, Duration::from_secs(8), read_brightness);
+
+    assert_eq!(
+        run.result,
+        Err(DdcError::Transport(
+            "ddc-hi panicked: scripted transport bug".to_owned()
+        ))
+    );
+    assert_eq!(
+        (run.attempts, run.enumerations, run.took),
+        (1, 1, Duration::ZERO)
+    );
+}
+
+#[test]
+fn a_panic_payload_that_is_not_text_still_names_the_panic() {
+    let error = HandleError::panicked(&42_u32);
+
+    assert!(error.is_panic());
+    assert!(!error.is_unsupported());
+    assert_eq!(error.message, "panic payload is not text");
 }
 
 #[test]
@@ -523,11 +661,11 @@ fn capabilities_reply_reaches_the_caller_as_text() {
 
 #[test]
 fn retries_transient_errors_up_to_three_times_within_timeout_budget() {
-    let backoff = Duration::from_millis(50);
+    let backoff = Duration::from_millis(200);
 
     let recovers = read_on_worker(Behaviour::Flaky(2), Duration::from_secs(1));
     let persists = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_secs(1));
-    let short = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(80));
+    let short = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(300));
 
     assert_eq!(recovers.result, Ok(FAKE_VALUE));
     assert_eq!(
@@ -544,13 +682,16 @@ fn retries_transient_errors_up_to_three_times_within_timeout_budget() {
 }
 
 /// The dev monitor keeps refusing capabilities reads for a few hundred
-/// milliseconds after one fails, so capabilities retries wait 500 ms where
-/// VCP ones wait 50 ms, and the capabilities budget still bounds them
-/// (D-2026-09-26-cli-2).
+/// milliseconds after one fails, so capabilities retries wait 500 ms
+/// (D-2026-09-26-cli-2); read back to back, it sometimes fails a VCP read
+/// three times 50 ms apart, so VCP retries wait 200 ms
+/// (D-2026-09-26-full-osd-control-9). Each budget still bounds its retries:
+/// three VCP attempts fit the default 1 s, 300 ms cuts them to two, 200 ms
+/// to one.
 #[test]
-fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_50_ms_within_budget() {
+fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_200_ms_within_budget() {
     let caps_backoff = Duration::from_millis(500);
-    let vcp_backoff = Duration::from_millis(50);
+    let vcp_backoff = Duration::from_millis(200);
     let budgets = DdcHiBudgets::default();
 
     let caps = capabilities_on_worker(Behaviour::Flaky(2), budgets.capabilities);
@@ -558,6 +699,9 @@ fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_50_ms_within_budget()
     let caps_fail = capabilities_on_worker(Behaviour::Fail(FLAKY), budgets.capabilities);
     let caps_tight = capabilities_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(700));
     let caps_one_shot = capabilities_on_worker(Behaviour::Fail(FLAKY), caps_backoff);
+    let vcp_fail = read_on_worker(Behaviour::Fail(FLAKY), budgets.vcp);
+    let vcp_tight = read_on_worker(Behaviour::Fail(FLAKY), Duration::from_millis(300));
+    let vcp_one_shot = read_on_worker(Behaviour::Fail(FLAKY), vcp_backoff);
 
     assert_eq!(caps.result.as_deref(), Ok("(prot(monitor)vcp(10 12))"));
     assert_eq!(
@@ -579,6 +723,21 @@ fn capabilities_retries_wait_500_ms_while_vcp_retries_wait_50_ms_within_budget()
     assert_transport(&caps_one_shot.result, "gave up after attempt 1 of 3");
     assert_eq!(
         (caps_one_shot.attempts, caps_one_shot.sleeps),
+        (1, Vec::new())
+    );
+    assert_transport(&vcp_fail.result, "gave up after attempt 3 of 3");
+    assert_eq!(
+        (vcp_fail.attempts, vcp_fail.sleeps),
+        (3, vec![vcp_backoff, vcp_backoff])
+    );
+    assert_transport(&vcp_tight.result, "gave up after attempt 2 of 3");
+    assert_eq!(
+        (vcp_tight.attempts, vcp_tight.sleeps),
+        (2, vec![vcp_backoff])
+    );
+    assert_transport(&vcp_one_shot.result, "gave up after attempt 1 of 3");
+    assert_eq!(
+        (vcp_one_shot.attempts, vcp_one_shot.sleeps),
         (1, Vec::new())
     );
 }
@@ -633,14 +792,14 @@ fn failed_vcp_answers_transport_at_once_when_a_presence_check_cannot_fit() {
     );
     let tight = on_slow_worker(
         Behaviour::Fail(FLAKY),
-        Duration::from_millis(100) + ENUMERATION,
+        Duration::from_millis(400) + ENUMERATION,
         read_brightness,
     );
 
     assert_transport(&vcp.result, "gave up after attempt 3 of 3");
     assert_eq!(
         (vcp.enumerations, vcp.took),
-        (1, Duration::from_millis(100))
+        (1, Duration::from_millis(400))
     );
     assert_transport(&tight.result, FLAKY);
     assert_eq!(tight.enumerations, 1);
@@ -692,4 +851,72 @@ fn unsupported_reply_is_final_without_retry_or_presence_check() {
         (caps.attempts, caps.enumerations, caps.took),
     ];
     assert_eq!(costs, [(1, 1, Duration::ZERO); 3]);
+}
+
+/// 0x70 at 80 of 100: the reply the dev monitor sent for 0x7E during a
+/// probe, left on the bus by the earlier read of 0x70.
+const BLUE_BLACK_LEVEL_REPLY: VcpReply = VcpReply {
+    value: VcpValue {
+        current: 80,
+        max: 100,
+    },
+    echoed: Some(VcpCode(0x70)),
+};
+
+/// Reads 0x7E on display "a" after `stale` replies were left on the bus.
+fn read_trapezoid_after(stale: &[VcpReply]) -> Run<VcpValue> {
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
+    source.leave_on_the_bus(stale);
+    on_bus(&source, Duration::from_secs(1), |worker, id, deadline| {
+        worker.read_vcp(id, VcpCode(0x7E), deadline)
+    })
+}
+
+/// Over `/dev/i2c-*` a reply left on the bus by an earlier request that
+/// gave up can arrive for the next one: on the dev monitor a probe read
+/// 0x70's value as 0x7E's. The worker refuses a reply that echoes another
+/// code as a transient failure and reads again, so the reply to the code
+/// asked wins; with no echo (Windows) the reply is taken as it is
+/// (D-2026-09-26-full-osd-control-10).
+#[test]
+fn a_reply_that_echoes_another_vcp_code_is_retried_until_the_reply_to_the_code_asked_arrives() {
+    let backoff = Duration::from_millis(200);
+
+    let recovers = read_trapezoid_after(&[BLUE_BLACK_LEVEL_REPLY]);
+    let persists = read_trapezoid_after(&[BLUE_BLACK_LEVEL_REPLY; 3]);
+    let unchecked = read_trapezoid_after(&[VcpReply {
+        echoed: None,
+        ..BLUE_BLACK_LEVEL_REPLY
+    }]);
+
+    assert_eq!(recovers.result, Ok(FAKE_VALUE));
+    assert_eq!((recovers.attempts, recovers.sleeps), (2, vec![backoff]));
+    assert_eq!(
+        persists.result,
+        Err(DdcError::Transport(
+            "reply answers VCP code 0x70, not 0x7E (gave up after attempt 3 of 3)".to_owned()
+        ))
+    );
+    assert_eq!(persists.attempts, 3);
+    assert_eq!(unchecked.result, Ok(BLUE_BLACK_LEVEL_REPLY.value));
+    assert_eq!(unchecked.attempts, 1);
+}
+
+#[test]
+fn a_reply_for_another_code_is_a_transient_failure() {
+    let trapezoid = VcpCode(0x7E);
+
+    let error = BLUE_BLACK_LEVEL_REPLY.answering(trapezoid).unwrap_err();
+
+    assert!(!error.is_unsupported());
+    assert!(!error.is_panic());
+    assert_eq!(
+        error,
+        HandleError::new("reply answers VCP code 0x70, not 0x7E")
+    );
+    let own = VcpReply {
+        echoed: Some(trapezoid),
+        ..BLUE_BLACK_LEVEL_REPLY
+    };
+    assert_eq!(own.answering(trapezoid), Ok(own.value));
 }

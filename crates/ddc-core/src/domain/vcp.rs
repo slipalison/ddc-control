@@ -31,12 +31,18 @@ impl VcpCode {
     pub const AUDIO_VOLUME: Self = Self(0x62);
     /// 0x87 — sharpness.
     pub const SHARPNESS: Self = Self(0x87);
+    /// 0xAE — vertical frequency, in hundredths of a hertz.
+    pub const VERTICAL_FREQUENCY: Self = Self(0xAE);
+    /// 0xC9 — display firmware level.
+    pub const FIRMWARE_LEVEL: Self = Self(0xC9);
     /// 0xCA — OSD enable/lock.
     pub const OSD_LOCK: Self = Self(0xCA);
     /// 0xCC — OSD language.
     pub const OSD_LANGUAGE: Self = Self(0xCC);
     /// 0xD6 — power mode.
     pub const POWER_MODE: Self = Self(0xD6);
+    /// 0xDF — VCP (MCCS) version.
+    pub const VCP_VERSION: Self = Self(0xDF);
     /// 0xE0 — first code of the manufacturer-specific range (0xE0..=0xFF).
     pub const MANUFACTURER_SPECIFIC_START: Self = Self(0xE0);
 }

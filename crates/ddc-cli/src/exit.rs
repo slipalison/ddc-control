@@ -34,6 +34,10 @@ impl From<Exit> for ExitCode {
 /// Everything that makes a command fail after its arguments parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
+    /// An argument clap accepted does not fit the feature it goes with,
+    /// such as a value name of another feature. Found before any monitor
+    /// is touched.
+    Usage(String),
     /// No single monitor could be chosen.
     Selection(SelectionError),
     /// The core refused or failed the operation.
@@ -49,6 +53,7 @@ impl CliError {
     /// The exit code this error ends the process with.
     pub fn exit(&self) -> Exit {
         let error = match self {
+            Self::Usage(_) => return Exit::Usage,
             Self::Selection(_) => return Exit::Monitor,
             Self::Ddc { error, .. } => error,
         };
@@ -72,6 +77,7 @@ impl From<SelectionError> for CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (monitor, error) = match self {
+            Self::Usage(message) => return f.write_str(message),
             Self::Selection(selection) => return selection.fmt(f),
             Self::Ddc { monitor, error } => (monitor, error),
         };

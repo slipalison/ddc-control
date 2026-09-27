@@ -9,7 +9,7 @@ use ddc_core::domain::{VcpCode, VcpValue};
 use ddc_hi::{Ddc, DdcHost, DisplayInfo, Handle};
 
 use super::identity::{DisplayIdentity, EdidIdentity};
-use super::worker::{DdcHandle, DisplaySource, HandleError};
+use super::worker::{DdcHandle, DisplaySource, HandleError, VcpReply};
 
 /// The displays `ddc_hi::Display::enumerate` finds. It never probes DDC/CI
 /// (D-4): a display with a readable EDID and a mute DDC/CI is listed and
@@ -33,9 +33,9 @@ impl DdcHandle for Handle {
         self.capabilities_string().map_err(transaction_error)
     }
 
-    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpValue, HandleError> {
+    fn read_vcp(&mut self, code: VcpCode) -> Result<VcpReply, HandleError> {
         self.get_vcp_feature(code.0)
-            .map(vcp_value)
+            .map(vcp_reply)
             .map_err(transaction_error)
     }
 
@@ -75,9 +75,33 @@ fn is_unsupported_reply(cause: &(dyn Error + 'static)) -> bool {
     reply == UNSUPPORTED_VCP_CODE
 }
 
+/// A Get VCP Feature reply as the worker checks it: the value, and the code
+/// the monitor echoes where the platform backend hands it over
+/// (D-2026-09-26-full-osd-control-10).
+pub(crate) fn vcp_reply(reply: ddc_hi::VcpValue) -> VcpReply {
+    VcpReply {
+        value: vcp_value(reply),
+        echoed: echoed_code(&reply),
+    }
+}
+
+/// The VCP code a Get VCP Feature reply says it answers, where the platform
+/// backend passes it on. `ddc` 0.2.2, under `ddc-i2c`, stores the code the
+/// monitor echoes in `ty` and never compares it with the request. `dxva2`
+/// checks replies itself, and `ddc-winapi` puts the value type in `ty`.
+#[cfg(target_os = "linux")]
+fn echoed_code(reply: &ddc_hi::VcpValue) -> Option<VcpCode> {
+    Some(VcpCode(reply.ty))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn echoed_code(_: &ddc_hi::VcpValue) -> Option<VcpCode> {
+    None
+}
+
 /// A Get VCP Feature reply in core terms: maximum then current, each a
 /// big-endian byte pair (VESA MCCS, D-5).
-pub(crate) fn vcp_value(reply: ddc_hi::VcpValue) -> VcpValue {
+fn vcp_value(reply: ddc_hi::VcpValue) -> VcpValue {
     VcpValue {
         current: u16::from_be_bytes([reply.sh, reply.sl]),
         max: u16::from_be_bytes([reply.mh, reply.ml]),

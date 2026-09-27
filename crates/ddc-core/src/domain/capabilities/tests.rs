@@ -192,3 +192,73 @@ fn feature_of_undeclared_code_is_continuous_with_seed_risk() {
     assert_eq!(volume.risk, Risk::Safe);
     assert_eq!(volume.allowed_values, None);
 }
+
+/// Kind and access come from the catalog whether the capabilities declare
+/// the code or not, or cannot be read at all; allowed values come only from
+/// the capabilities (D-2026-09-26-full-osd-control-1).
+#[test]
+fn capabilities_feature_uses_the_catalog_kind_and_access_even_for_a_code_absent_from_the_capabilities_string()
+ {
+    let caps = Capabilities::parse(RTK_QHD_HDR_CAPS).unwrap();
+    let unreadable = Capabilities::default();
+
+    let firmware = caps.feature(VcpCode::FIRMWARE_LEVEL);
+    let auto_setup = caps.feature(VcpCode(0x1E));
+    let preset_without_caps = unreadable.feature(VcpCode::COLOR_PRESET);
+    let reset = caps.feature(VcpCode::RESTORE_FACTORY_DEFAULTS);
+    let version = caps.feature(VcpCode::VCP_VERSION);
+
+    assert!(!caps.declares(VcpCode::FIRMWARE_LEVEL));
+    assert_eq!(
+        (firmware.kind, firmware.access, firmware.risk),
+        (FeatureKind::Continuous, Access::ReadOnly, Risk::Safe)
+    );
+    assert!(!caps.declares(VcpCode(0x1E)));
+    assert_eq!(
+        (auto_setup.kind, auto_setup.access, auto_setup.risk),
+        (
+            FeatureKind::NonContinuous,
+            Access::ReadWrite,
+            Risk::Dangerous
+        )
+    );
+    assert_eq!(auto_setup.allowed_values, None);
+    assert_eq!(
+        (preset_without_caps.kind, preset_without_caps.access),
+        (FeatureKind::NonContinuous, Access::ReadWrite)
+    );
+    assert_eq!(preset_without_caps.allowed_values, None);
+    assert_eq!(
+        (reset.kind, reset.access, reset.allowed_values),
+        (FeatureKind::NonContinuous, Access::WriteOnly, None)
+    );
+    assert_eq!(
+        (version.kind, version.access),
+        (FeatureKind::Continuous, Access::ReadOnly)
+    );
+}
+
+#[test]
+fn feature_outside_the_catalog_keeps_the_capabilities_heuristic_and_is_dangerous() {
+    let caps = Capabilities::parse("(vcp(8D(01 02) DC))").unwrap();
+
+    let listed = caps.feature(VcpCode(0x8D));
+    let bare = caps.feature(VcpCode(0xDC));
+    let absent = caps.feature(VcpCode(0xE5));
+
+    assert_eq!(
+        (listed.kind, listed.access, listed.risk),
+        (
+            FeatureKind::NonContinuous,
+            Access::ReadWrite,
+            Risk::Dangerous
+        )
+    );
+    assert_eq!(listed.allowed_values, Some(vec![0x01, 0x02]));
+    for feature in [bare, absent] {
+        assert_eq!(
+            (feature.kind, feature.access, feature.risk),
+            (FeatureKind::Continuous, Access::ReadWrite, Risk::Dangerous)
+        );
+    }
+}

@@ -1,3 +1,4 @@
+use super::mccs_catalog::catalog_entry;
 use super::{DdcError, VcpCode, VcpValue};
 
 /// How a feature's value is interpreted (MCCS feature type).
@@ -58,23 +59,41 @@ pub struct Feature {
 }
 
 impl Feature {
-    /// Whether validating a write needs the feature's maximum: true unless the
-    /// feature lists its allowed values, since scalers often misreport the
-    /// maximum of non-continuous features.
-    pub fn requires_known_max(&self) -> bool {
-        self.allowed_values.is_none()
+    /// Refuses any write to a feature that cannot take one: a `Table`
+    /// feature, since a write carries a single value
+    /// (D-2026-09-26-full-osd-control-5), then a read-only one. Needs no
+    /// value, so it runs before anything is read from the monitor.
+    pub fn ensure_writable(&self) -> Result<(), DdcError> {
+        if self.kind == FeatureKind::Table || self.access == Access::ReadOnly {
+            return Err(DdcError::UnsupportedFeature(self.code));
+        }
+        Ok(())
     }
 
-    /// Checks `value` before it is written. A listed feature accepts only its
-    /// listed values; any other feature needs a `known_max` — without one the
-    /// write is refused rather than sent blind.
+    /// Whether the monitor can be asked for the feature's value: false only
+    /// for a write-only feature, which is then never read — not for its
+    /// maximum, not back after a write (D-2026-09-26-full-osd-control-8).
+    pub fn is_readable(&self) -> bool {
+        self.access != Access::WriteOnly
+    }
+
+    /// Whether validating a write needs the feature's maximum: only for a
+    /// continuous feature that does not list its values. A non-continuous
+    /// value is one of a closed set, never anything up to a maximum
+    /// (D-2026-09-26-full-osd-control-1).
+    pub fn requires_known_max(&self) -> bool {
+        self.kind == FeatureKind::Continuous && self.allowed_values.is_none()
+    }
+
+    /// Checks `value` before it is written: the feature must be writable
+    /// ([`ensure_writable`](Self::ensure_writable)); a feature with a value
+    /// list — the one the capabilities declare, else the catalog's — accepts
+    /// only its listed values; any other feature needs a `known_max`, and
+    /// without one the write is refused rather than sent blind.
     pub fn validate_write(&self, value: u16, known_max: Option<u16>) -> Result<(), DdcError> {
         let code = self.code;
-        if self.access == Access::ReadOnly {
-            return Err(DdcError::UnsupportedFeature(code));
-        }
-        if let Some(allowed) = &self.allowed_values {
-            let listed = u8::try_from(value).is_ok_and(|byte| allowed.contains(&byte));
+        self.ensure_writable()?;
+        if let Some(listed) = self.lists(value) {
             return if listed {
                 Ok(())
             } else {
@@ -86,6 +105,19 @@ impl Feature {
             return Err(DdcError::InvalidValue { code, value, max });
         }
         Ok(())
+    }
+
+    /// Whether `value` is in the feature's value list: the capabilities'
+    /// list, else the catalog's value names. `None` when neither lists any.
+    fn lists(&self, value: u16) -> Option<bool> {
+        let byte = u8::try_from(value).ok();
+        if let Some(allowed) = &self.allowed_values {
+            return Some(byte.is_some_and(|byte| allowed.contains(&byte)));
+        }
+        let named = catalog_entry(self.code)
+            .map(|entry| entry.values)
+            .filter(|values| !values.is_empty())?;
+        Some(byte.is_some_and(|byte| named.iter().any(|(listed, _)| *listed == byte)))
     }
 }
 
@@ -101,26 +133,27 @@ pub struct FeatureReading {
     pub declared_in_capabilities: bool,
 }
 
-/// Seed risk classification of a VCP code.
+/// The result of reading one code the capabilities do not declare, as part
+/// of a probe: a failure concerns only this code
+/// (D-2026-09-26-full-osd-control-2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbedFeature {
+    /// The code that was read.
+    pub code: VcpCode,
+    /// The reading, or why this code gave none:
+    /// [`DdcError::UnsupportedFeature`] when the monitor said it does not
+    /// support the code, [`DdcError::Transport`] or [`DdcError::Timeout`]
+    /// when it did not answer.
+    pub outcome: Result<FeatureReading, DdcError>,
+}
+
+/// Risk of writing `code`, as the [MCCS catalog](super::mccs_catalog) says.
 ///
-/// Safe: brightness, contrast, color preset, RGB gains, volume, sharpness and
-/// OSD language. Everything else — factory resets, input source, OSD lock,
-/// power mode, the manufacturer-specific range `0xE0..=0xFF`, and any code not
-/// yet classified — is `Dangerous`, so an unknown code always needs
+/// Any code outside the catalog — the rest of the manufacturer-specific range
+/// `0xE0..=0xFF` included — is `Dangerous`, so an unknown code always needs
 /// confirmation before it is written.
 pub fn risk_for_code(code: VcpCode) -> Risk {
-    match code {
-        VcpCode::BRIGHTNESS
-        | VcpCode::CONTRAST
-        | VcpCode::COLOR_PRESET
-        | VcpCode::RED_GAIN
-        | VcpCode::GREEN_GAIN
-        | VcpCode::BLUE_GAIN
-        | VcpCode::AUDIO_VOLUME
-        | VcpCode::SHARPNESS
-        | VcpCode::OSD_LANGUAGE => Risk::Safe,
-        _ => Risk::Dangerous,
-    }
+    catalog_entry(code).map_or(Risk::Dangerous, |entry| entry.risk)
 }
 
 /// Refuses a write to a dangerous code that the user did not confirm. Needs

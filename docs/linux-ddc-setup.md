@@ -92,12 +92,12 @@ only works with `sudo`, the permissions are wrong: fix step 3 instead.
   EDID and never probes DDC/CI. So a display with a readable EDID but no
   DDC/CI answer still shows up. Examples: most TVs, some docks and KVMs, and
   monitors with DDC/CI turned off in their OSD. Its reads and writes fail
-  as a transport error once the 3 attempts are spent, in about 100 ms on
+  as a transport error once the 3 attempts are spent, in about 0.4 s on
   the dev machine (a TV), without delaying calls to other monitors.
 - **Timings.** On the dev machine, enumeration took about 1.1 s (an EDID
   read on each bus), a capabilities read about 2.5 s, and a VCP read or
   write 40–100 ms. The default budgets are 5 s, 8 s and 1 s. A failed
-  transaction is retried up to 3 times within the same budget: 50 ms
+  transaction is retried up to 3 times within the same budget: 200 ms
   apart for VCP reads and writes, 500 ms apart for capabilities reads.
   A read or write on a monitor the backend has not listed yet
   first pays one enumeration, under the enumeration budget: about 1.2 s

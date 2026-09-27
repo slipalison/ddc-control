@@ -135,3 +135,14 @@ fn a_selection_error_keeps_its_own_message() {
 
     assert_eq!(error.to_string(), "no monitor found over DDC/CI");
 }
+
+#[test]
+fn a_usage_error_found_while_running_exits_2_with_its_own_message() {
+    let error = CliError::Usage("0x10 brightness has no value named 'srgb'".to_owned());
+
+    assert_eq!(error.exit(), Exit::Usage);
+    assert_eq!(
+        error.to_string(),
+        "0x10 brightness has no value named 'srgb'"
+    );
+}

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use super::mccs_catalog::catalog_entry;
 use super::{Access, DdcError, Feature, FeatureKind, VcpCode, risk_for_code};
 
 /// A monitor's parsed MCCS capabilities string, e.g.
@@ -49,19 +50,22 @@ impl Capabilities {
         self.vcp.contains_key(&code.0)
     }
 
-    /// The feature `code` as described by these capabilities. A code with a
-    /// value list is non-continuous; any other code, declared or not, is
-    /// treated as continuous until a full feature catalog exists.
+    /// The feature `code`: its kind and access come from the
+    /// [MCCS catalog](super::mccs_catalog), whether these capabilities
+    /// declare the code or not; its allowed values come only from these
+    /// capabilities. A code outside the catalog is read-write, and
+    /// non-continuous exactly when the capabilities list its values.
     pub fn feature(&self, code: VcpCode) -> Feature {
         let allowed_values = self.vcp.get(&code.0).cloned().flatten();
-        let kind = match allowed_values {
-            Some(_) => FeatureKind::NonContinuous,
-            None => FeatureKind::Continuous,
+        let (kind, access) = match (catalog_entry(code), &allowed_values) {
+            (Some(entry), _) => (entry.kind, entry.access),
+            (None, Some(_)) => (FeatureKind::NonContinuous, Access::ReadWrite),
+            (None, None) => (FeatureKind::Continuous, Access::ReadWrite),
         };
         Feature {
             code,
             kind,
-            access: Access::ReadWrite,
+            access,
             risk: risk_for_code(code),
             allowed_values,
         }

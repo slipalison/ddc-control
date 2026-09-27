@@ -1,9 +1,11 @@
 use std::io::{self, Write};
 
-use ddc_core::domain::{Capabilities, FeatureReading, MonitorId, MonitorInfo, VcpCode, VcpValue};
+use ddc_core::domain::{
+    Capabilities, DdcError, FeatureReading, MonitorId, MonitorInfo, VcpCode, VcpValue,
+};
 use serde_json::{Value, json};
 
-use super::{Format, Printer, monitor_line};
+use super::{FeatureRow, Format, Printer, monitor_line};
 
 const CAPS: &str =
     "(prot(monitor)type(LCD)model(FAKE)cmds(01 02 F3)vcp(10 14(01 0B) 60(0F 11))mccs_ver(2.2))";
@@ -239,8 +241,9 @@ fn get_as_json_has_the_reading_fields() {
     );
 }
 
+/// The label and the JSON `name` are the catalog alias.
 #[test]
-fn a_code_without_a_shortcut_has_no_name() {
+fn a_catalogued_code_is_labelled_by_its_alias() {
     let text = capture(Format::Text, |p| {
         p.get(&id(), &reading(VcpCode::SHARPNESS, 5, 10, true));
     });
@@ -248,9 +251,89 @@ fn a_code_without_a_shortcut_has_no_name() {
         p.get(&id(), &reading(VcpCode::SHARPNESS, 5, 10, true));
     });
 
-    assert_eq!(text.out, "0x87: 5 (0x05), max 10 (0x0A)\n");
+    assert_eq!(text.out, "0x87 sharpness: 5 (0x05), max 10 (0x0A)\n");
+    assert_eq!(json.json()["name"], "sharpness");
+}
+
+#[test]
+fn a_code_without_an_alias_has_no_name() {
+    let text = capture(Format::Text, |p| {
+        p.get(&id(), &reading(VcpCode(0x8D), 1, 2, true));
+    });
+    let json = capture(Format::Json, |p| {
+        p.get(&id(), &reading(VcpCode(0x8D), 1, 2, true));
+    });
+
+    assert_eq!(text.out, "0x8D: 1 (0x01), max 2 (0x02)\n");
     assert_eq!(json.json()["name"], Value::Null);
-    assert_eq!(json.json()["code"], 135);
+    assert_eq!(json.json()["code"], 141);
+}
+
+/// Text puts the meaning right after the raw value; JSON adds
+/// `value_name` for a named value and `interpreted` for any other meaning
+/// (D-2026-09-26-full-osd-control-3).
+#[test]
+fn get_shows_what_the_catalog_says_the_value_means() {
+    let cases = [
+        (
+            VcpCode::COLOR_PRESET,
+            0x01,
+            0x0B,
+            "0x14 preset: 1 (0x01) sRGB, max 11 (0x0B)\n",
+            json!("sRGB"),
+            Value::Null,
+        ),
+        (
+            VcpCode::VERTICAL_FREQUENCY,
+            14400,
+            0xFFFF,
+            "0xAE v-frequency: 14400 (0x3840) 144.00 Hz, max 65535 (0xFFFF)\n",
+            Value::Null,
+            json!("144.00 Hz"),
+        ),
+        (
+            VcpCode::VCP_VERSION,
+            0x0202,
+            0xFFFF,
+            "0xDF vcp-version: 514 (0x202) 2.2, max 65535 (0xFFFF)\n",
+            Value::Null,
+            json!("2.2"),
+        ),
+        (
+            VcpCode(0xAC),
+            3,
+            0xFFFF,
+            "0xAC h-frequency: 3 (0x03), max 65535 (0xFFFF)\n",
+            Value::Null,
+            Value::Null,
+        ),
+    ];
+    for (code, current, max, line, value_name, interpreted) in cases {
+        let text = capture(Format::Text, |p| {
+            p.get(&id(), &reading(code, current, max, true));
+        });
+        let json = capture(Format::Json, |p| {
+            p.get(&id(), &reading(code, current, max, true));
+        })
+        .json();
+
+        assert_eq!(text.out, line, "{code}");
+        assert_eq!(json["value_name"], value_name, "{code}");
+        assert_eq!(json["interpreted"], interpreted, "{code}");
+    }
+}
+
+/// A plain reading keeps exactly the JSON of the phase `cli`: the new
+/// fields are left out, not null.
+#[test]
+fn a_reading_without_a_meaning_has_no_value_name_or_interpreted_field() {
+    let json = capture(Format::Json, |p| {
+        p.get(&id(), &reading(VcpCode::BRIGHTNESS, 50, 100, true));
+    })
+    .json();
+
+    assert!(json.get("value_name").is_none(), "{json}");
+    assert!(json.get("interpreted").is_none(), "{json}");
 }
 
 #[test]
@@ -267,8 +350,74 @@ fn set_as_text_shows_the_value_read_back() {
         );
     });
 
-    assert_eq!(captured.out, "0x60 input: 17 (0x11), max 18 (0x12)\n");
+    assert_eq!(
+        captured.out,
+        "0x60 input: 17 (0x11) HDMI-1, max 18 (0x12)\n"
+    );
     assert!(captured.err.is_empty());
+}
+
+#[test]
+fn set_as_json_names_the_value_read_back() {
+    let captured = capture(Format::Json, |p| {
+        p.set(
+            &id(),
+            VcpCode::COLOR_PRESET,
+            0x05,
+            VcpValue {
+                current: 0x05,
+                max: 0x0B,
+            },
+        );
+    });
+
+    assert_eq!(
+        captured.json(),
+        json!({
+            "monitor": "FAKE-OUT-1",
+            "code": 20,
+            "name": "preset",
+            "requested": 5,
+            "current": 5,
+            "max": 11,
+            "value_name": "6500 K",
+            "applied": true
+        })
+    );
+}
+
+/// A write-only feature is never read back, so `set` on one prints what
+/// was sent, as `reset` does (D-2026-09-26-full-osd-control-8).
+#[test]
+fn a_write_only_feature_prints_only_what_was_sent() {
+    fn via_sent(p: &mut Printer<'_>) {
+        p.sent(&id(), VcpCode::RESTORE_FACTORY_COLOR, 1);
+    }
+    fn via_set(p: &mut Printer<'_>) {
+        let sent = VcpValue { current: 1, max: 1 };
+        p.set(&id(), VcpCode::RESTORE_FACTORY_COLOR, 1, sent);
+    }
+    for print in [via_sent as fn(&mut Printer<'_>), via_set] {
+        let text = capture(Format::Text, print);
+        let json = capture(Format::Json, print);
+
+        assert_eq!(
+            text.out,
+            "0x08: sent 1 (0x01) Reset (write-only, not read back)\n"
+        );
+        assert!(text.err.is_empty(), "{}", text.err);
+        assert_eq!(
+            json.json(),
+            json!({
+                "monitor": "FAKE-OUT-1",
+                "code": 8,
+                "name": null,
+                "requested": 1,
+                "value_name": "Reset",
+                "read_back": false
+            })
+        );
+    }
 }
 
 #[test]
@@ -336,6 +485,112 @@ fn errors_go_to_the_error_stream_in_both_formats() {
     }
 }
 
+fn feature_rows() -> Vec<FeatureRow> {
+    let caps = Capabilities::parse(CAPS).unwrap();
+    vec![
+        FeatureRow {
+            feature: caps.feature(VcpCode::BRIGHTNESS),
+            declared: true,
+            outcome: Ok(VcpValue {
+                current: 50,
+                max: 100,
+            }),
+        },
+        FeatureRow {
+            feature: caps.feature(VcpCode::VERTICAL_FREQUENCY),
+            declared: false,
+            outcome: Ok(VcpValue {
+                current: 14400,
+                max: 0xFFFF,
+            }),
+        },
+        FeatureRow {
+            feature: caps.feature(VcpCode(0xC6)),
+            declared: false,
+            outcome: Err(DdcError::UnsupportedFeature(VcpCode(0xC6))),
+        },
+        FeatureRow {
+            feature: caps.feature(VcpCode(0x7E)),
+            declared: false,
+            outcome: Err(DdcError::Timeout),
+        },
+    ]
+}
+
+#[test]
+fn features_as_text_is_an_aligned_table_with_a_header() {
+    let captured = capture(Format::Text, |p| p.features(&feature_rows(), None));
+
+    assert_eq!(
+        captured.out,
+        "CODE  NAME         TYPE  ACCESS  RISK       SOURCE  VALUE                          DESCRIPTION\n\
+         0x10  brightness   C     RW      safe       caps    50/100                         Luminance\n\
+         0xAE  v-frequency  C     RO      safe       probe   14400/65535 144.00 Hz          Vertical Frequency\n\
+         0xC6  -            C     RO      safe       probe   not supported by this monitor  -\n\
+         0x7E  trapezoid    C     RW      dangerous  probe   not responding                 Trapezoid\n"
+    );
+    assert!(captured.err.is_empty());
+}
+
+#[test]
+fn features_as_json_always_has_every_field() {
+    let listed = capture(Format::Json, |p| p.features(&feature_rows(), None)).json();
+
+    assert_eq!(
+        listed[1],
+        json!({
+            "code": 174,
+            "name": "v-frequency",
+            "description": "Vertical Frequency",
+            "kind": "C",
+            "access": "RO",
+            "risk": "safe",
+            "declared_in_capabilities": false,
+            "probe_status": "ok",
+            "current": 14400,
+            "max": 65535,
+            "value_name": null,
+            "interpreted": "144.00 Hz"
+        })
+    );
+    assert_eq!(
+        listed[2],
+        json!({
+            "code": 198,
+            "name": null,
+            "description": null,
+            "kind": "C",
+            "access": "RO",
+            "risk": "safe",
+            "declared_in_capabilities": false,
+            "probe_status": "unsupported",
+            "current": null,
+            "max": null,
+            "value_name": null,
+            "interpreted": null
+        })
+    );
+    assert_eq!(listed[3]["probe_status"], "unresponsive");
+}
+
+#[test]
+fn features_warn_when_the_capabilities_could_not_be_read_and_print_no_empty_table() {
+    let broken = DdcError::Transport("capabilities string unavailable".to_owned());
+    for format in [Format::Text, Format::Json] {
+        let captured = capture(format, |p| p.features(&[], Some(&broken)));
+
+        assert_eq!(
+            captured.err,
+            "warning: capabilities could not be read (transport error: capabilities string \
+             unavailable); no code counts as declared, and --probe reads every catalogued one\n"
+        );
+        match format {
+            Format::Text => assert!(captured.out.is_empty(), "{}", captured.out),
+            Format::Json => assert_eq!(captured.json(), json!([])),
+        }
+    }
+}
+
 /// A stream that refuses every write, like a closed pipe.
 struct Broken;
 
@@ -369,6 +624,8 @@ fn failing_streams_are_ignored() {
                 max: 100,
             },
         );
+        printer.features(&feature_rows(), None);
+        printer.sent(&id(), VcpCode::RESTORE_FACTORY_DEFAULTS, 1);
         printer.error("still no panic");
     }
     assert!(Broken.flush().is_err());

@@ -9,8 +9,10 @@
 //! Every test only enumerates and reads; none changes a monitor setting.
 //! Each prints how long each operation took, as evidence for the default
 //! budgets of D-7 (enumerate < 5 s, capabilities < 8 s, VCP < 1 s), for
-//! D-2026-09-26-ddc-backends-1 (no enumeration inside a VCP budget) and for
-//! D-2026-09-26-cli-4 (a refused code is unsupported, not a transport error).
+//! D-2026-09-26-ddc-backends-1 (no enumeration inside a VCP budget), for
+//! D-2026-09-26-cli-4 (a refused code is unsupported, not a transport error)
+//! and for D-2026-09-26-full-osd-control-6 (a panic inside `ddc-hi` fails
+//! one read, never the worker).
 
 #![cfg(feature = "ddc-hi")]
 
@@ -33,10 +35,14 @@ const MCCS_2_2: u16 = 0x0202;
 /// 0x8D audio mute and 0xDC display mode: the dev monitor neither declares
 /// them nor supports them, and says so with result code 0x01.
 const REFUSED_BY_DEV_MONITOR: [VcpCode; 2] = [VcpCode(0x8D), VcpCode(0xDC)];
-/// Well under the default VCP budget of 1 s (D-7): a mute display fails
-/// after its three attempts (~100 ms), with no presence check that cannot
-/// fit the budget (D-2026-09-26-ddc-backends-1).
-const FAST_FAILURE: Duration = Duration::from_millis(500);
+/// 0x7E trapezoid: the dev monitor's reply to it makes `ddc-i2c` 0.2.2
+/// panic (index out of bounds before the checksum).
+const PANICS_DDC_I2C: VcpCode = VcpCode(0x7E);
+/// Under the default VCP budget of 1 s (D-7) and the ~1.1 s enumeration: a
+/// mute display fails after its three attempts, 200 ms apart (~0.4 s on the
+/// dev TV, D-2026-09-26-full-osd-control-9), with no presence check that
+/// cannot fit the budget (D-2026-09-26-ddc-backends-1).
+const FAST_FAILURE: Duration = Duration::from_millis(800);
 /// A Get VCP on the dev monitor takes ~45 ms; far less than the ~1.1 s
 /// enumeration that used to queue behind a failure on another display.
 const NO_STALL: Duration = Duration::from_millis(250);
@@ -214,5 +220,27 @@ fn hardware_code_the_dev_monitor_refuses_is_unsupported() {
     }
     let (after, _) = timed_read(&backend, &dev, VcpCode::BRIGHTNESS);
 
+    assert!(after.is_ok(), "{after:?}");
+}
+
+/// Reading 0x7E makes `ddc-i2c` 0.2.2 panic on the dev monitor. The read
+/// fails as a transport error, and the same backend reads brightness right
+/// after it: the worker thread survived (D-2026-09-26-full-osd-control-6).
+#[test]
+#[ignore = "needs the dev monitor attached; run with DDC_HW_TESTS=1"]
+fn hardware_reading_0x7e_never_stops_the_worker() {
+    if !hardware_enabled() {
+        return;
+    }
+    let backend = ddc_adapters::DdcHiMonitorBackend::new().unwrap();
+    let dev = MonitorId::new(RTK_ID);
+
+    let (trapezoid, _) = timed_read(&backend, &dev, PANICS_DDC_I2C);
+    let (after, _) = timed_read(&backend, &dev, VcpCode::BRIGHTNESS);
+
+    assert!(
+        matches!(trapezoid, Err(DdcError::Transport(_))),
+        "{trapezoid:?}"
+    );
     assert!(after.is_ok(), "{after:?}");
 }
