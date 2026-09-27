@@ -145,20 +145,24 @@ Needs a desktop session whose tray is a StatusNotifierItem host (KDE Plasma, or 
 
 ```sh
 cargo build -p ddc-tray --release --locked
-bash apps/ddc-tray/scripts/smoke-sni.sh target/release/ddc-tray
+bash apps/ddc-tray/scripts/smoke-sni.sh --activate target/release/ddc-tray
 ```
 
 Expected: exit 0 a few seconds later, with
 
 ```text
 smoke-sni: started target/release/ddc-tray as PID <pid>
-smoke-sni: org.kde.StatusNotifierWatcher lists :1.<n>/org/ayatana/NotificationItem/tray_icon_tray_app_ddc_control, owned by PID <pid>
-smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later and never panicked
+smoke-sni: org.kde.StatusNotifierWatcher lists org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem, owned by PID <pid>
+smoke-sni: called org.kde.StatusNotifierItem.Activate on org.kde.StatusNotifierItem-<pid>-1/StatusNotifierItem
+smoke-sni: the app printed 'ddc-tray: popup shown' after Activate
+smoke-sni: OK — PID <pid> registered its tray item, was alive 2 s later, showed its popup on Activate and never panicked
 ```
 
-The script lists the watcher's items, starts the app, and waits up to 15 s for a new item whose D-Bus connection belongs to the app's own PID (`GetConnectionUnixProcessID`); the app must then still be alive 2 s later, with no `panicked` on its stderr. It always stops the app on the way out (SIGTERM, SIGKILL after 5 s). Nothing is written to any monitor. On Linux the app replaces itself at launch to turn WebKitGTK's DMA-BUF renderer off (D-2026-09-26-tray-app-10); the PID stays the same, so the check still holds.
+The script lists the watcher's items, starts the app with `DDC_TRAY_DEBUG=1`, and waits up to 15 s for a new item whose D-Bus connection belongs to the app's own PID (`GetConnectionUnixProcessID`); the app must then still be alive 2 s later, with no `panicked` on its stderr. With `--activate` it then calls `Activate` on that item, as the tray does on a left click, and requires `ddc-tray: popup shown` on the app's stderr within 5 s: the popup appears on screen for a moment. Without `--activate` it stops after the registration checks. It always stops the app on the way out (SIGTERM, SIGKILL after 5 s). Nothing is written to any monitor: the popup only reads. On Linux the app replaces itself at launch to turn WebKitGTK's DMA-BUF renderer off (D-2026-09-26-tray-app-10); the PID stays the same, so the check still holds.
 
-Any other outcome is exit 1 with a `smoke-sni: FAIL:` line and the end of the app's stderr: no watcher on the session bus; the app exited before registering (most often another instance was already running); no item owned by that PID within 15 s; the app died within 2 s of registering; or `panicked` on its stderr.
+Any other outcome is exit 1 with a `smoke-sni: FAIL:` line and the end of the app's stderr: no watcher on the session bus; the app exited before registering (most often another instance was already running); no item owned by that PID within 15 s; the app died within 2 s of registering; the item did not answer `Activate` (an AppIndicator item, as the tray had until iteration 3, has no such method: `busctl` says "No such method", "Método inexistente" in Portuguese); no `popup shown` line within 5 s of it; or `panicked` on its stderr.
+
+A SIGTERM leaves the app's KWin placement script loaded (the app unloads it only when it quits through **Quit**); it only matches the popup of that dead process, and the next start replaces it. To remove it by hand: `busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting unloadScript s ddc-tray-anchor`.
 
 ### 7. Tray hardware test
 
@@ -187,10 +191,13 @@ Expected: `2 passed`, with the timings, the monitors, the panel, `brightness <or
 
 ### 8. The popup by hand (optional)
 
-Start `target/release/ddc-tray` and choose **Open panel** in its tray menu. On the dev machine the LG TV is listed first, and its DDC/CI is mute, so its panel fails: check that the popup opens on the RTK (after about 5 s the first time, while it tries the TV) and that the selector at the top lists the TV as "LG TV SSCR2 (no DDC/CI)". Then only:
+Start `target/release/ddc-tray` and left-click its tray icon. On the dev machine the LG TV is listed first, and its DDC/CI is mute, so its panel fails: check that the popup opens on the RTK (after about 5 s the first time, while it tries the TV) and that the selector at the top lists the TV as "LG TV SSCR2 (no DDC/CI)". On KDE Plasma under Wayland, check that it opens next to the icon, not in the middle of the screen, and that it has no taskbar entry. Then only:
 
+- left-click the icon again: the popup hides; click it once more: it shows;
+- open the monitor selector and the color preset list, and check that the popup stays open while the list is open and after a pick (the bug of iteration 3); Esc on an open list closes only the list;
 - move brightness, contrast and volume and change the color preset, putting each back to its step 0 value right after;
-- use the menu's **Brightness** entries only while the popup shows the RTK (they set the monitor the popup last loaded), then put brightness back;
+- roll the mouse wheel over the icon one notch at a time while the popup shows the RTK: brightness moves 5% per notch and the open popup follows; put brightness back;
+- use the menu's **Brightness** entries (right click) only while the popup shows the RTK (they set the monitor the popup last loaded), then put brightness back;
 - open the input and power dialogs only to read them, and close them with **Cancel** or Esc;
 - open **All settings** and run **Probe hidden settings**, which only read, without changing any entry.
 
