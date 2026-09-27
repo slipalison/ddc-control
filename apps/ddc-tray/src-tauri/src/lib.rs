@@ -131,13 +131,21 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::set_feature,
             commands::hide_popup,
         ])
-        .build(tauri::generate_context!())?
+        .build(context())?
         .run(|app, event| {
             if matches!(event, RunEvent::Exit) {
                 tray::uninstall(app);
             }
         });
     Ok(())
+}
+
+/// What Tauri embeds of `tauri.conf.json` — merged with the target's
+/// `tauri.<platform>.conf.json`, when there is one — and of the popup's
+/// files. The one place the context is generated, so the tests check the
+/// configuration the app runs with (D-2026-09-27-tray-app-11).
+pub(crate) fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
 }
 
 /// WebKitGTK's DMA-BUF renderer kills the app with a Wayland protocol error
@@ -303,12 +311,31 @@ mod switch_tests {
 
 #[cfg(test)]
 mod build_tests {
+    /// The popup's Content-Security-Policy (D-2026-09-26-tray-app-7): no
+    /// inline script or style, no `eval`, nothing from outside the app.
+    const STRICT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
+        img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; \
+        object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
     /// Without `tauri/custom-protocol`, even `cargo build --release` makes a
     /// Tauri dev build, which serves `app.security.devCsp` in place of `csp`
     /// (D-2026-09-27-tray-app-10).
     #[test]
     fn the_tray_is_not_a_dev_build() {
         assert!(!tauri::is_dev(), "tauri/custom-protocol is off");
+    }
+
+    /// The policy the app is built with, as Tauri embeds it: the base config
+    /// merged with the target's platform file (RFC 7396), where a
+    /// `"csp": null` erases it (D-2026-09-27-tray-app-11).
+    #[test]
+    fn the_effective_csp_is_the_strict_policy() {
+        let context = super::context();
+        let security = &context.config().app.security;
+
+        let csp = security.csp.as_ref().map(ToString::to_string);
+        assert_eq!(csp.as_deref(), Some(STRICT_CSP));
+        assert_eq!(security.dev_csp, None);
     }
 }
 
