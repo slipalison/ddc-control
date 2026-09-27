@@ -311,6 +311,11 @@ mod switch_tests {
 
 #[cfg(test)]
 mod build_tests {
+    use std::path::Path;
+
+    use tauri::utils::config::parse::read_from;
+    use tauri::utils::platform::Target;
+
     /// The popup's Content-Security-Policy (D-2026-09-26-tray-app-7): no
     /// inline script or style, no `eval`, nothing from outside the app.
     const STRICT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
@@ -336,6 +341,24 @@ mod build_tests {
         let csp = security.csp.as_ref().map(ToString::to_string);
         assert_eq!(csp.as_deref(), Some(STRICT_CSP));
         assert_eq!(security.dev_csp, None);
+    }
+
+    /// The policy of every target the app ships to, read as Tauri's build
+    /// reads it for that target — the base config merged with that target's
+    /// platform file, which the build of any other target never reads
+    /// (D-2026-09-27-tray-app-11).
+    #[test]
+    fn the_effective_csp_is_the_strict_policy_on_every_target() {
+        let config_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for target in [Target::Linux, Target::Windows, Target::MacOS] {
+            let (merged, _) = read_from(target, config_dir).unwrap();
+            let config: tauri::Config = serde_json::from_value(merged).unwrap();
+            let security = &config.app.security;
+
+            let csp = security.csp.as_ref().map(ToString::to_string);
+            assert_eq!(csp.as_deref(), Some(STRICT_CSP), "{target}");
+            assert_eq!(security.dev_csp, None, "{target}");
+        }
     }
 }
 
