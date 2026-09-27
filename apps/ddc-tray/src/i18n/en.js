@@ -1,0 +1,79 @@
+// English texts of the popup, by key (D-2026-09-26-tray-app-6). `value.*`
+// keys are slugs of the core's value names; a name without a key shows as is.
+
+export default Object.freeze({
+  'state.loading': 'Looking for monitors…',
+  'state.empty': 'No monitor with DDC/CI was found.',
+  'action.retry': 'Try again',
+  'hint.i2c':
+    'On Linux, DDC/CI needs the i2c-dev module and read/write access to /dev/i2c-*. See {doc}.',
+
+  'format.percent': '{value}%',
+  'format.fraction': '{current} of {max}',
+  'format.unnamed': 'Value {hex}',
+  'format.code': 'Setting {hex}',
+
+  'origin.caps': 'Declared by the monitor',
+  'origin.probe': 'Found by probing',
+  'reading.unsupported': 'Not supported',
+  'reading.unresponsive': 'No response',
+
+  'confirm.title': 'Confirm change',
+  'confirm.body.input':
+    'Switch the input to {to}? The screen will show that source and may go dark if it has no signal.',
+  'confirm.body.power':
+    "Set power to {to}? The screen may turn off, and you may need the monitor's power button to turn it back on.",
+  'confirm.body.generic':
+    'Set {feature} to {to}? This setting can change how the monitor behaves.',
+  'confirm.accept': 'Apply',
+  'confirm.cancel': 'Cancel',
+
+  'error.not_found': 'Monitor not found. It may have been disconnected.',
+  'error.unsupported': 'This monitor does not support this setting.',
+  'error.invalid_value': 'The monitor does not accept this value.',
+  'error.needs_confirmation': 'This change needs your confirmation.',
+  'error.timeout': 'The monitor did not respond in time.',
+  'error.transport': 'Could not talk to the monitor over DDC/CI.',
+  'error.backend_unavailable': 'Monitor control is not available on this computer.',
+  'error.unknown': 'Something went wrong.',
+
+  'feature.brightness': 'Brightness',
+  'feature.contrast': 'Contrast',
+  'feature.volume': 'Volume',
+  'feature.input': 'Input',
+  'feature.preset': 'Color preset',
+  'feature.power': 'Power',
+  'feature.color-temp': 'Color temperature',
+  'feature.red-gain': 'Red gain',
+  'feature.green-gain': 'Green gain',
+  'feature.blue-gain': 'Blue gain',
+  'feature.auto-setup': 'Auto setup',
+  'feature.h-position': 'Horizontal position',
+  'feature.v-position': 'Vertical position',
+  'feature.red-black-level': 'Red black level',
+  'feature.green-black-level': 'Green black level',
+  'feature.blue-black-level': 'Blue black level',
+  'feature.trapezoid': 'Trapezoid',
+  'feature.sharpness': 'Sharpness',
+  'feature.osd-lock': 'On-screen menu',
+  'feature.osd-language': 'Menu language',
+  'feature.new-control-value': 'New control value',
+
+  'value.display-native': 'Native',
+  'value.user-1': 'User 1',
+  'value.on': 'On',
+  'value.off-dpm': 'Standby (DPM)',
+  'value.off-write-only': 'Off (power button)',
+  'value.off': 'Off',
+  'value.run': 'Run',
+  'value.continuous': 'Continuous',
+  'value.osd-disabled': 'Disabled',
+  'value.osd-enabled': 'Enabled',
+  'value.chinese-traditional': 'Chinese (Traditional)',
+  'value.english': 'English',
+  'value.french': 'French',
+  'value.german': 'German',
+  'value.japanese': 'Japanese',
+  'value.spanish': 'Spanish',
+  'value.chinese-simplified': 'Chinese (Simplified)',
+});

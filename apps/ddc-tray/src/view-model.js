@@ -1,0 +1,202 @@
+// What the popup renders, built from the contract's DTOs (D-2026-09-26-
+// tray-app-5). Texts come from the injected `t`; names, risks and value
+// lists come from the DTOs — that is, from the core — so nothing here knows
+// MCCS. A value name is shown through its `value.<slug>` key when one
+// exists, else as the core wrote it.
+
+import { errorKey, featureKey, translateOr, valueKey } from './i18n/index.js';
+
+export const I2C_DOC = 'docs/linux-ddc-setup.md';
+
+/** Error kinds a Linux user may fix by setting up i2c-dev access. */
+const I2C_HINT_KINDS = new Set(['backend_unavailable', 'transport', 'timeout']);
+
+const CONFIRM_BODY_KEYS = new Map([
+  ['input', 'confirm.body.input'],
+  ['power', 'confirm.body.power'],
+]);
+
+/**
+ * The OS the popup runs on, as far as the webview tells.
+ * @param {{ userAgentData?: { platform?: string }, platform?: string, userAgent?: string } | undefined} nav
+ * @returns {'linux' | 'windows' | 'other'}
+ */
+export function detectPlatform(nav) {
+  const platform = nav?.userAgentData?.platform || nav?.platform || nav?.userAgent || '';
+  if (/\bwin(32|64|dows)?\b/i.test(platform)) return 'windows';
+  if (/linux/i.test(platform)) return 'linux';
+  return 'other';
+}
+
+/**
+ * The monitor to show: `preferredId` while it is still listed, else the
+ * first one, else none.
+ */
+export function pickMonitor(monitors, preferredId) {
+  if (monitors.some((monitor) => monitor.id === preferredId)) return preferredId;
+  return monitors[0]?.id ?? null;
+}
+
+/** The header: the monitor's name, and a picker when there is a choice. */
+export function monitorPicker(monitors, selectedId) {
+  return {
+    selectable: monitors.length > 1,
+    current: monitors.find((monitor) => monitor.id === selectedId) ?? null,
+    options: monitors.map(({ id, label }) => ({ id, label, selected: id === selectedId })),
+  };
+}
+
+/**
+ * The quick controls of a `load_panel` answer: continuous ones as sliders,
+ * the input as a segmented choice, power as a button whose `choices` are
+ * the other modes (plan A-3), and any other list (the preset) as a select.
+ */
+export function panelView(panel, t) {
+  const controls = panel.controls.map((control) => controlView(control, t));
+  const choices = controls.filter((control) => control.widget === 'choice');
+  const power = choices.find((control) => control.key === 'power');
+  return {
+    monitorId: panel.monitorId,
+    sliders: controls.filter((control) => control.widget === 'slider'),
+    input: choices.find((control) => control.key === 'input') ?? null,
+    selects: choices.filter((control) => control.key !== 'input' && control.key !== 'power'),
+    power: power ? { ...power, choices: power.options.filter((option) => !option.selected) } : null,
+  };
+}
+
+/** One quick control, labelled by its `feature.<key>` text. */
+export function controlView(control, t) {
+  return {
+    code: control.code,
+    key: control.key,
+    label: featureLabel(t, control.key, null, control.code),
+    dangerous: control.dangerous,
+    ...valueView(control.value, t),
+  };
+}
+
+/** The "all settings" entries, in the order the Rust side lists them. */
+export function featuresView(features, t) {
+  return features.map((feature) => featureView(feature, t));
+}
+
+/**
+ * One "all settings" entry: labelled by its `feature.<alias>` text, else by
+ * the core's MCCS name; `widget` is null when reading it gave no value.
+ */
+export function featureView(feature, t) {
+  return {
+    code: feature.code,
+    hex: hex(feature.code),
+    key: feature.alias,
+    label: featureLabel(t, feature.alias, feature.name, feature.code),
+    dangerous: feature.dangerous,
+    origin: feature.origin,
+    originText: t(`origin.${feature.origin}`),
+    status: feature.status,
+    statusText: feature.status === 'ok' ? null : t(`reading.${feature.status}`),
+    ...(feature.value ? valueView(feature.value, t) : { widget: null }),
+  };
+}
+
+/**
+ * A control or feature DTO showing `readBack`, the `{ current, max }` a
+ * `set_feature` answers — never the value asked for. A non-continuous
+ * value is the low byte of the reading.
+ */
+export function withReadBack(item, { current, max }) {
+  const { value } = item;
+  const shown =
+    value.kind === 'continuous' ? { ...value, current, max } : { ...value, current: current & 0xff };
+  return { ...item, value: shown };
+}
+
+/**
+ * The status line: `loading`, `ready`, `empty` or `error`. Empty and error
+ * offer `retry`; on Linux, when a missing i2c-dev setup may be the cause,
+ * `hint` points at the setup guide.
+ * @param {{ state: 'loading' | 'ready' | 'empty' | 'error', error?: { kind: string, message: string } | null }} status
+ * @param {{ t: Function, platform: string }} context
+ */
+export function statusView({ state, error = null }, { t, platform }) {
+  const hintable = state === 'empty' || (state === 'error' && I2C_HINT_KINDS.has(error?.kind));
+  return {
+    state,
+    busy: state === 'loading',
+    message: statusMessage(state, error, t),
+    detail: state === 'error' ? error?.message || null : null,
+    retry: state === 'empty' || state === 'error',
+    hint: platform === 'linux' && hintable ? { text: t('hint.i2c', { doc: I2C_DOC }), doc: I2C_DOC } : null,
+  };
+}
+
+/** The text of an error by its kind; an unknown kind reads as a generic one. */
+export function errorText(error, t) {
+  return translateOr(t, errorKey(error?.kind ?? 'unknown'), t('error.unknown'));
+}
+
+/**
+ * The confirmation dialog of a dangerous change, saying what the change
+ * does: switching the input, the power mode, or another setting.
+ * @param {{ key: string | null, label: string, toLabel: string }} change
+ */
+export function confirmView({ key, label, toLabel }, t) {
+  const body = CONFIRM_BODY_KEYS.get(key) ?? 'confirm.body.generic';
+  return {
+    title: t('confirm.title'),
+    body: t(body, { feature: label, to: toLabel }),
+    accept: t('confirm.accept'),
+    cancel: t('confirm.cancel'),
+  };
+}
+
+/** A byte as MCCS writes it: `0x1B`. */
+export function hex(code) {
+  return `0x${code.toString(16).toUpperCase().padStart(2, '0')}`;
+}
+
+function valueView(value, t) {
+  return value.kind === 'continuous' ? sliderFields(value, t) : choiceFields(value, t);
+}
+
+function sliderFields({ current, max }, t) {
+  const percent = max > 0 ? Math.min(100, Math.max(0, Math.round((current * 100) / max))) : 0;
+  const valueText =
+    max === 100 ? t('format.percent', { value: current }) : t('format.fraction', { current, max });
+  return { widget: 'slider', current, max, percent, valueText };
+}
+
+function choiceFields({ current, options }, t) {
+  const views = options.map((option) => ({
+    value: option.value,
+    label: optionLabel(option, t),
+    selected: option.value === current,
+  }));
+  const selected = views.find((option) => option.selected);
+  return {
+    widget: 'choice',
+    current,
+    currentLabel: selected ? selected.label : unnamed(current, t),
+    options: views,
+  };
+}
+
+function optionLabel({ value, name }, t) {
+  return name ? translateOr(t, valueKey(name), name) : unnamed(value, t);
+}
+
+function unnamed(value, t) {
+  return t('format.unnamed', { hex: hex(value) });
+}
+
+function featureLabel(t, alias, name, code) {
+  const fallback = name ?? t('format.code', { hex: hex(code) });
+  return alias ? translateOr(t, featureKey(alias), fallback) : fallback;
+}
+
+function statusMessage(state, error, t) {
+  if (state === 'loading') return t('state.loading');
+  if (state === 'empty') return t('state.empty');
+  if (state === 'error') return errorText(error, t);
+  return null;
+}
