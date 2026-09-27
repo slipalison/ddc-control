@@ -41,37 +41,40 @@ App Tauri 2 `apps/ddc-tray`: ícone na bandeja (Linux + Windows), popup com sele
       **Verify:** `n=$(grep -RIn 'DdcHiMonitorBackend::new' apps/ddc-tray/src-tauri/src | wc -l); [ "$n" = "1" ] && grep -q 'DdcHiMonitorBackend::new' apps/ddc-tray/src-tauri/src/lib.rs && echo OK`
       **Source:** CONTEXT
 - [ ] Módulo de apresentação (`panel.rs`) é Rust puro sobre `MonitorControl`, sem importar o runtime do Tauri.
-      **Verify:** `test -f apps/ddc-tray/src-tauri/src/panel.rs && ! grep -nE '\btauri(::|_)' apps/ddc-tray/src-tauri/src/panel.rs | grep -q . && echo OK`
+      **Verify:** `f=apps/ddc-tray/src-tauri/src/panel.rs; test -f $f && ! grep -vE '^\s*//' $f | grep -nE '\btauri(::|_)|DdcHiMonitorBackend|CachingMonitorBackend|InMemoryMonitorBackend|SoftwareOsd|ddc_adapters' | grep -q . && grep -q '^use ddc_core::ports::MonitorControl;' $f && [ "$(grep -cE '^pub fn [a-z_]+<M: MonitorControl \+ \?Sized>' $f)" -ge 5 ] && echo OK`
       **Source:** CONTEXT
 - [ ] `#![forbid(unsafe_code)]` presente em `ddc-tray/src-tauri`.
-      **Verify:** `grep -RIlq '#!\[forbid(unsafe_code)\]' apps/ddc-tray/src-tauri/src/lib.rs && echo OK`
+      **Verify:** `d=apps/ddc-tray/src-tauri/src; grep -qxE '#!\[forbid\(unsafe_code\)\]' $d/lib.rs && grep -qxE '#!\[forbid\(unsafe_code\)\]' $d/main.rs && ! grep -RnE 'allow\(unsafe_code\)|\bunsafe[[:space:]]*(\{|fn|impl)' $d | grep -q . && echo OK`
       **Source:** CONTEXT
 - [ ] `node --test` cobre debounce/coalescência do slider, o view-model de apresentação e o bridge demo, com zero falhas (testes FORA de `src/`, que é o `frontendDist` embutido no binário).
-      **Verify:** `o=$(node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/**/*.test.mjs' 2>&1); echo "$o" | grep -qE '^# pass ([2-9][0-9]|[1-9][0-9]{2,})$' && echo "$o" | grep -qE '^# fail 0$' && ! find apps/ddc-tray/src -name '*.test.*' | grep -q . && echo OK`
+      **Verify:** `t=apps/ddc-tray/tests/ui; for m in debounce view-model bridge-demo contract i18n-parity i18n-html; do o=$(node --test --test-reporter=tap "$t/$m.test.mjs" 2>&1); echo "$o" | grep -qE '^# pass [1-9]' && echo "$o" | grep -qE '^# fail 0$' || { echo "FAIL $m"; exit 1; }; done; o=$(node --test --test-reporter=tap "$t/**/*.test.mjs" 2>&1); echo "$o" | grep -qE '^# pass ([2-9][0-9]|[1-9][0-9]{2,})$' && echo "$o" | grep -qE '^# fail 0$' && ! find apps/ddc-tray/src -name '*.test.*' | grep -q . && echo OK`
       **Source:** CONTEXT
 - [ ] Paridade de chaves i18n entre `en` e `pt-BR` e ausência de texto hardcoded no HTML fora das chaves.
       **Verify:** `o=$(node --test --test-reporter=tap 'apps/ddc-tray/tests/ui/i18n*.test.mjs' 2>&1); echo "$o" | grep -qE '^# pass [1-9]' && echo "$o" | grep -qE '^# fail 0$' && echo OK`
       **Source:** CONTEXT
 - [ ] CSP do tray não permite `unsafe-inline` em script e restringe `script-src` a `'self'`.
-      **Verify:** csp=$(jq -r '.app.security.csp' apps/ddc-tray/src-tauri/tauri.conf.json); echo "$csp" | grep -qE "script-src[^;]*'self'" && ! echo "$csp" | grep -q 'unsafe-inline' && echo OK
+      **Verify:** `csp=$(jq -r '.app.security.csp' apps/ddc-tray/src-tauri/tauri.conf.json); d() { echo "$csp" | tr ';' '\n' | sed -E 's/^ +| +$//g' | grep -E "^$1( |$)"; }; [ "$(d script-src)" = "script-src 'self'" ] && [ "$(d default-src)" = "default-src 'self'" ] && [ "$(d style-src)" = "style-src 'self'" ] && ! echo "$csp" | grep -qE 'unsafe-(inline|eval)' && echo OK`
       **Source:** CONTEXT
 - [ ] Capabilities do tray não concedem `shell`/`fs`/`http`/`opener`.
-      **Verify:** ! jq -r '.. .identifier? // empty' apps/ddc-tray/src-tauri/capabilities/*.json 2>/dev/null | grep -qE '^(shell|fs|http|opener):' && echo OK
+      **Verify:** `c=apps/ddc-tray/src-tauri; perms=$(jq -r '.permissions[] | if type=="string" then . else .identifier end' $c/capabilities/*.json); [ -n "$perms" ] && ! echo "$perms" | grep -vxE 'core:event:default|allow-[a-z-]+' | grep -q . && [ "$(jq '.app.security.capabilities // [] | length' $c/tauri.conf.json)" = 0 ] && echo OK`
       **Source:** CONTEXT
 - [ ] `tauri-plugin-single-instance` registrado no composition root.
-      **Verify:** `grep -q 'tauri_plugin_single_instance' apps/ddc-tray/src-tauri/src/lib.rs && echo OK`
+      **Verify:** `f=apps/ddc-tray/src-tauri/src/lib.rs; grep -m1 -E '^[[:space:]]*\.plugin\(' $f | grep -qE '^[[:space:]]*\.plugin\(tauri_plugin_single_instance::init\(' && echo OK`
       **Source:** CONTEXT
 - [ ] Smoke Linux/KDE: o binário release sobe, registra no StatusNotifierWatcher um item cuja conexão D-Bus pertence AO PRÓPRIO processo (PID conferido via `org.freedesktop.DBus.GetConnectionUnixProcessID`), continua vivo depois do registro, e não imprime `panicked` no stderr; o script encerra o app ao final.
       **Verify:** `cargo build -p ddc-tray --release --locked -q && bash apps/ddc-tray/scripts/smoke-sni.sh target/release/ddc-tray && echo OK` (o script sai ≠0 em qualquer uma das condições violadas, com timeout de registro de 15 s)
       **Source:** CONTEXT
 - [ ] Teste `#[ignore]` de hardware no monitor "RTK QHD HDR" existe, compila e é gated por `DDC_HW_TESTS=1` (painel carregado só com leituras + UMA escrita Safe de brilho, restaurada ao valor original; nada Dangerous é gravado). O reviewer NUNCA o roda (regra do reviewer); o orquestrador o roda nesta máquina com `DDC_HW_TESTS=1` e anexa a evidência no corpo do PR (mesma prática de `ddc-backends`/`full-osd-control`).
-      **Verify:** `cargo test -p ddc-tray --locked -- --ignored --list 2>&1 | grep -qi 'rtk_qhd_hdr' && grep -RqE 'DDC_HW_TESTS' apps/ddc-tray/src-tauri/tests && echo OK`
+      **Verify:** `f=apps/ddc-tray/src-tauri/tests/rtk_qhd_hdr.rs; cargo test -p ddc-tray --locked --test rtk_qhd_hdr -- --ignored --list 2>/dev/null | grep -qE '^rtk_qhd_hdr[a-z_]*: test$' && grep -qE '^[[:space:]]*if !hardware_enabled\(\) \{' $f && grep -qE 'var\("DDC_HW_TESTS"\)' $f && ! grep -vE '^[[:space:]]*(//|\*)' $f | grep -nE 'confirmed:[[:space:]]*true|Confirm::Yes' | grep -q . && echo OK`
       **Source:** CONTEXT
 - [ ] Gate 7 (frontend-validator): zero erros de console e zero violações axe critical/serious nos `critical_paths` de demo.
-      **Verify:** `cd apps/ddc-tray && npm ci --ignore-scripts --no-audit --no-fund --silent && o=$(npx playwright test --reporter=list 2>&1); echo "$o" | grep -qE '[1-9][0-9]* passed' && ! echo "$o" | grep -qE '[0-9]+ (failed|flaky)' && echo OK`
+      **Verify:** `cd apps/ddc-tray && npm ci --ignore-scripts --no-audit --no-fund --silent && o=$(npx playwright test --reporter=list 2>&1); rc=$?; n=0; for t in light dark; do for p in '/' '/?demo=rtk' '/?demo=two-monitors' '/?demo=empty' '/?demo=error'; do echo "$o" | grep -F "[$t] › tests/e2e/scenarios.spec.mjs" | grep -F "› $p settles" | grep -q '✓' && n=$((n+1)); done; done; [ $rc -eq 0 ] && [ $n -eq 10 ] && ! echo "$o" | grep -qE '[0-9]+ (failed|flaky)' && echo OK` (exit 0 da suíte + os 5 `critical_paths` × 2 temas com ✓ no spec que faz console+axe)
       **Source:** CONTEXT
+- [ ] Nenhum `TODO`/`FIXME` sem issue nos arquivos não-Rust do tray (o baseline do PROJECT só lê `*.rs`).
+      **Verify:** `! grep -RInE 'TODO|FIXME' --include='*.js' --include='*.mjs' --include='*.html' --include='*.css' --include='*.sh' --include='*.json' --exclude-dir=node_modules --exclude=package-lock.json apps/ddc-tray | grep -vE '#[0-9]+' | grep -q . && echo OK`
+      **Source:** CONTEXT (DoD critic iter 1)
 - [ ] Screenshots do popup (tema claro e escuro, cenário RTK) gerados pela suíte Playwright e versionados para o revisor do PR.
-      **Verify:** `for f in docs/screenshots/tray-popup-light.png docs/screenshots/tray-popup-dark.png; do test -s "$f" && file "$f" | grep -q 'PNG image' || exit 1; done && echo OK`
+      **Verify:** `L=docs/screenshots/tray-popup-light.png; D=docs/screenshots/tray-popup-dark.png; for f in $L $D; do git ls-files --error-unmatch "$f" >/dev/null 2>&1 && file "$f" | grep -q 'PNG image data, 720 x 1120' || exit 1; done; ! cmp -s $L $D && awk -v l="$(magick $L -colorspace Gray -format '%[fx:mean]' info:)" -v d="$(magick $D -colorspace Gray -format '%[fx:mean]' info:)" 'BEGIN{exit !(l>0.6 && d<0.4)}' && echo OK` (versionados, 360×560 @2x, diferentes, claro de fato claro e escuro de fato escuro)
       **Source:** CONTEXT
 
 ### Manual
