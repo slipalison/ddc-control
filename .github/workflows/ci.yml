@@ -33,14 +33,14 @@ jobs:
   versao:
     permissions:
       contents: read
-    uses: slipalison/github-workflows/.github/workflows/versao.yml@2335b52fb2e3f3bfdf553573521e5923e5831996
+    uses: slipalison/github-workflows/.github/workflows/versao.yml@afc20cc9f5457d045640df903e0ce9a7df1fb515
     with:
       versao_inicial: "0.1.0"
 
   qualidade:
     permissions:
       contents: read
-    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@2335b52fb2e3f3bfdf553573521e5923e5831996
+    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@afc20cc9f5457d045640df903e0ce9a7df1fb515
     with:
       # Tauri compiles three times on Windows (clippy, llvm-cov, release) and
       # a first run has no cache: the template's 20 minutes are not enough.
