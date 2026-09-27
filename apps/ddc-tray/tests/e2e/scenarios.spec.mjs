@@ -11,7 +11,9 @@ import {
   expect,
   expectAccessible,
   expectPicked,
+  hides,
   inputChip,
+  loadEnds,
   monitorPicker,
   open,
   optionsOf,
@@ -167,9 +169,12 @@ test('/?demo=rtk with "all settings" open and probed, clean console, no serious 
 });
 
 // `fail=` makes the demo time out the commands it names, as the backend
-// does when a monitor stops answering. Each failure is told in words, the
-// control shows the monitor's value again, and nothing was written.
+// does when a monitor stops answering, or refuse the window's own
+// (listening to the tray, hiding the popup), as Tauri refuses a command no
+// capability grants. Each failure is told in words, the control shows the
+// monitor's value again, and nothing was written.
 const TIMED_OUT = t('error.timeout');
+const REFUSED = t('error.unknown');
 
 async function toastTells(page, text) {
   const toast = page.locator('#toast');
@@ -233,6 +238,29 @@ const FAILURES = [
       await toastTells(page, TIMED_OUT);
       await expect(probeButton(page)).toHaveAttribute('aria-disabled', 'false');
       await expect(page.locator('#probe-results')).toBeHidden();
+    },
+  },
+  // The popup starts hidden, so the load that follows must not hide this:
+  // no event of the tray will ever refresh what the popup shows.
+  {
+    name: 'listening to the tray was refused, and a load that works',
+    fail: 'events',
+    act: (page) =>
+      loadEnds(page, () => page.getByRole('button', { name: t('action.refresh'), exact: true }).click()),
+    shows: async (page) => {
+      await toastTells(page, REFUSED);
+      await expect(page.locator('#app')).toHaveAttribute('data-state', 'ready');
+      await expect(slider(page, 'brightness')).toHaveValue('75');
+    },
+  },
+  {
+    name: 'hiding the popup was refused',
+    fail: 'hide',
+    act: (page) => page.keyboard.press('Escape'),
+    shows: async (page) => {
+      await toastTells(page, REFUSED);
+      await expect(page.locator('#app')).toHaveAttribute('data-state', 'ready');
+      expect(await hides(page)).toBe(0);
     },
   },
 ];
