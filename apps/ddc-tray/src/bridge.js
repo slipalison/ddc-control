@@ -14,7 +14,7 @@
 // `__TAURI__` means the app is broken, and simulated values would pass for
 // the monitor's: there every command fails as `backend_unavailable`.
 
-import { failingCommands, scenarioMonitors, scenarioName } from './demo-data.js';
+import { DEMO_MESSAGES, failingCommands, scenarioMonitors, scenarioName } from './demo-data.js';
 
 export const DEMO_LATENCY_MS = 60;
 
@@ -31,18 +31,8 @@ const DEV_HOSTS = new Set(['localhost', '127.0.0.1']);
 /** Why every command fails when the page is neither in Tauri nor on a dev server. */
 export const UNAVAILABLE_MESSAGE = 'the Tauri API is missing from this window, so no monitor can be reached';
 
-/** What the core answers when the monitor does not answer (`DdcError::Timeout`). */
-const TIMEOUT_MESSAGE = 'monitor did not respond in time';
-
 /** The command behind `listen` in Tauri's own script. */
 const EVENT_LISTEN = 'plugin:event|listen';
-
-// How Tauri refuses a command no capability grants in a release build
-// (`webview/mod.rs` of tauri 2.12): a string, which the bridge reads as
-// kind `unknown`.
-function refusedByTauri(command) {
-  return `Command ${command} not allowed by ACL`;
-}
 
 /**
  * The bridge for `win`: Tauri's when it is there; without `__TAURI__`, the
@@ -163,9 +153,9 @@ function demoBridge(win, latencyMs, timers) {
   const invoke = async (command, args = {}) => {
     await wait(command === 'probe_features' ? latencyMs * PROBE_LATENCY_FACTOR : latencyMs);
     if (scenario === 'error') {
-      throw uiError('backend_unavailable', 'no DDC/CI backend could be started (demo)');
+      throw uiError('backend_unavailable', DEMO_MESSAGES.noBackend());
     }
-    if (!Object.hasOwn(handlers, command)) throw uiError('unknown', `unknown command ${command}`);
+    if (!Object.hasOwn(handlers, command)) throw uiError('unknown', DEMO_MESSAGES.unknownCommand(command));
     return copy(handlers[command](args));
   };
 
@@ -191,7 +181,7 @@ function demoBridge(win, latencyMs, timers) {
 function write(monitors, writes, { monitorId, code, value, confirmed }, fails) {
   const entry = writableEntry(answering(monitors, monitorId), code);
   if (entry.dangerous && confirmed !== true) {
-    throw uiError('needs_confirmation', `writing feature ${hex(code)} is dangerous and was not confirmed`);
+    throw uiError('needs_confirmation', DEMO_MESSAGES.notConfirmed(hex(code)));
   }
   validate(entry, value);
   timeOutIfFailing(fails, 'set_feature');
@@ -202,7 +192,7 @@ function write(monitors, writes, { monitorId, code, value, confirmed }, fails) {
 
 function monitorOf(monitors, monitorId) {
   const monitor = monitors.find((candidate) => candidate.info.id === monitorId);
-  if (!monitor) throw uiError('not_found', `monitor ${monitorId} not found`);
+  if (!monitor) throw uiError('not_found', DEMO_MESSAGES.notFound(monitorId));
   return monitor;
 }
 
@@ -219,34 +209,31 @@ function writableEntry(monitor, code) {
     (candidate) => candidate.code === code,
   );
   if (!entry || entry.status === 'unsupported') {
-    throw uiError('unsupported', `feature ${hex(code)} is not supported`);
+    throw uiError('unsupported', DEMO_MESSAGES.unsupported(hex(code)));
   }
-  if (entry.status === 'unresponsive') throw uiError('timeout', TIMEOUT_MESSAGE);
+  if (entry.status === 'unresponsive') throw uiError('timeout', DEMO_MESSAGES.timeout());
   return entry;
 }
 
 // A command `?fail=` names reaches the monitor, which then does not answer
 // in time: nothing is read and nothing changes.
 function timeOutIfFailing(fails, command) {
-  if (fails.has(command)) throw uiError('timeout', TIMEOUT_MESSAGE);
+  if (fails.has(command)) throw uiError('timeout', DEMO_MESSAGES.timeout());
 }
 
 // A command of the window `?fail=` names (hiding it, listening to the
 // tray) is refused before it runs, and reaches the popup as the app's
 // bridge hands it such a refusal.
 function refuseIfFailing(fails, command) {
-  if (fails.has(command)) throw normalizeError(refusedByTauri(command));
+  if (fails.has(command)) throw normalizeError(DEMO_MESSAGES.refusedByTauri(command));
 }
 
 function validate(entry, value) {
   if (entry.options && !entry.options.some((option) => option.value === value)) {
-    throw uiError('invalid_value', `value ${value} is not an allowed value for feature ${hex(entry.code)}`);
+    throw uiError('invalid_value', DEMO_MESSAGES.notAllowed(value, hex(entry.code)));
   }
   if (!entry.options && value > entry.reading.max) {
-    throw uiError(
-      'invalid_value',
-      `value ${value} for feature ${hex(entry.code)} exceeds its maximum ${entry.reading.max}`,
-    );
+    throw uiError('invalid_value', DEMO_MESSAGES.aboveMax(value, hex(entry.code), entry.reading.max));
   }
 }
 

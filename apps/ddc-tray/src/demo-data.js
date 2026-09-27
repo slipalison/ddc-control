@@ -3,7 +3,8 @@
 // `src-tauri/src/fixture.rs` (plan A-2) — the contract test pins it to the
 // golden — and its probe mirrors the probe test of `panel/tests.rs`; the
 // mute TV's error is pinned the same way, to the mute golden. Every name is
-// the core's catalog name, verbatim.
+// the core's catalog name, verbatim; every message of a failing call, the
+// core's (or Tauri's) wording.
 
 export const SCENARIOS = Object.freeze(['rtk', 'two-monitors', 'empty', 'error']);
 
@@ -17,6 +18,27 @@ export function scenarioName(search) {
   const asked = new URLSearchParams(search ?? '').get('demo');
   return SCENARIOS.includes(asked) ? asked : DEFAULT_SCENARIO;
 }
+
+/**
+ * What the demo's backend answers a call that fails with, as the core
+ * (`crates/ddc-core/src/domain/error.rs`) and Tauri word it: English, as
+ * any backend message, which the popup shows only as data. A `code` is
+ * written as MCCS writes it (`0x60`).
+ */
+export const DEMO_MESSAGES = Object.freeze({
+  timeout: () => 'monitor did not respond in time',
+  noBackend: () => 'no DDC/CI backend could be started (demo)',
+  unknownCommand: (command) => `unknown command ${command}`,
+  notConfirmed: (code) => `writing feature ${code} is dangerous and was not confirmed`,
+  notFound: (monitorId) => `monitor ${monitorId} not found`,
+  unsupported: (code) => `feature ${code} is not supported`,
+  notAllowed: (value, code) => `value ${value} is not an allowed value for feature ${code}`,
+  aboveMax: (value, code, max) => `value ${value} for feature ${code} exceeds its maximum ${max}`,
+  // How Tauri refuses a command no capability grants in a release build
+  // (`webview/mod.rs` of tauri 2.12): a string, which the bridge reads as
+  // kind `unknown`.
+  refusedByTauri: (command) => `Command ${command} not allowed by ACL`,
+});
 
 /**
  * The commands `?fail=` can make fail, by the word that names each:
