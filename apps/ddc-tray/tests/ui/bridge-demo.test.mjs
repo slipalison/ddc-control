@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   DEMO_LATENCY_MS,
@@ -8,14 +9,28 @@ import {
   isLocalDevServer,
   normalizeError,
 } from '../../src/bridge.js';
-import { SCENARIOS, scenarioName } from '../../src/demo-data.js';
+import { FAILURES, SCENARIOS, failingCommands, scenarioName } from '../../src/demo-data.js';
 
 const RTK = 'RTK-RTK-QHD-HDR-01010101';
 const DELL = 'DEL-DELL-U2723QE-7X9K2L3';
 const TV = 'GSM-LG-TV-SSCR2-01010101';
 const INPUT = 0x60;
 const BRIGHTNESS = 0x10;
+const PRESET = 0x14;
 const POWER = 0xd6;
+const TRAPEZOID = 0x7e;
+
+// What the core says when a monitor does not answer (`DdcError::Timeout`),
+// read from its source, and the contract's kind for it: the demo's
+// failures are the backend's, not made up.
+const CORE_ERRORS = readFileSync(
+  new URL('../../../../crates/ddc-core/src/domain/error.rs', import.meta.url),
+  'utf8',
+);
+const TIMEOUT = Object.freeze({
+  kind: 'timeout',
+  message: /#\[error\("([^"]+)"\)\]\s*Timeout,/.exec(CORE_ERRORS)?.[1],
+});
 
 // Where the Playwright suite serves the popup: the only kind of page the
 // demo runs on (D-2026-09-27-tray-app-6).
@@ -68,6 +83,8 @@ test('outside a local dev server the bridge never falls back to the demo', async
     'https://tauri.localhost/index.html',
     'tauri://localhost/?demo=rtk',
     'http://tauri.localhost/?demo=two-monitors',
+    'tauri://localhost/?demo=rtk&fail=write',
+    'http://tauri.localhost/?fail=features,probe',
   ];
 
   for (const href of pages) {
@@ -232,6 +249,89 @@ test('error answers backend_unavailable to every command', async () => {
     message: 'no DDC/CI backend could be started (demo)',
   });
   assert.deepEqual(panel, listed);
+});
+
+test("the demo's timeout is the core's DdcError::Timeout", () => {
+  assert.equal(typeof TIMEOUT.message, 'string');
+  assert.match(TIMEOUT.message, /\bin time\b/);
+});
+
+test('?fail= names the commands the demo fails; an unknown word is ignored', () => {
+  assert.deepEqual(FAILURES, {
+    write: 'set_feature',
+    features: 'load_features',
+    probe: 'probe_features',
+  });
+  const failing = (search) => [...failingCommands(search)].sort();
+
+  assert.deepEqual(failing('?demo=rtk&fail=write'), ['set_feature']);
+  assert.deepEqual(failing('?fail=features,probe'), ['load_features', 'probe_features']);
+  assert.deepEqual(failing('?fail=probe&fail=write&pseudo=1'), ['probe_features', 'set_feature']);
+  assert.deepEqual(failing('?fail= write , features'), ['load_features', 'set_feature']);
+  assert.deepEqual(failing('?fail=panel,hide,nope,,constructor'), []);
+  assert.deepEqual(failing('?demo=rtk'), []);
+  assert.deepEqual(failing(undefined), []);
+});
+
+test('fail=write: a write times out after the core checks and changes nothing', async () => {
+  const { win, bridge } = demo('?demo=rtk&fail=write');
+
+  assert.deepEqual(await rejection(bridge.setFeature(RTK, BRIGHTNESS, 40)), TIMEOUT);
+  assert.deepEqual(await rejection(bridge.setFeature(RTK, PRESET, 0x02)), TIMEOUT);
+  assert.deepEqual(await rejection(bridge.setFeature(RTK, INPUT, 0x11, { confirmed: true })), TIMEOUT);
+  // The core refuses these before it talks to the monitor.
+  assert.deepEqual(await rejection(bridge.setFeature(RTK, INPUT, 0x11)), {
+    kind: 'needs_confirmation',
+    message: 'writing feature 0x60 is dangerous and was not confirmed',
+  });
+  assert.deepEqual(await rejection(bridge.setFeature(RTK, BRIGHTNESS, 101)), {
+    kind: 'invalid_value',
+    message: 'value 101 for feature 0x10 exceeds its maximum 100',
+  });
+
+  assert.deepEqual(win.__ddcDemo.writes, []);
+  const panel = await bridge.loadPanel(RTK);
+  assert.equal(control(panel, BRIGHTNESS).value.current, 75);
+  assert.equal(control(panel, PRESET).value.current, 0x01);
+  assert.equal(control(panel, INPUT).value.current, 0x0f);
+  assert.equal((await bridge.loadFeatures(RTK)).length, 7);
+  assert.equal((await bridge.probeFeatures(RTK)).length, 9);
+});
+
+test('fail=features and fail=probe time out those reads and nothing else', async () => {
+  const { win, bridge } = demo('?demo=rtk&fail=features,probe');
+
+  assert.deepEqual(await rejection(bridge.loadFeatures(RTK)), TIMEOUT);
+  assert.deepEqual(await rejection(bridge.probeFeatures(RTK)), TIMEOUT);
+
+  assert.deepEqual(
+    (await bridge.listMonitors()).map((monitor) => monitor.id),
+    [RTK],
+  );
+  assert.equal((await bridge.loadPanel(RTK)).monitorId, RTK);
+  assert.deepEqual(await bridge.setFeature(RTK, BRIGHTNESS, 40), { current: 40, max: 100 });
+  assert.deepEqual(win.__ddcDemo.writes, [{ monitorId: RTK, code: BRIGHTNESS, value: 40, confirmed: false }]);
+});
+
+test('a failing command still looks for its monitor first', async () => {
+  const { bridge } = demo('?demo=two-monitors&fail=write,features,probe');
+  const mute = await rejection(bridge.loadPanel(TV));
+
+  assert.equal(mute.kind, 'transport');
+  assert.deepEqual(await rejection(bridge.loadFeatures(TV)), mute);
+  assert.deepEqual(await rejection(bridge.setFeature(TV, BRIGHTNESS, 10)), mute);
+  assert.deepEqual(await rejection(bridge.probeFeatures('gone')), {
+    kind: 'not_found',
+    message: 'monitor gone not found',
+  });
+  assert.deepEqual(await rejection(bridge.probeFeatures(DELL)), TIMEOUT);
+});
+
+test('without fail=, a probed code that gave no answer times out as the core does', async () => {
+  const { win, bridge } = demo('?demo=rtk');
+
+  assert.deepEqual(await rejection(bridge.setFeature(RTK, TRAPEZOID, 1, { confirmed: true })), TIMEOUT);
+  assert.deepEqual(win.__ddcDemo.writes, []);
 });
 
 test('a dangerous write without confirmation is refused and writes nothing', async () => {

@@ -19,6 +19,30 @@ export function scenarioName(search) {
 }
 
 /**
+ * The commands `?fail=` can make time out, by the word that names each:
+ * `fail=write`, `fail=features`, `fail=probe`, or a comma-separated list.
+ */
+export const FAILURES = Object.freeze({
+  write: 'set_feature',
+  features: 'load_features',
+  probe: 'probe_features',
+});
+
+/**
+ * The commands `?fail=` in `search` asks the demo to fail; an unknown word
+ * is ignored, as an unknown scenario is.
+ * @param {string | undefined} search
+ * @returns {Set<string>}
+ */
+export function failingCommands(search) {
+  const words = new URLSearchParams(search ?? '')
+    .getAll('fail')
+    .flatMap((list) => list.split(','))
+    .map((word) => word.trim());
+  return new Set(words.filter((word) => Object.hasOwn(FAILURES, word)).map((word) => FAILURES[word]));
+}
+
+/**
  * Fresh monitors of scenario `name`, in enumeration order. Each entry holds
  * the raw reading (`current`, `max`) a write changes, and `options` when
  * the feature is non-continuous; a monitor with a `mute` error fails every

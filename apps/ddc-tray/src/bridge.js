@@ -3,14 +3,16 @@
 // contract, picked by `?demo=rtk|two-monitors|empty|error`, for the browser,
 // the Playwright suite and `node --test`. The demo enforces what the core
 // does to the UI: a dangerous write needs `confirmed`, a value must be one
-// the feature accepts, and the answer is the value read back.
+// the feature accepts, and the answer is the value read back. `&fail=` makes
+// writes, "all settings" or the probe time out, as the backend does when a
+// monitor stops answering, so the popup's failures can be seen too.
 //
 // The demo runs only on a local dev server (D-2026-09-27-tray-app-6).
 // Inside the app (`tauri://localhost`, `http://tauri.localhost`) a missing
 // `__TAURI__` means the app is broken, and simulated values would pass for
 // the monitor's: there every command fails as `backend_unavailable`.
 
-import { scenarioMonitors, scenarioName } from './demo-data.js';
+import { failingCommands, scenarioMonitors, scenarioName } from './demo-data.js';
 
 export const DEMO_LATENCY_MS = 60;
 
@@ -26,6 +28,9 @@ const DEV_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 /** Why every command fails when the page is neither in Tauri nor on a dev server. */
 export const UNAVAILABLE_MESSAGE = 'the Tauri API is missing from this window, so no monitor can be reached';
+
+/** What the core answers when the monitor does not answer (`DdcError::Timeout`). */
+const TIMEOUT_MESSAGE = 'monitor did not respond in time';
 
 /**
  * The bridge for `win`: Tauri's when it is there; without `__TAURI__`, the
@@ -104,6 +109,7 @@ function unavailableBridge() {
 function demoBridge(win, latencyMs, timers) {
   const scenario = scenarioName(win?.location?.search);
   const monitors = scenarioMonitors(scenario);
+  const fails = failingCommands(win?.location?.search);
   const listeners = new Map();
   const demo = { scenario, writes: [], selected: null, hides: 0, emit };
   if (win) win.__ddcDemo = demo;
@@ -115,9 +121,17 @@ function demoBridge(win, latencyMs, timers) {
       return null;
     },
     load_panel: ({ monitorId }) => panelDto(answering(monitors, monitorId)),
-    load_features: ({ monitorId }) => answering(monitors, monitorId).features.map(featureDto),
-    probe_features: ({ monitorId }) => answering(monitors, monitorId).probe.map(featureDto),
-    set_feature: (args) => write(monitors, demo.writes, args),
+    load_features: ({ monitorId }) => {
+      const { features } = answering(monitors, monitorId);
+      timeOutIfFailing(fails, 'load_features');
+      return features.map(featureDto);
+    },
+    probe_features: ({ monitorId }) => {
+      const { probe } = answering(monitors, monitorId);
+      timeOutIfFailing(fails, 'probe_features');
+      return probe.map(featureDto);
+    },
+    set_feature: (args) => write(monitors, demo.writes, args, fails),
     hide_popup: () => {
       demo.hides += 1;
       return null;
@@ -151,12 +165,15 @@ function demoBridge(win, latencyMs, timers) {
   return api('demo', invoke, listen);
 }
 
-function write(monitors, writes, { monitorId, code, value, confirmed }) {
+// As in the core, a write is checked before the monitor is reached, so a
+// failing one still refuses what the core refuses.
+function write(monitors, writes, { monitorId, code, value, confirmed }, fails) {
   const entry = writableEntry(answering(monitors, monitorId), code);
   if (entry.dangerous && confirmed !== true) {
     throw uiError('needs_confirmation', `writing feature ${hex(code)} is dangerous and was not confirmed`);
   }
   validate(entry, value);
+  timeOutIfFailing(fails, 'set_feature');
   entry.reading.current = value;
   writes.push({ monitorId, code, value, confirmed: confirmed === true });
   return { current: entry.reading.current, max: entry.reading.max };
@@ -183,8 +200,14 @@ function writableEntry(monitor, code) {
   if (!entry || entry.status === 'unsupported') {
     throw uiError('unsupported', `feature ${hex(code)} is not supported`);
   }
-  if (entry.status === 'unresponsive') throw uiError('timeout', 'monitor did not respond in time');
+  if (entry.status === 'unresponsive') throw uiError('timeout', TIMEOUT_MESSAGE);
   return entry;
+}
+
+// A command `?fail=` names reaches the monitor, which then does not answer
+// in time: nothing is read and nothing changes.
+function timeOutIfFailing(fails, command) {
+  if (fails.has(command)) throw uiError('timeout', TIMEOUT_MESSAGE);
 }
 
 function validate(entry, value) {
