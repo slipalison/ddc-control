@@ -57,6 +57,32 @@ test('a value is sent exactly when the burst has paused for 80 ms', (t) => {
   assert.deepEqual(sent(), [[BRIGHTNESS, 60]]);
 });
 
+// A slider dragged for 400 ms: every push restarts the window, so nothing
+// is written while the drag lasts — a throttle would write every 80 ms.
+test('a burst longer than the debounce window writes once, after it ends', async (t) => {
+  const tick = mockTimers(t);
+  const writes = [];
+  const queue = createWriteQueue({ write: async (key, value) => writes.push([key, value]) });
+  const burst = Array.from({ length: 20 }, (_, index) => index * 5);
+  const every = 20;
+  assert.ok(burst.length * every > DEBOUNCE_MS * 4);
+
+  for (const [index, value] of burst.entries()) {
+    queue.push(BRIGHTNESS, value);
+    if (index === burst.length - 1) break;
+    tick(every);
+    await settle();
+    assert.deepEqual(writes, [], `no write ${(index + 1) * every} ms into the burst`);
+  }
+  tick(DEBOUNCE_MS - 1);
+  await settle();
+  assert.deepEqual(writes, [], `no write ${DEBOUNCE_MS - 1} ms after the last push`);
+  tick(1);
+  await settle();
+
+  assert.deepEqual(writes, [[BRIGHTNESS, burst.at(-1)]]);
+});
+
 test('the second write waits for the first and carries only the last value', async (t) => {
   const tick = mockTimers(t);
   const { calls, write, sent } = manualWrites();
