@@ -1,6 +1,9 @@
 // A dangerous change waits for the in-app dialog (D-2026-09-26-tray-app-4,
 // -5): nothing reaches the bridge before "Apply", the write that follows is
 // flagged `confirmed`, and the UI shows the value the monitor reads back.
+// Each variant of the dialog shows its own texts: the input's has a note on
+// how to go back, power's lists the other modes, and the generic one, for
+// any other dangerous setting, has neither.
 
 import { readFileSync } from 'node:fs';
 import {
@@ -8,9 +11,13 @@ import {
   acceptButton,
   cancelButton,
   confirmDialog,
+  dropdown,
   expect,
+  expectAccessible,
+  expectPicked,
   inputChip,
   open,
+  pick,
   powerButton,
   serve,
   t,
@@ -20,8 +27,12 @@ import {
 
 const INPUT = 0x60;
 const POWER = 0xd6;
+const OSD_LOCK = 0xca;
 const HDMI_1 = 0x11;
 const OFF_WRITE_ONLY = 0x05;
+const OSD_DISABLED = 0x01;
+/** A continuous code the catalog does not name (see the slider test). */
+const UNNAMED = 0xe9;
 
 test('another input opens the dialog, and nothing is written yet', async ({ page }) => {
   await open(page, '/?demo=rtk');
@@ -121,4 +132,93 @@ test('power asks with the other modes and writes the one picked, confirmed', asy
   await expect
     .poll(() => writes(page))
     .toEqual([{ monitorId: MONITORS.rtk, code: POWER, value: OFF_WRITE_ONLY, confirmed: true }]);
+});
+
+/** Expects the generic dialog: its title, `body`, both buttons, and no note nor choice. */
+async function expectGenericDialog(page, body) {
+  const dialog = confirmDialog(page);
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('data-tone', 'danger');
+  await expect(page.locator('#confirm-title')).toHaveText(t('confirm.title'));
+  await expect(page.locator('#confirm-body')).toHaveText(body);
+  await expect(page.locator('#confirm-note')).toBeHidden();
+  await expect(page.locator('#confirm-note')).toHaveText('');
+  await expect(page.locator('#confirm-choices')).toBeHidden();
+  await expect(acceptButton(page)).toHaveText(t('confirm.accept'));
+  await expect(cancelButton(page)).toHaveText(t('confirm.cancel'));
+  await expect(cancelButton(page)).toBeFocused();
+}
+
+test('a dangerous list of All settings asks with the generic dialog, then writes confirmed', async ({ page }) => {
+  await open(page, '/?demo=rtk');
+  await page.getByText(t('more.title'), { exact: true }).click();
+  const osdLock = dropdown(page, t('feature.osd-lock'));
+
+  await pick(osdLock, t('value.osd-disabled'));
+
+  await expectGenericDialog(
+    page,
+    t('confirm.body.generic', { feature: t('feature.osd-lock'), to: t('value.osd-disabled') }),
+  );
+  await expectAccessible(page);
+  expect(await writes(page)).toEqual([]);
+
+  await acceptButton(page).click();
+
+  await expect
+    .poll(() => writes(page))
+    .toEqual([{ monitorId: MONITORS.rtk, code: OSD_LOCK, value: OSD_DISABLED, confirmed: true }]);
+  await expectPicked(osdLock, OSD_DISABLED);
+});
+
+// A monitor may declare a continuous code the catalog does not name: it is
+// labelled by its code and is dangerous, as any unknown code is (the
+// core's `risk_for_code`). A test-only bridge.js adds one to the RTK's
+// settings, where the demo's writes find it too.
+const MONITORS_LINE = 'const monitors = scenarioMonitors(scenario);';
+const UNNAMED_SETTING = {
+  code: UNNAMED,
+  alias: null,
+  name: null,
+  dangerous: true,
+  origin: 'caps',
+  status: 'ok',
+  reading: { current: 20, max: 40 },
+  options: null,
+};
+
+test('a dangerous slider of All settings asks on release: Cancel puts it back, Apply writes it', async ({
+  page,
+}) => {
+  const bridge = readFileSync(new URL('../../src/bridge.js', import.meta.url), 'utf8');
+  expect(bridge, 'the demo line this test patches').toContain(MONITORS_LINE);
+  const adding = `for (const monitor of monitors) monitor.features.push(${JSON.stringify(UNNAMED_SETTING)});`;
+  await page.route('**/bridge.js', (route) =>
+    serve(route, { patch: (source) => source.replace(MONITORS_LINE, `${MONITORS_LINE} ${adding}`) }),
+  );
+  await open(page, '/?demo=rtk');
+  await page.getByText(t('more.title'), { exact: true }).click();
+  const label = t('format.code', { hex: '0xE9' });
+  const range = page.getByRole('slider', { name: label, exact: true });
+
+  await range.press('ArrowRight');
+
+  await expectGenericDialog(
+    page,
+    t('confirm.body.generic', { feature: label, to: t('format.fraction', { current: 21, max: 40 }) }),
+  );
+  await expectAccessible(page);
+  await cancelButton(page).click();
+  await expect(confirmDialog(page)).toBeHidden();
+  await expect(range).toHaveValue('20');
+  await expect(range).toHaveAttribute('aria-valuetext', t('format.fraction', { current: 20, max: 40 }));
+  expect(await writes(page)).toEqual([]);
+
+  await range.press('ArrowRight');
+  await acceptButton(page).click();
+
+  await expect
+    .poll(() => writes(page))
+    .toEqual([{ monitorId: MONITORS.rtk, code: UNNAMED, value: 21, confirmed: true }]);
+  await expect(range).toHaveValue('21');
 });
