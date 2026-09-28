@@ -1,88 +1,111 @@
 # Phase 7: Review  (slug: release-packaging)
 
-**Verdict:** BLOCKED
+**Verdict:** APPROVED_PENDING_MANUAL
 
-> Loop iter 3. Escrito pelo orquestrador a partir do resultado integral do reviewer, porque o harness nega escrita de `.md` ao subagente.
+> Loop iter 4. Escrito pelo orquestrador a partir do resultado integral do reviewer: o harness nega escrita de `.md` ao subagente.
 >
-> **Prova da herança (Gates 1–7 e revisão do template herdam da iteração 2)**
-> - `git diff --quiet 45c8433 HEAD -- . ':!.jdi'` sai 0.
-> - O head do gw#14 é `d6d340a`, e os checks de lá estão em success.
-> - O `release-evidence.env` está igual ao da iteração 2 (sha256 `dfe01e30…`).
->
-> **Fato novo durante a revisão:** o humano mergeou o #11 às 16:49:19Z (squash → `8156ae1`). O push na `main` rodou o run 36453793875, todo em success. O `lancar` desse run (egresso `block`) apagou o rascunho 398419349 às 17:04:55.68Z e publicou a release REAL **398454265** às 17:05:00Z: `v0.1.0` → `8156ae1`, 8 anexos. A árvore do `8156ae1` é igual à do `HEAD_SHA` fora de `.jdi/`.
+> **Prova da herança (Gates 1–7 e revisão do template herdam da iteração 3, que herdou da 2)**
+> - `git diff --quiet f2c54ad HEAD -- . ':!.jdi'` sai 0. `f6063d7 (HEAD_SHA)..HEAD` fora de `.jdi/` também sai 0.
+> - Único commit novo: `b8f0265` (só `CONTEXT.md`, `REVIEW.md` e o `release-evidence.env`, que ganhou `MAIN_SHA`, `MAIN_RUN_ID` e `RELEASE_ID`).
+> - O head do gw#14 continua `d6d340a`, com os checks em pass. O `origin/main` é `8156ae1` = `MAIN_SHA`.
+> - Gate 8: os 9 `Verify:`, extraídos por programa, rodados literalmente com `bash --noprofile --norc` entre 17:20 e 17:22:36Z, e em seguida a baseline do PROJECT.
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
-| Build | PASS | Herdado (prova acima). |
+| Build | PASS | Herdado. |
 | Tests | PASS | Re-executado: 386 passed, 0 failed, 9 ignored. |
-| Coverage | PASS | Re-executado: 83.36% com exclusão; 82.93% literal. |
+| Coverage | PASS | Re-executado: 83.36% (Gate 3), 82.93% (literal). Piso de 80%. |
 | Lint | PASS | Herdado. |
 | Hexagonal/Safety/Hygiene | PASS | Herdado. 5.10 re-executado: `cargo audit` sem vulnerabilidade. |
-| Consistency | PASS | Herdado. Os commits da iteração 3 só tocam `.jdi/`. |
-| Segurança do template (gw#14) | PASS | Herdado. Nenhum `run:` do `lancar.yml@d6d340a` contém `${{`. |
+| Consistency | PASS | `b8f0265`: escopo `release-packaging`, tipo `docs`, só `.jdi/`. D-8 respeitada: a tag nasceu do merge. |
+| Segurança do template (gw#14) | PASS | Herdado; head `d6d340a` inalterado. |
 | UI Validation | PASS | Herdado. |
-| DoD | BLOCK | Os 9 do CONTEXT deram `OK` às 17:04–17:06Z. No re-run das 17:11Z, as linhas 6 e 7 saíram com exit 1 por causa da publicação real. |
+| DoD | PASS_PENDING_MANUAL | 12/12 auto PASS (9 CONTEXT + 3 PROJECT); 2 manuais pendentes |
 
 ## Blockers
-- **B-1 — linha 7 ("Nenhuma tag `v*`").**
-  - Agora existe `refs/tags/v0.1.0 → 8156ae1`, criada pelo push do merge. Não é defeito de código.
-  - **Proibido "corrigir" apagando a tag ou a release.**
-- **B-2 — linha 6 (rascunho `DRAFT_RELEASE_ID`).** O rascunho 398419349 dá 404, porque foi apagado pelo `lancar` da `main`, como a D-2 manda. A mesma checagem contra a release real 398454265 / run 36453793875 / `8156ae1` dá `OK`.
+- nenhum. Os B-1 e B-2 da iteração 3 foram resolvidos pela emenda pós-merge, e as linhas discriminam (ver Notas).
 
 ## Warnings
-- **W-7 residual (texto):** agora está na release PÚBLICA 398454265. O corpo (20.159 caracteres) mistura o CHANGELOG em inglês com os títulos em pt-BR das notas do `versao`. Revisar o corpo já é possível, e editar não mexe em tag nem em anexo.
+- **W-7 residual (texto):** o corpo da release pública 398454265 mistura o CHANGELOG em inglês com os títulos em pt-BR das notas do `versao`. Editar o corpo não mexe em tag nem em anexo. Mas a linha 6 exige os 42 itens do `[Unreleased]` no corpo, então uma edição que tire algum deles derruba a linha.
 - **W-8 (herdado, fora do diff):** continua aberto.
 - **W-9 (baixo):** ferramentas fixadas por hash em tags que o dono reescreve. Falha fechado.
 - **W-10 (cosmético):** comentário de 133 caracteres em `qualidade.yml:912`.
-- **W-11 (novo, operacional, prioridade alta): ordem do merge invertida.**
-  - A `main` do ddc-control roda com `uses: …@d6d340a…`, que é head de PR não mergeado no gw.
-  - Ordem: mergear o gw#13; rebasear e mergear o gw#14; logo depois, o PR que troca `@d6d340a…` por `@main`.
-  - Esse PR publica a `v0.1.1`. Juntá-lo ao PR de ship do `.jdi/` economiza uma release.
-- **W-12 (novo, processo):** os commits `.jdi/` da iteração 3 não estão na `main`. Um rebase da branch sobre a `main` quebraria a linha 1, que usava ancestralidade.
+- **W-11 (operacional, prioridade alta):** ordem do merge invertida.
+  - A `main` roda com `uses: …@d6d340a…` (`ci.yml:42/54/130`), e os gw#13 e #14 continuam abertos.
+  - Ordem: gw#13; depois rebasear e mergear o gw#14; depois o PR que troca por `@main`.
+  - O próximo merge na `main` publica a `v0.1.1`, e a linha 7 ("única tag `v*` é `v0.1.0`") só vale até lá. Fazer o ship antes.
+- **W-12 (processo, MITIGADO):** a linha 1 compara árvores e não quebra com rebase. Se o `HEAD_SHA` sumir localmente, `git fetch origin f6063d7…` o traz (o `refs/pull/11/head` o mantém).
+- **W-13 (baixo, lacuna da emenda):** a linha 1 prova `MAIN_SHA ≡ HEAD_SHA` fora de `.jdi/`, mas não compara `HEAD_SHA` com a HEAD da branch. Hoje o fato vale (`git diff --quiet f6063d7 HEAD -- . ':!.jdi'` sai 0). Não bloqueia.
 
 ## Notas
-- **Linha 8 reescrita — não oca, discrimina.**
-  - O modo do runner é equivalente; 15 valores foram classificados igual nos dois modos.
-  - 17 mutantes reprovam: `${{` no `run`, `::error::` removido, regex frouxa, caminho absoluto aceito, `if`/`continue-on-error` no passo e no job, passo depois do `gh release create`, env trocado ou ausente, passo duplicado etc.
-- **Linha 3 reescrita — não oca, discrimina.**
-  - O `0.1.0` dos pacotes só pode vir do `Carimbar versao`: a única fonte de versão é o workspace em `0.0.0`, e nenhum crate fixa versão própria.
-  - 4 mutantes e o `07323e5` (com `0.1.0`) reprovam.
-- **Linha do tempo (UTC).** Às 16:49:19, o merge. Às 17:04:17, a linha 7 dá OK. Às 17:04:55, o rascunho é apagado. Às 17:05:00, a release é publicada. Às 17:11, as linhas 6 e 7 dão exit 1.
+- **Linha 1 emendada: não é oca, discrimina.** Base `OK`, e 5 mutantes reprovam:
+  - `MAIN_SHA=07323e5`, que está na `main` mas tem outra árvore;
+  - `MAIN_SHA=f6063d7`, fora da `main` por causa do squash;
+  - `MAIN_SHA=b8f0265`;
+  - `MAIN_SHA=45c8433`;
+  - `HEAD_SHA=59d16ef`, com código diferente.
+- **Linha 6 emendada: não é oca, discrimina.** Base `OK`, e 7 mutantes reprovam:
+  - `MAIN_RUN_ID` = o run de PR;
+  - `DRAFT_RELEASE_ID=398335754`, apagado pelo ensaio e não pela `main`;
+  - `RELEASE_ID` = o rascunho apagado;
+  - `MAIN_SHA=07323e5`;
+  - `VERSAO=0.1.1`;
+  - artefatos do ensaio no lugar dos da `main`, que falha no `cmp`;
+  - um item falso no `Unreleased`.
+  - O grep "Rascunho 398419349 de v0.1.0 apagado." casa com a saída real (log, linha 485), não com o eco do script.
+- **Linha 7 emendada: não é oca, discrimina.** Base `OK`, e 3 mutantes reprovam. O `git ls-remote --tags origin` mostra UMA tag no repositório (`v0.1.0 → 8156ae1`, leve). A única release é a 398454265, de `github-actions[bot]`, com 8 anexos. Não sobrou rascunho.
 
 ## DoD Checklist (gate 8)
 
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | Run real de `pull_request` no `HEAD_SHA` (success, `rust-linux` em 22.04, `salto=inicial versao=0.1.0`, `lancar` skipped) | CONTEXT | Auto | PASS | `OK` (17:04:55Z). Ver W-12 |
-| 2 | Template que rodou = PR #14 (`WORKFLOWS_SHA`) | CONTEXT | Auto | PASS | `OK` |
-| 3 | `pacotes-rust-linux` inspecionados; carimbo provado (0.0.0, `tauri.conf.json` sem `version`, `version.workspace = true`) | CONTEXT | Auto | PASS | `OK`; as checagens novas discriminam |
+| 1 | Run real de `pull_request` no `HEAD_SHA` (success, `rust-linux` em 22.04, `salto=inicial versao=0.1.0`, `lancar` skipped); `MAIN_SHA` ancestral de `origin/main` e com árvore igual à do `HEAD_SHA` fora de `.jdi/` | CONTEXT | Auto | PASS | `OK`; 5/5 mutantes reprovam |
+| 2 | Template que rodou = PR #14 (`WORKFLOWS_SHA`) | CONTEXT | Auto | PASS | `OK`; head `d6d340a` |
+| 3 | `pacotes-rust-linux` inspecionados; carimbo provado | CONTEXT | Auto | PASS | `OK` |
 | 4 | `pacotes-rust-windows` e os 5 passos | CONTEXT | Auto | PASS | `OK` |
 | 5 | Ensaio `ENSAIO_RUN_ID` | CONTEXT | Auto | PASS | `OK` |
-| 6 | Rascunho `DRAFT_RELEASE_ID` | CONTEXT | Auto | FAIL | `OK` às 17:04:17–17:04:54Z; exit 1 às 17:11:16Z (404, apagado pelo `lancar` da `main`) |
-| 7 | Nenhuma tag `v*` | CONTEXT | Auto | FAIL | `OK` às 17:04:17Z; exit 1 às 17:11:15Z (`v0.1.0 → 8156ae1`, criada pelo merge) |
-| 8 | Validação de entrada do `lancar.yml` (YAML parseado, sem `${{`, recusa pelo `::error::` do script) | CONTEXT | Auto | PASS | `OK`; 17/17 mutantes reprovam |
+| 6 | Release PUBLICADA 398454265 / run 36453793875 / `8156ae1`; o log liga o rascunho 398419349; assets = artefatos da `main` + `SHA256SUMS`, byte a byte; corpo com o `Unreleased` | CONTEXT | Auto | PASS | `OK`; 7/7 mutantes reprovam |
+| 7 | Única tag `v*` = `v0.1.0 → MAIN_SHA` | CONTEXT | Auto | PASS | `OK`; 3/3 mutantes; `ls-remote` com 1 tag. Vale até o próximo merge na `main` (W-11) |
+| 8 | Validação de entrada do `lancar.yml` | CONTEXT | Auto | PASS | `OK` |
 | 9 | Nenhum `TODO`/`FIXME` sem issue | CONTEXT | Auto | PASS | `OK` |
 | 10 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | 386/0/9 |
 | 11 | Coverage >= 80% of lines | PROJECT | Auto | PASS | 82.93% literal |
 | 12 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | `OK` |
-| 13 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: só `## [Unreleased]`; a `v0.1.0` já foi publicada, então o heading `## [0.1.0]` já é devido |
-| 14 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: Install com `SHA256SUMS` e o aviso de instalador sem assinatura; "What publishes" e "Do not rehearse near a merge" |
+| 13 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `CHANGELOG.md:8` só tem `## [Unreleased]`; a `v0.1.0` foi publicada, então o heading `## [0.1.0]` é devido e entra no PR de ship |
+| 14 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## Install` (`README.md:7`) com `sha256sum -c --ignore-missing SHA256SUMS` (`:21`) e o aviso de instalador sem assinatura (`:22`); "What publishes" (`:498`) e "Do not rehearse near a merge" (`:499`) |
 
-**Totals:** 14 items | Auto: 12 (10 PASS, 2 FAIL) | Manual: 2 pending
+**Totals:** 14 items | Auto: 12 (12 PASS, 0 FAIL) | Manual: 2 pending
+
+**Manual confirmation** (while a manual item is still pending):
+Run `/jdi-confirm-dod release-packaging` to confirm each manual item with evidence. Without that, `/jdi-ship` will refuse the phase.
 
 ## Recommendation
-Código e template aprovados. O BLOCKED vem só das linhas 6 e 7, que o merge humano do #11 tornou impossíveis de passar, do jeito previsto. O doer não tem o que corrigir.
+Código, template e DoD aprovados. As 3 linhas emendadas discriminam (15/15 mutantes reprovam). Falta a confirmação dos 2 manuais.
 
-Emenda de DoD pós-merge para o orquestrador:
-- `MAIN_SHA`, `MAIN_RUN_ID` e `RELEASE_ID` no `release-evidence.env`;
-- a linha 6 aponta para a release real e liga o rascunho validado pelo log "Rascunho 398419349 de v0.1.0 apagado.";
-- a linha 7 passa a exigir que a única tag `v*` seja `v0.1.0 → MAIN_SHA`;
-- a linha 1 compara árvores em vez de ancestralidade.
+Antes do próximo merge na `main`, registrar o verify/ship desta phase (W-11/linha 7). Também antes:
+- mergear o gw#13;
+- rebasear e mergear o gw#14;
+- abrir o PR que troca por `@main`, junto com o ship do `.jdi/` e o heading `## [0.1.0]` do CHANGELOG, para gastar uma release só (`v0.1.1`).
 
 Não fazer:
-- apagar a tag ou a release;
-- recriar um rascunho;
-- empurrar `ensaio-release/*`.
+- apagar ou mover a tag `v0.1.0` ou a release;
+- recriar rascunho;
+- empurrar `ensaio-release/*`;
+- tirar do corpo da release os itens do `Unreleased`.
 
-> **Emenda aplicada pelo orquestrador (verify reset iter 3 → 4):** é exatamente a recomendada acima. A linha 1 passou a usar `MAIN_SHA` ancestral de `origin/main` e árvore do `MAIN_SHA` igual à do `HEAD_SHA` fora de `.jdi/`. As linhas 6 e 7 agora tratam da release real. Os 9 `Verify:` foram rodados literalmente em `bash`: todos `OK`.
+## DoD Critic (enhanced)
+
+- DoD row «6»: o corpo não era provado inteiro. O `grep -E '^- '` só conferia os 42 itens de nível 0 do `[Unreleased]` e ignorava os 25 subitens aninhados e os títulos `###`.
+  - Mutante realista demonstrado: `Montar as notas` com `dentro && /^- /`, que gera um corpo de 11.668 caracteres sem subitens.
+  - Com esse corpo servido por um shim de `gh`, a linha imprimia OK. O controle, sem 1 item de nível 0, reprovava, o que mostra que o shim estava em uso.
+- Suspeita (não objetiva): depois da emenda, nenhuma linha ligava o `DRAFT_RELEASE_ID` ao `ENSAIO_RUN_ID`.
+- As outras 11 linhas Auto foram julgadas não ocas, e as emendadas 1 e 7 discriminam.
+
+**Verdict:** BLOCKED
+
+> Correção do orquestrador (verify reset iter 4 → 5, CONTEXT linha 6):
+> - o corpo tem de COMEÇAR pela seção `## [Unreleased]` inteira do CHANGELOG do `MAIN_SHA`, byte a byte, como o `awk` do template a extrai. Isso cobre títulos, itens e subitens, e a seção precisa ter pelo menos 10 linhas;
+> - o log do `lancar / Tag e release` do `ENSAIO_RUN_ID` precisa ter `ID: $DRAFT_RELEASE_ID`.
+>
+> Resultado: a linha dá `OK` contra a release real, e o mesmo corpo sem os subitens aninhados reprova (rc=1).
