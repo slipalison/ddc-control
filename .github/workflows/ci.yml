@@ -31,10 +31,13 @@ name: CI
 
 on:
   push:
-    # `ensaio-release/**` is the release rehearsal: `ramo_de_ensaio` below
-    # makes the pipeline create the release there as a DRAFT (no tag, not
-    # public), after the same gates as main. Only `main` publishes.
-    branches: [main, 'ensaio-release/**']
+    # Only main. The `ensaio-release/**` rehearsal of the previous phase is
+    # gone: a draft release there would have to pass the Sonar gate, and
+    # SonarQube Cloud's free plan analyzes only the main branch and pull
+    # requests (run 36498449337: "Not authorized or project not found" on the
+    # Quality Gate). Every pull request's packages stay downloadable as run
+    # artifacts (D-2026-09-28-ci-full-pipeline-1).
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -58,7 +61,7 @@ jobs:
       packages: write
       security-events: write # SARIF of the scans and of CodeQL
       actions: read          # CodeQL
-    uses: slipalison/github-workflows/.github/workflows/pipeline.yml@a13c1546a146f28ce515beb0d770d5a17a4879a5
+    uses: slipalison/github-workflows/.github/workflows/pipeline.yml@71f8b07862f1a4c295f40d48173a2acf9edda3e8
     with:
       # The first release, while the repository had no `vX.Y.Z` tag.
       versao_inicial: "0.1.0"
@@ -125,7 +128,6 @@ jobs:
       # which runs third-party npm code (D-2026-09-28-release-packaging-7).
       artefatos_release: "pacotes-rust-*"
       changelog: CHANGELOG.md
-      ramo_de_ensaio: "ensaio-release/"
 
       # -------------------------------------------------------- security --
       # The repository is public, so CodeQL is free and its results, like the
