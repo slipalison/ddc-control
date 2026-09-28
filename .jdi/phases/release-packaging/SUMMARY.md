@@ -92,3 +92,10 @@ Os 9 `Verify:` dão `OK` em `bash`. A linha 8, que falhava contra o `3688e06`, a
   - `bd278c9` PLAN.
 - Gates locais verdes: 386 testes, cobertura 83,36%, 161 + 138 na UI, actionlint e pins. `Conferir as entradas` testado em 15 combinações e `Conferir componente` em 38.
 - W-8 (herdado, fora do diff) continua aberto.
+
+## Iteração 3 (sem código; reset das linhas 8 e 3 pelo orquestrador)
+Os 9 `Verify:` dão `OK` (exit 0) antes e depois do commit `22e1153`, que só mexe no PLAN. A evidência é a da iteração 2: `RUN_ID` 36445031966, ensaio 36447884185, rascunho 398419349, `HEAD_SHA` `f6063d7` e `WORKFLOWS_SHA` `d6d340a`.
+
+Controles negativos:
+- A linha 8 sai 1 contra o `3688e06`, contra o `d6d340a` com `${{ inputs.artefatos }}` injetado no `::error::` e contra o `d6d340a` sem `::error::`.
+- As checagens novas da linha 3 reprovam na `origin/main`, onde a versão ainda é `0.1.0`.
