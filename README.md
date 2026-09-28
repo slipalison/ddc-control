@@ -2,17 +2,34 @@
 
 Control everything your monitor's physical OSD offers — brightness, contrast, input source, color preset, volume, power — from software, over DDC/CI, with the same Rust binary on Windows and Linux.
 
-**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`), 3 (`cli`), 4 (`full-osd-control`), 5 (`tray-app`) and 6 (`ci-crossbuild`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, lists every feature with its current value, probes the ones the capabilities leave out, and reads and writes features by name, with factory resets behind `--yes`; the `ddc-tray` app puts the everyday controls in a popup behind a system-tray icon (see [Tray app](#tray-app)). Reads are validated on real hardware. Writes pass the same checks and are tested against the in-memory backend; on real hardware only the tray's hardware test has written so far, one brightness change on the dev monitor, restored right after. CI builds and tests the whole workspace on Linux and Windows on every pull request (see [CI](#ci)). The tray has been run on Linux (KDE Plasma) only: on Windows it builds and its tests pass in CI, but it has not been run on a Windows desktop yet. Installers come next (phase `release-packaging`). See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
+**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`), 3 (`cli`), 4 (`full-osd-control`), 5 (`tray-app`), 6 (`ci-crossbuild`) and 7 (`release-packaging`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, lists every feature with its current value, probes the ones the capabilities leave out, and reads and writes features by name, with factory resets behind `--yes`; the `ddc-tray` app puts the everyday controls in a popup behind a system-tray icon (see [Tray app](#tray-app)). Reads are validated on real hardware. Writes pass the same checks and are tested against the in-memory backend; on real hardware only the tray's hardware test has written so far, one brightness change on the dev monitor, restored right after. CI builds, tests and packages the whole workspace on Linux and Windows on every pull request, and a push to `main` whose commits call for a new version publishes the installers as a GitHub Release (see [Install](#install) and [CI](#ci)). The tray has been run on Linux (KDE Plasma) only: on Windows it builds and its tests pass in CI, but it has not been run on a Windows desktop yet. See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
 
 ## Install
+
+A push to `main` publishes a [GitHub Release](https://github.com/slipalison/ddc-control/releases), built by [CI](#ci), when its commits call for a new version (see [CI](#ci)), with these files (`<version>` is the release's, such as `0.1.0`):
+
+| System | File | What it is |
+|---|---|---|
+| Debian, Ubuntu, Mint | `ddc-control_<version>_amd64.deb` | the [tray app](#tray-app) (`/usr/bin/ddc-tray`) and the Linux DDC/CI setup |
+| Fedora and other rpm distributions | `ddc-control-<version>-1.x86_64.rpm` | the same, as an rpm |
+| Any Linux | `ddc-control_<version>_amd64.AppImage` | the tray app in one file, without the setup |
+| Linux | `ddc-cli-x86_64-unknown-linux-gnu.tar.gz` | the `ddc-cli` binary and `LICENSE` |
+| Windows | `ddc-control_<version>_x64_en-US.msi` | the tray app, as an MSI installer |
+| Windows | `ddc-control_<version>_x64-setup.exe` | the tray app, as an NSIS installer |
+| Windows | `ddc-cli-x86_64-pc-windows-msvc.zip` | `ddc-cli.exe` and `LICENSE` |
+
+- **Check the download** against the release's `SHA256SUMS`, in the folder you saved the files to: `sha256sum -c --ignore-missing SHA256SUMS`.
+- **The installers are not signed.** Windows SmartScreen warns about an unknown publisher before the MSI or the NSIS installer runs. The AppImage needs `chmod +x` before it runs.
+- **Linux builds need glibc 2.35 or newer**, such as Ubuntu 22.04, Debian 12, Mint 21 or a current Fedora: they are built on Ubuntu 22.04.
+- **On Linux your user needs access to `/dev/i2c-*`.** The deb and the rpm set that up themselves: they install the udev rule and load `i2c-dev` at boot, and their post-install applies both right away. The AppImage and the `ddc-cli` archive cannot: follow steps 2 and 3 of [`docs/linux-ddc-setup.md`](docs/linux-ddc-setup.md). Never run `ddc-cli` or `ddc-tray` with `sudo`.
+
+From source, the CLI installs with cargo; the tray app is built and run from the repository, as described in [Tray app](#tray-app):
 
 ```sh
 cargo install --path crates/ddc-cli --locked
 ```
 
-On Linux your user needs access to `/dev/i2c-*` first: see [`docs/linux-ddc-setup.md`](docs/linux-ddc-setup.md). Never run `ddc-cli` with `sudo`.
-
-The tray app has no installer or package yet: build and run it from the repository, as described in [Tray app](#tray-app).
+A binary built from the repository says `0.0.0` in `--version`: only CI stamps the release version (see [CI](#ci)).
 
 ## Usage
 
@@ -378,7 +395,7 @@ cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
 - **WebKitGTK's DMA-BUF renderer is off on Linux.** On the dev machine (KDE Plasma on Wayland, NVIDIA driver 615, WebKitGTK 2.54) it killed the app with `Error 71 (Protocol error) dispatching to Wayland display` as soon as the popup was shown. So at launch `ddc-tray` replaces itself (same process id, same arguments) with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, unless that variable is already set: a value you set, whatever it is, is kept (D-2026-09-26-tray-app-10). The popup is then drawn without DMA-BUF, a negligible cost for a 360×560 window.
 - **Windows is built and unit-tested, not run.** [CI](#ci) builds the tray on `windows-latest`, lints it with clippy `-D warnings`, runs its tests there (128 of them, `tray/notification_area.rs`'s click tests included) and builds its release binary. Nothing has run it on a Windows desktop yet: the left click, the anchoring above the icon and DDC/CI through `dxva2` are still unproven. Locally, checking the tray for Windows from Linux still stops in `tauri-winres`, which needs `llvm-rc`.
 - **No autostart, profiles or global hotkeys** yet: phase `profiles-hotkeys`.
-- **No installer** yet: bundling is off, and packages (MSI/NSIS, deb/rpm/AppImage) come with phase `release-packaging`. Build it from source.
+- **Unsigned installers.** The MSI, the NSIS installer and the AppImage carry no code signature: no certificate is available. Expect the system's warning the first time (see [Install](#install)).
 
 ## Layout
 
@@ -401,9 +418,10 @@ cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
   - `src/` is the popup: static HTML, CSS and ES modules, no bundler and no npm at runtime. `bridge.js` calls the Tauri commands, or the in-memory demo in a plain browser; `dropdown.js` (the in-page lists), `debounce.js`, `view-model.js` and `i18n/` (English and Brazilian Portuguese) hold the logic the tests reach.
   - `tests/` holds the `node --test` suites (`ui/`), the Playwright suite (`e2e/`) and the contract goldens (`fixtures/`); `scripts/smoke-sni.sh` is the Linux tray smoke test. `package.json` lists only the test tools.
 
+- `packaging/linux` — what the deb and the rpm install besides the app: the udev rule (`60-ddc-control-i2c.rules`), the `modules-load.d` entry for `i2c-dev` and the post-install script. `apps/ddc-tray/src-tauri/tauri.conf.json` maps them into both packages.
+
 Still to come:
 
-- Installers and release packages (phase `release-packaging`).
 - Profiles, global hotkeys and autostart (phase `profiles-hotkeys`).
 
 Architecture is locked to Hexagonal (Ports & Adapters) — see `.jdi/PROJECT.md` and `.jdi/decisions/`.
@@ -467,14 +485,20 @@ Linux: load `i2c-dev` and make sure your user can open `/dev/i2c-*` (a udev `uac
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every pull request, every push to `main` and on demand (`workflow_dispatch`). A newer commit on the same branch cancels the run still going. The file is only a caller: every step lives in the reusable workflows of [slipalison/github-workflows](https://github.com/slipalison/github-workflows) (`versao.yml` and `qualidade.yml`), extended there for this project and never copied here.
+`.github/workflows/ci.yml` runs on every pull request, every push to `main` or to an `ensaio-release/*` branch, and on demand (`workflow_dispatch`). A newer commit on the same branch cancels the run still going. The file is only a caller: every step lives in the reusable workflows of [slipalison/github-workflows](https://github.com/slipalison/github-workflows) (`versao.yml`, `qualidade.yml` and `lancar.yml`), extended there for this project and never copied here.
 
 | Job | Runner | What it runs |
 |---|---|---|
 | `versao` | ubuntu-latest | Computes the next version from the Conventional Commits (`0.1.0` while there is no tag) and fails a commit outside them. It creates no tag and no release. |
-| `qualidade / rust-linux` | ubuntu-latest | `cargo fmt --check`, `cargo audit`, `cargo clippy --all-targets --all-features -D warnings`, the tests under `cargo llvm-cov` with the 80% line floor, and `cargo build -p ddc-tray --release --locked`. Tauri's WebKitGTK and libudev headers come from apt. |
-| `qualidade / rust-windows` | windows-latest | The same, without the audit. The coverage panel reports but has no floor. |
+| `qualidade / rust-linux` | ubuntu-22.04 | `cargo fmt --check`, `cargo audit`, `cargo clippy --all-targets --all-features -D warnings`, the tests under `cargo llvm-cov` with the 80% line floor, then the version stamp, `cargo build -p ddc-tray --release --locked`, `ddc-cli` in release, and the packages: the deb, the rpm and the AppImage of `ddc-tray`, and the `ddc-cli` `.tar.gz`, uploaded as the artifact `pacotes-rust-linux`. Tauri's WebKitGTK, librsvg and libudev headers come from apt. |
+| `qualidade / rust-windows` | windows-latest | The same, without the audit, with the MSI, the NSIS installer and the `ddc-cli` `.zip` (`pacotes-rust-windows`). The coverage panel reports but has no floor. |
 | `qualidade / node-ui` | ubuntu-latest | `npm ci --ignore-scripts` and `npm test` in `apps/ddc-tray`. |
+| `lancar / Tag e release` | ubuntu-latest | On a push only, after every `qualidade` job passed: the tag `v<version>` and the GitHub Release, with the seven packages, a `SHA256SUMS` and the version's section of `CHANGELOG.md` (`## [Unreleased]` while it has none) above the commit notes. |
+
+- **What publishes.** A push to `main` publishes a release only when its commits call for a new version: `versao` reports a bump (`salto`) other than `nenhum`. Every Conventional Commit since the last `v*` tag counts (`feat` is a minor, a `!` or `BREAKING CHANGE:` a major, any other type a patch), so what publishes nothing is a push with no new commit since the last release, such as a re-run of a commit already released. A push to an `ensaio-release/*` branch runs the same `lancar` and leaves the release as a draft: no tag, not public, the rehearsal of a release before its merge. A draft left with the same tag is deleted before the next release is created; a published one never is. A pull request never gets to `lancar`: its run shows it as skipped.
+- **Do not rehearse near a merge.** With attachments, `main`'s `gh release create` also goes through a draft while it uploads the files. A rehearsal of the same version running at that moment would delete that draft in its `Apagar rascunho velho da mesma tag` step, and `main`'s release would fail without publishing anything (a new run fixes it; nothing leaks). Let a rehearsal finish before merging, and push no `ensaio-release/*` branch while `main`'s run is going.
+- **The version is stamped.** `Cargo.toml` says `0.0.0`, and `qualidade` writes the version `versao` computed into it before the release build, so the binaries and the packages carry it with no bot commit on `main`. On a pull request that is the version the merge will get. The `Conferir versao dos binarios` step runs `ddc-cli --version` on both systems and fails if the version is not there. A local build says `0.0.0`.
+- **Linux on Ubuntu 22.04.** The packages link against the glibc of the system that builds them: built on 24.04 (glibc 2.39), they would not run on Ubuntu 22.04 or Debian 12. The whole Linux job runs there, tests and audit included, so the tested binary is the packaged one.
 
 - **Coverage.** The 80% floor is on lines, measured on Linux over the whole workspace, the binaries' `main.rs` included (82.93% on 2026-09-27). The same run measured 87.93% on Windows, where the Linux-only tray code is not compiled; that panel only reports.
 - **Rust 1.98** on both runners, the toolchain the code is linted with locally, so a lint new in a later stable cannot fail a pull request out of the blue.
@@ -482,7 +506,7 @@ Linux: load `i2c-dev` and make sure your user can open `/dev/i2c-*` (a udev `uac
 - **`cargo audit`.** It fails on any vulnerability not ignored in `.cargo/audit.toml`. That file ignores four advisories, each with the dependency path, why ddc-control does not reach the affected code and when to check it again, and nothing else: no severity threshold, no `--ignore` flag. Three of the four are warnings (unmaintained or unsound crates), which `cargo audit` prints without failing; the fourth, a vulnerability, fails it. To re-check one, delete its lines and run `cargo audit`: it must still name the advisory, and if it does not, the entry was stale and stays deleted.
 - **`npm test`** runs the `node --test` suites (TAP), then `scripts/playwright-browsers.mjs`, which installs Playwright's Chromium, then the Playwright suite. On a GitHub-hosted runner the install adds the browser's system libraries (`--with-deps`, apt as root on a throwaway machine). Anywhere else, a developer machine or a self-hosted runner, it only puts the browser in the user's cache, never with `sudo`; with the browser already there it does nothing.
 - **Hardware tests** never run in CI: no runner has a monitor, and they are `#[ignore]`d without `DDC_HW_TESTS=1`.
-- **Pinned template.** Until the github-workflows pull request that adds Windows runners, apt packages, `cargo audit` and the release build is merged, both `uses:` point at its head commit, not at a branch, so a run is tied to the exact template code under review. After the merge they move to `@main`.
+- **Pinned template.** Until the github-workflows pull request that adds the packaging, the stamped version and the release attachments is merged (it includes the one that added Windows runners, apt packages, `cargo audit` and the release build), every `uses:` points at its head commit, not at a branch, so a run is tied to the exact template code under review. After the merge they move to `@main`.
 
 To reproduce a run locally, use the [quality gates](#dev-setup) plus `cd apps/ddc-tray && npm test`. The CI measures coverage without the `--ignore-filename-regex` of the local gate, so its number is lower.
 

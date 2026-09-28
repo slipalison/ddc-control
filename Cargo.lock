@@ -797,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "ddc-adapters"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "ddc",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "ddc-cli"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "ddc-core"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "ddc-adapters",
  "thiserror 2.0.21",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "ddc-tray"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "ddc-adapters",
  "ddc-core",
