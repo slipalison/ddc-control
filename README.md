@@ -485,7 +485,7 @@ Linux: load `i2c-dev` and make sure your user can open `/dev/i2c-*` (a udev `uac
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every pull request, on every push to `main` or to an `ensaio-release/*` branch, and on demand (`workflow_dispatch`). A newer commit on the same branch cancels the run still going.
+`.github/workflows/ci.yml` runs on every pull request, on every push to `main`, and on demand (`workflow_dispatch`). A newer commit on the same branch cancels the run still going.
 
 The file is one call, `esteira`, to the shared pipeline of [slipalison/github-workflows](https://github.com/slipalison/github-workflows) (`pipeline.yml`), the same entry point every application repository uses. Every step lives there, and nothing is copied here. With no image and no deploy, the pipeline skips those two jobs and runs the rest in parallel:
 
@@ -503,9 +503,8 @@ The file is one call, `esteira`, to the shared pipeline of [slipalison/github-wo
 
 - **What publishes.** A push to `main` publishes a release only when its commits call for a new version.
   - `versao` must report a bump (`salto`) other than `nenhum`. Every Conventional Commit since the last `v*` tag counts: `feat` is a minor, a `!` or `BREAKING CHANGE:` a major, and any other type a patch. So only a push with no new commit since the last release, such as a re-run of a commit already released, publishes nothing.
-  - A push to an `ensaio-release/*` branch goes through the same gates and leaves the release as a draft: no tag, not public. It rehearses a release before its merge. A draft left with the same tag is deleted before the next release is created; a published release never is.
-  - A pull request never reaches `lancar`.
-- **Do not rehearse near a merge.** With attachments, `main`'s `gh release create` also goes through a draft while it uploads the files. A rehearsal of the same version running at that moment would delete that draft in its `Apagar rascunho velho da mesma tag` step, and `main`'s release would fail without publishing anything. A new run fixes it, and nothing leaks. Let a rehearsal finish before merging, and push no `ensaio-release/*` branch while `main`'s run is going.
+  - A pull request never reaches `lancar`. Its packages are the run's artifacts `pacotes-rust-linux` and `pacotes-rust-windows`, stamped with the version the merge will get, to download and install before merging.
+  - There is no release rehearsal on a branch any more. A draft release there would have to pass the Sonar gate, and SonarQube Cloud's free plan analyzes only `main` and pull requests.
 - **The version is stamped.** `Cargo.toml` says `0.0.0`. `qualidade` writes the version `versao` computed into it before the release build, so the binaries and the packages carry it with no bot commit on `main`. On a pull request, that is the version the merge will get. The `Conferir versao dos binarios` step runs `ddc-cli --version` on both systems and fails if the version is not there. A local build says `0.0.0`.
 - **Linux on Ubuntu 22.04.** The packages link against the glibc of the system that builds them: built on 24.04 (glibc 2.39), they would not run on Ubuntu 22.04 or Debian 12. The whole Linux job runs on 22.04, tests and audit included, so the tested binary is the packaged one.
 - **Coverage.**

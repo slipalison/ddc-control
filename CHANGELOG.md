@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI is one call to the shared `pipeline.yml` of slipalison/github-workflows, instead of `versao`, `qualidade` and `lancar` called one by one. Job names gain the `esteira / ` prefix. v0.1.0 was released before this change, without the security scans, Sonar or the gate.
 - `npm test` in `apps/ddc-tray` runs `test:unit` (the `node --test` suites, with coverage), then the Playwright suite.
 
+### Removed
+
+- The release rehearsal on `ensaio-release/*` branches. A draft release there would have to pass the Sonar gate, and SonarQube Cloud's free plan analyzes only `main` and pull requests. The packages of every pull request remain downloadable as run artifacts.
+
 ## [0.1.0] - 2026-09-28
 
 ### Added
