@@ -20,6 +20,17 @@ development files and `pkg-config`:
 A build without the real backend (`--no-default-features`) does not need
 them.
 
+## Installed from the deb or the rpm? Steps 2 and 3 are done
+
+The `.deb` and `.rpm` packages of a [release](https://github.com/slipalison/ddc-control/releases) install both pieces of this setup:
+
+- `/usr/lib/modules-load.d/ddc-control.conf`, which loads `i2c-dev` at every boot (step 2);
+- `/usr/lib/udev/rules.d/60-ddc-control-i2c.rules`, the Option A rule of step 3, byte for byte.
+
+Their post-install script also loads the module and reloads udev right away, so the monitor list works without a reboot. Each of those commands may fail (in a container, say) without failing the installation; a reboot then does the same. If you already added the rule by hand as `/etc/udev/rules.d/60-ddc-control-i2c.rules`, the same name, yours takes precedence and says the same thing.
+
+The AppImage cannot install system files, and a `cargo` build installs nothing: with either, do steps 2 and 3 by hand.
+
 ## 2. Load the `i2c-dev` module
 
 ```sh
