@@ -87,3 +87,21 @@ Aprovado. Antes do merge do PR #12, por ordem de custo:
 4. Fazer um ensaio em `ensaio-release/*` (só rascunho) para provar a release pelo pipeline (W3).
 5. Depois do gw#14 e do gw#15: repin para `@main`, run verde do PR, e só então apagar as branches `teste/*` (W5); tirar os PRs de rascunho (W9).
 6. `esteira / Portao` obrigatório no ruleset, se o usuário decidir (D-6).
+
+## Iteração 2 (orquestrador, depois dos avisos)
+
+**Verdict:** APPROVED_PENDING_MANUAL
+
+As oito linhas do DoD foram rodadas de novo, literalmente, contra o run 36499258551 (head `0b54a97`, template `af3ecb7` via `71f8b07`), e todas passaram. Na linha 6, o Gitleaks varreu 347 commits e o Semgrep usou 1.074 regras. Na linha 4, a cobertura no Sonar foi de 86,3%.
+
+| Aviso | Situação |
+|---|---|
+| W1 TruffleHog | Corrigido: `ci.yml`, README, CHANGELOG e a emenda da D-2 dizem "commits do evento". O comentário antigo do `seguranca.yml` no gw fica como todo lá. |
+| W2 `workflow_dispatch` | Mantido de propósito e registrado na D-1. README e `ci.yml` dizem "push or manual run". |
+| W3 caminho de release | O ensaio rodou (run 36498449337) e mostrou que o SonarQube Cloud Free não analisa branch: "Not authorized or project not found" no Quality Gate, e o `lancar` foi pulado. O ensaio saiu da esteira (gw `af3ecb7`, emenda da D-1) em vez de ganhar exceção ao Sonar. Risco aceito: a fiação `artefatos_release`/`changelog` → `lancar` roda pela primeira vez no push do merge. O `lancar.yml` é o mesmo que publicou a v0.1.0. |
+| W4 token | Aberto, com o usuário. Rotação recomendada, porque o valor passou pela conversa. No gw, expor o token só no passo `Analisar` fica como todo. |
+| W5 pin descartável | Aberto até o merge do gw. As branches `teste/esteira-app-desktop`, `-6bd2c63` e `-a13c154` ficam até o `uses:` virar `@main`, com run verde depois do repin. |
+| W6 roadmap | Corrigido. |
+| W7 linhas 5 e 7 | Linha 5: as anotações vão para um arquivo, e o `gh api` que falha reprova (o mutante com o run 36453793875 reprova). Linha 7: o texto não promete mais a tabela. Linha 6: sem mudança, com a ressalva registrada. |
+| W8 SIGPIPE | Corrigido: um `awk` só. A linha 8 rodou o script de novo. |
+| W9 rascunhos | gw#15 pronto para revisão. O PR #12 fica em rascunho até o repin para `@main`, de propósito, para não ser mergeado antes do gw. |

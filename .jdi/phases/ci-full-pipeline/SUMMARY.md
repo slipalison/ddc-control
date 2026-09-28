@@ -1,7 +1,7 @@
 # Phase 8: CI full pipeline — Summary  (slug: ci-full-pipeline)
 
 ## Resultado
-O `ci.yml` virou uma chamada ao `pipeline.yml`, e o run real do PR #12 (36496391097, head `cccd78f`) saiu verde.
+O `ci.yml` virou uma chamada ao `pipeline.yml`, e o run real do PR #12 (36499258551, head `0b54a97`, template `af3ecb7`) saiu verde.
 
 | Job | Resultado |
 |---|---|
@@ -16,7 +16,7 @@ As 8 linhas do DoD passam contra esse run, e cada linha que lê o run reprova nu
 
 ## Números medidos
 - **Varreduras:**
-  - Gitleaks: 339 commits varridos, 0 achados;
+  - Gitleaks: 347 commits varridos, 0 achados;
   - Semgrep: 1.074 regras no conjunto;
   - code scanning do PR: CodeQL, Semgrep e Trivy, sem alerta aberto.
 - **Trivy:** 2 avisos médios no `Cargo.lock` no primeiro run. São `serde_yaml` (GHSA-39vw-qp34-rmwf) e `glib` (GHSA-wrw7-89jp-8q8g), os mesmos advisories já aceitos no `.cargo/audit.toml`, e foram para o `.trivyignore` com referência cruzada.
@@ -31,8 +31,11 @@ As 8 linhas do DoD passam contra esse run, e cada linha que lê o run reprova nu
 - **`SONAR_TOKEN`:** foi gerado pelo navegador a pedido do usuário. O token "ddc-control CI", sem expiração, ficou no secret do repositório. A Análise Automática já estava desligada.
 - **Template:** o `pipeline.yml` chama os aninhados `@main`, e a `main` do gw não tem o #14. A prova usa a branch descartável `teste/esteira-app-desktop` (`a13c154`), que é o head do #15 (`ad8a96e`) com os aninhados fixados nele. O primeiro pin (`6bd2c63`) continua alcançável pela branch `teste/esteira-app-desktop-6bd2c63`.
 
+- **Ensaio de release retirado.** O run 36498449337 mostrou que o SonarQube Cloud Free não analisa branch: "Not authorized or project not found" no Quality Gate, e o `lancar` foi pulado. O `ramo_de_ensaio` saiu do gw#15, e o gatilho `ensaio-release/**` saiu do `ci.yml` (emenda da D-1). A primeira release pela esteira será o push do merge.
+- **Review da iteração 1:** as correções W1, W2, W6, W7 e W8 estão na iteração 2 do REVIEW.
+
 ## github-workflows #15 (empilhado no #14)
-- `pipeline.yml` para app desktop: `timeout_qualidade`, versão carimbada, `artefatos_release`, `changelog`, `ramo_de_ensaio`, `sonar_versao_linguagem` e `sonar_pacotes_sistema`.
+- `pipeline.yml` para app desktop: `timeout_qualidade`, versão carimbada, `artefatos_release`, `changelog`, `sonar_versao_linguagem` e `sonar_pacotes_sistema`.
 - `sonar.yml`: `pacotes_sistema`.
 - `Portao` (BREAKING): reprova Sonar sem `sonar_projeto` e sem `sonar_dispensa`.
 - README: "O mínimo exigido", o `Portao` no ruleset, a Análise Automática nos pré-requisitos e a correção do Clippy.
