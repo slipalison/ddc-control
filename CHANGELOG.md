@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Security scans on every pull request and push, through the shared pipeline: Gitleaks and TruffleHog over the whole history, Semgrep, Trivy on `Cargo.lock` and `package-lock.json`, an SPDX SBOM, and CodeQL for Rust, JavaScript/TypeScript and the GitHub Actions workflows. The results go to the Security tab, and an `error` finding fails the run.
+- Security scans on every pull request and push, through the shared pipeline: Gitleaks over the whole history, TruffleHog (verified secrets) over the commits of the push or pull request, Semgrep, Trivy on `Cargo.lock` and `package-lock.json`, an SPDX SBOM, and CodeQL for Rust, JavaScript/TypeScript and the GitHub Actions workflows. The results go to the Security tab, and an `error` finding fails the run.
 - SonarQube Cloud analysis on CI, whose Quality Gate fails the run. It covers the Rust code (Sonar's own Rust rules, plus `cargo llvm-cov` coverage) and the popup's JS (coverage from `node --test`). `scripts/ci/sonar-coverage.sh` writes both reports, and runs locally too.
 - One `esteira / Portao` check that fails when any job of the pipeline failed, or when Sonar is off without a written reason.
 - An 80% line-coverage floor for the popup's JS modules: `npm run test:unit` writes `apps/ddc-tray/coverage/lcov.info`, and it measured 88.15%. Before, the CI job printed an error annotation for the missing report and passed.
