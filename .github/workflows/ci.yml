@@ -134,6 +134,10 @@ jobs:
       # The same literal as the `versao` job: if it ever changes, it changes
       # in both, in the same commit.
       versao_inicial: "0.1.0"
-      artefatos: "pacotes-*"
+      # Only the two Rust components that package (`pacotes-rust-linux`,
+      # `pacotes-rust-windows`). `pacotes-*` would also attach any artifact
+      # another job of the run uploaded under that prefix, node-ui included,
+      # which runs third-party npm code (D-2026-09-28-release-packaging-7).
+      artefatos: "pacotes-rust-*"
       changelog: CHANGELOG.md
       rascunho: ${{ github.ref != 'refs/heads/main' }}
