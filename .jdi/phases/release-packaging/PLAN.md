@@ -181,3 +181,80 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
 - **UI:** `cd apps/ddc-tray && npm test` + Gate 7 (`npm ci --ignore-scripts && npx playwright test`).
 - **gw:** `python3 bin/pinar_actions.py --verificar`, actionlint 1.7.12 e os scripts de validação extraídos do YAML.
 - **CI:** os 9 `Verify:` da CONTEXT dão `OK`, em `bash`, contra o `release-evidence.env` commitado. Mínimo de cobertura: 80% de linhas (PROJECT.md).
+
+## Iteração 2 (loop ralph: blocker do crítico + avisos do REVIEW)
+
+Origem: o crítico do DoD reprovou a linha 8 na iteração 1, e o orquestrador reescreveu o `Verify:`. Agora ele lê o YAML parseado e exige que `changelog` absoluto reprove. Contra o `3688e06`, a linha 8 não dava `OK`. Entram também os avisos W-1..W-7 do REVIEW e a emenda da D-7 (`artefatos: "pacotes-rust-*"`). A W-8 é herdada da ci-crossbuild e não atinge o ddc-control; fica aberta.
+
+### Tasks
+
+#### T-9 (gw): W-1, a tag móvel nunca num rascunho
+- **Files modified:** `gw:.github/workflows/lancar.yml`, `gw:README.md`
+- **Acceptance:** `Conferir as entradas` recebe `MOVEL`/`RASCUNHO` por `env` e reprova a combinação. Os dois valem `false` sem a variável, então o script continua rodando sozinho. `Mover a tag de major` ganha `if: inputs.tag_movel_major && !inputs.rascunho`.
+- **Test:** script extraído do YAML em 15 combinações.
+- **Status:** completed (`e0f00bb`)
+
+#### T-10 (gw): W-3, caminho absoluto reprova
+- **Files modified:** `gw:.github/workflows/{lancar,qualidade}.yml`, `gw:README.md`
+- **Acceptance:** `changelog` e `caminho_tauri` com `/` no começo reprovam, além de `..`. O `env:` do `Conferir as entradas` segue com `VERSAO`/`TAG`/`ARTEFATOS`/`CHANGELOG`, sem `if` nem `continue-on-error`, antes do `gh release create`.
+- **Test:** `Verify:` 8 literal dá `OK` contra o commit e não dá contra o `3688e06`. O `Conferir componente` passa em 38 combinações; contra o head anterior, 3 divergiam.
+- **Status:** completed (`5da296b`)
+
+#### T-11 (gw): W-2, ferramentas do AppImage fixadas
+- **Files modified:** `gw:.github/workflows/qualidade.yml`, `gw:README.md`
+- **Acceptance:**
+  - O passo `Ferramentas do AppImage` (só Linux) baixa de URL fixa, com sha256, os arquivos que o `prepare_tools` do tauri-bundler 2.10.0 procura em `$XDG_CACHE_HOME/tauri`: `AppRun-x86_64` (`apprun-old`), `linuxdeploy-07333c6-x86_64.AppImage` e `linuxdeploy-plugin-appimage.AppImage` (release `1-alpha-20250213-1`, e não a `continuous`). Também baixa o runtime type2 `20251108`, que entra por `LDAI_RUNTIME_FILE`.
+  - O passo Tauri reprova se aparecer uma linha `Downloading` ou se o AppImage não começar com o runtime conferido.
+  - Nenhum item ficou sem fonte versionada. A ressalva de que nenhuma dessas releases é imutável no GitHub, e de que o sha256 é o que segura, está na seção "Segurança" do README do gw.
+- **Test:** ensaio local dos dois passos extraídos. Com as ferramentas, o passo passou. Com o diretório vazio, reprovou nas linhas `Downloading`. Com o AppImage do iter 1, a trava do runtime reprovou.
+- **Status:** completed (`0efa403`)
+
+#### T-12 (gw): W-4, W-5 e W-6 (texto)
+- **Files modified:** `gw:.github/workflows/{lancar,qualidade}.yml`, `gw:README.md`, `gw:exemplos/ci-rust-desktop.yml`
+- **Acceptance:**
+  - O egresso real do `lancar` inclui os domínios meta que o harden-runner libera.
+  - A corrida ensaio × main está documentada.
+  - O texto deixa de dizer que a "única diferença é a chave do cache", porque o `Alvo do runner` também roda.
+  - A lista do exemplo fica inteira, e o exemplo recomenda `artefatos: "pacotes-app-*"`.
+- **Status:** completed (`d6d340a` = `WORKFLOWS_SHA`; CI do gw: run 36444714782, os checks `Scripts`, `Pins das actions`, `Sintaxe dos workflows` e `versao` em success)
+
+#### T-13: emenda da D-7 no `ci.yml`
+- **Files modified:** `.github/workflows/ci.yml`
+- **Acceptance:** `artefatos: "pacotes-rust-*"`, com o porquê.
+- **Status:** completed (`aaac501`)
+
+#### T-14: repin
+- **Files modified:** `.github/workflows/ci.yml`
+- **Acceptance:** os 3 `uses:` em `@d6d340a96e2d2bc645e6e5a4c1e2dfba5637b901`.
+- **Status:** completed (`59d16ef`)
+
+#### T-15: W-7 e W-5 no ddc-control
+- **Files modified:** `README.md`, `CHANGELOG.md`
+- **Acceptance:**
+  - O README deixa de dizer "Every push to `main` publishes". A release sai quando os commits pedem versão (`salto != nenhum`).
+  - O README avisa para não ensaiar perto do merge.
+  - O CHANGELOG corrige o item da release e registra o AppImage feito com ferramentas fixadas.
+- **Status:** completed (`f6063d7` = `HEAD_SHA`)
+
+#### T-16: evidência nova
+- **Files modified:** `.jdi/phases/release-packaging/release-evidence.env`
+- **Status:** completed (`23e14ec`)
+
+### Runs
+
+| Run | Commit (gw) | Tipo | Resultado | O que mostrou |
+|---|---|---|---|---|
+| 36445031966 | `f6063d7` (`d6d340a`) | PR (`RUN_ID`) | success | `lancar` skipped, `rust-linux` no ubuntu-22.04. Job Linux 109005130135: 4 sha256 `OK`, 0 linhas `Downloading` (eram 3), 0 `endpoint called` de `cargo-tauri`/`appimagetool`/`linuxdeploy` (eram 4), `appimagetool` do plugin fixado (`appimage_extracted_f0785913…`, o mesmo hash medido localmente), e a trava confirmou o runtime `2fca8b443c92`. |
+| 36446037437 | `f6063d7` | ensaio, branch `ensaio-release/v0.1.0-f6063d7` | failure | O Linux passou, com a mesma prova da W-2. No Windows, a conexão caiu (`os error 10054`) enquanto o bundler baixava o `nsis_tauri_utils.dll`, o que é transitório. `lancar` skipped, nada criado. A branch foi apagada, e o ensaio refeito numa nova (sem `gh run rerun`). |
+| **36447884185** | `f6063d7` | ensaio (`ENSAIO_RUN_ID`), branch `ensaio-release/v0.1.0-f6063d7-2` | success | `lancar` em `block`, sem bloqueio. `pacotes-rust-*` pegou 2 de 4 artefatos. Apagou o rascunho 398335754 e criou o **398419349** (8 anexos, alvo `f6063d7`, corpo de 21.160 caracteres). A branch foi apagada, e o rascunho fica. |
+
+### Verificação
+- Gates locais: fmt, clippy `--all-features -D warnings`, 386 testes (15 binários, 9 ignorados), cobertura de 83,36% com a exclusão (82,93% no `Verify:` literal do PROJECT) e `npm test` (161 + 138).
+- gw: actionlint 1.7.12 com shellcheck e `pinar_actions --verificar` OK. O `actions.lock.json` não mudou.
+- Os 9 `Verify:` do CONTEXT, literais, em `bash`, deram `OK` (exit 0) antes e depois do commit `23e14ec`. A baseline do PROJECT também passou.
+
+### Desvios
+- O `CHANGELOG.md` entrou na T-15. O item da release tinha a mesma imprecisão da W-7, e o AppImage com ferramentas fixadas é uma mudança que o usuário vê.
+- O exemplo e o README do gw passam a recomendar o padrão estreito de `artefatos`, pelo mesmo motivo da emenda da D-7.
+- O `bundle.useLocalToolsDir` do Tauri não é suportado pelo template: ele troca o diretório de ferramentas, e a trava `Downloading` o acusa. Isso está documentado.
+- Primeiro ensaio falhou por rede no Windows. O WiX e o NSIS o próprio bundler baixa com hash fixo no código, e isso ficou fora do escopo da W-2.
