@@ -32,3 +32,5 @@ lancar:
 - `packages: write` é concedido mesmo sem imagem: a checagem de permissão do GitHub é estática. O motivo está no cabeçalho do `lancar.yml`.
 - `versao_inicial: "0.1.0"` é o MESMO literal do job `versao`. Se um dia mudar, muda nos dois `with:` no mesmo commit.
 - **Segurança:** quem pode empurrar uma branch `ensaio-release/*` já pode empurrar na `main` (escrita no repositório). O ensaio só cria RASCUNHO, que não é público e não cria tag.
+
+**Emenda do orquestrador (2026-09-28, iteração 2):** `artefatos: "pacotes-rust-*"` no lugar de `"pacotes-*"`. Com `pacotes-*`, o `lancar` também anexaria qualquer artefato `pacotes-*` subido por outro job do mesmo run, como o `node-ui`, que roda código npm de terceiros. O reviewer da iteração 1 apontou esse risco de envenenamento de artefato. O padrão fica restrito aos componentes rust que empacotam.
