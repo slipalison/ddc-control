@@ -258,3 +258,17 @@ Origem: o crítico do DoD reprovou a linha 8 na iteração 1, e o orquestrador r
 - O exemplo e o README do gw passam a recomendar o padrão estreito de `artefatos`, pelo mesmo motivo da emenda da D-7.
 - O `bundle.useLocalToolsDir` do Tauri não é suportado pelo template: ele troca o diretório de ferramentas, e a trava `Downloading` o acusa. Isso está documentado.
 - Primeiro ensaio falhou por rede no Windows. O WiX e o NSIS o próprio bundler baixa com hash fixo no código, e isso ficou fora do escopo da W-2.
+
+## Iteração 3 (loop ralph: só o `Verify:` das linhas 8 e 3)
+
+Origem: o crítico do DoD achou as linhas 8 e 3 frouxas na iteração 2. O orquestrador reescreveu os dois `Verify:` no CONTEXT (`d18745a`). A linha 8 agora proíbe `${{` no `run` parseado, roda o script como o runner e só conta a recusa pelo `::error::` do próprio script. A linha 3 agora fixa a origem da versão do Tauri: `0.0.0` no workspace, sem `version` no `tauri.conf.json` e `version.workspace = true` na tray. Nenhum código, template ou evidência mudou. O `release-evidence.env` continua o mesmo: `RUN_ID` 36445031966, `ENSAIO_RUN_ID` 36447884185, `DRAFT_RELEASE_ID` 398419349, `HEAD_SHA` `f6063d7` e `WORKFLOWS_SHA` `d6d340a`, com o gw#14 ainda nesse head.
+
+### Verificação
+- Os 9 `Verify:` foram extraídos do CONTEXT por programa (sha256 `5060ad6b…`) e rodados literalmente, em `bash`, a partir da raiz. Todos deram `OK` com exit 0: 1 (3 s), 2 (24 s), 3 (32 s), 4 (4 s), 5 (2 s), 6 (37 s), 7 (1 s), 8 (0 s) e 9 (0 s).
+- Controles negativos das linhas reescritas:
+  - A linha 8 contra o `3688e06` sai 1.
+  - Com o `lancar.yml` do `d6d340a` mutado localmente, a linha 8 sai 1 nos dois casos: com um `${{ inputs.artefatos }}` no primeiro `::error::` do passo, e com o `::error::` trocado por texto comum.
+  - As 3 checagens novas da linha 3 reprovam na `origin/main` (`version = "0.1.0"`) e passam no HEAD.
+
+### Desvios
+- nenhum
