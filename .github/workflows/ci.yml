@@ -1,23 +1,37 @@
 name: CI
 
-# ddc-control's CI is this one caller: every build, lint, test, packaging and
-# release step lives in the reusable workflows of slipalison/github-workflows,
-# which this repo extends there and never copies here
-# (D-2026-09-27-ci-crossbuild-1, D-2026-09-28-release-packaging-1).
+# ddc-control's CI is one call to the shared pipeline of
+# slipalison/github-workflows (pipeline.yml), the entry point every
+# application repository uses (D-2026-09-28-ci-full-pipeline-1). In parallel
+# it runs:
+#   versao     the next version from the Conventional Commits; a commit
+#              outside them fails the run
+#   qualidade  one job per component: fmt, `cargo audit`, clippy, the tests
+#              with the coverage floor, the release build and the packages
+#   seguranca  Gitleaks and TruffleHog over the whole history, Semgrep, Trivy
+#              on the lockfiles, the SBOM, and CodeQL for Rust, JS/TS and
+#              these workflows
+#   sonar      Sonar analysis and its Quality Gate, with Rust and JS coverage
+# and then `Portao`, one check that fails when any of them failed. Only on a
+# push to main, and only after all of them passed, `lancar` tags and publishes
+# the GitHub Release with the packages. There is no image and no deploy: with
+# `imagem` and `app` empty, the pipeline skips both.
 #
-# PINNED TO A COMMIT, NOT A BRANCH. While the github-workflows PR that adds
-# the Tauri packages, the stamped version and the release attachments is
-# under review, every `uses:` below points at that PR's head commit, so a run
-# here is tied to the exact template code being reviewed. Once that PR is
-# merged, each `@<sha>` is swapped for `@main`.
+# Until 2026-09-28 this file called versao, qualidade and lancar directly, and
+# v0.1.0 went out without the security scans, Sonar or the gate.
+#
+# PINNED TO A COMMIT, NOT A BRANCH (D-2026-09-28-ci-full-pipeline-5). The
+# github-workflows PR that lets a desktop app use pipeline.yml is under
+# review, and pipeline.yml calls its nested workflows at @main, which does
+# not have that PR yet. The commit below is that PR's head with the nested
+# workflows pinned to it, on a throwaway branch, so a run here is the PR's
+# exact code. Once the PR is merged, this becomes @main.
 
 on:
   push:
-    # `ensaio-release/**` is the release rehearsal
-    # (D-2026-09-28-release-packaging-8): a push there runs this file as it
-    # is in the pushed commit, so the whole release job is proven before the
-    # merge, and `lancar` only creates a DRAFT release there (no tag, not
-    # public). Only `main` publishes.
+    # `ensaio-release/**` is the release rehearsal: `ramo_de_ensaio` below
+    # makes the pipeline create the release there as a DRAFT (no tag, not
+    # public), after the same gates as main. Only `main` publishes.
     branches: [main, 'ensaio-release/**']
   pull_request:
   workflow_dispatch:
@@ -32,47 +46,42 @@ permissions:
   contents: read
 
 jobs:
-  # Computes the next version from the Conventional Commits and rejects a
-  # commit outside them; it never creates a tag or a release (`lancar` does,
-  # last). `versao_inicial` is the first release, while the repository has no
-  # `vX.Y.Z` tag; `lancar` below repeats the same literal.
-  versao:
+  esteira:
+    # A reusable workflow never gets more than the caller grants here.
     permissions:
-      contents: read
-    uses: slipalison/github-workflows/.github/workflows/versao.yml@d6d340a96e2d2bc645e6e5a4c1e2dfba5637b901
+      contents: write        # the tag and the release (lancar, main only)
+      # No image, but lancar.yml's `alias` job (skipped here) asks for it,
+      # and GitHub checks a reusable workflow's permissions statically:
+      # without it the run dies in startup_failure.
+      packages: write
+      security-events: write # SARIF of the scans and of CodeQL
+      actions: read          # CodeQL
+    uses: slipalison/github-workflows/.github/workflows/pipeline.yml@6bd2c63558741cf23ff8f173ba2dad4a5358c76e
     with:
+      # The first release, while the repository had no `vX.Y.Z` tag.
       versao_inicial: "0.1.0"
 
-  qualidade:
-    # Needs the version: Cargo.toml says 0.0.0, and the packages are stamped
-    # with the version this run computes (D-2026-09-28-release-packaging-10).
-    # On a pull request that is the version the merge will get, so the PR's
-    # packages are already the next release's.
-    needs: [versao]
-    permissions:
-      contents: read
-    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@d6d340a96e2d2bc645e6e5a4c1e2dfba5637b901
-    with:
+      # --------------------------------------------------------- quality --
       # Tauri compiles three times per Rust job (clippy, llvm-cov, release),
       # then once more to bundle. With no cache, the first run took 13
       # minutes on Windows and 7 on Linux (run 36341518707); the limit is
       # only there to stop a hung job.
-      timeout: 60
-      versao: ${{ needs.versao.outputs.versao }}
+      timeout_qualidade: 60
       # One job per component, in parallel. The names are a contract: the
-      # phase's evidence queries the run's jobs, steps and artifacts
-      # (`pacotes-rust-linux`, `pacotes-rust-windows`) by them.
+      # release attaches the `pacotes-rust-*` artifacts, and the phases'
+      # evidence queries the run's jobs by them.
       #
       # rust-linux: fmt, `cargo audit` (exceptions in .cargo/audit.toml),
-      #   clippy -D warnings, the tests under cargo llvm-cov with the project's
-      #   80% line floor, the ddc-tray release binary, and the packages: deb,
-      #   rpm and AppImage of ddc-tray and the ddc-cli .tar.gz. Rust 1.98 is
-      #   the toolchain the code is linted with locally, so a lint new in a
-      #   later stable cannot fail a PR out of the blue.
+      #   clippy -D warnings, the tests under cargo llvm-cov with the
+      #   project's 80% line floor, the ddc-tray release binary, and the
+      #   packages: deb, rpm and AppImage of ddc-tray and the ddc-cli .tar.gz,
+      #   stamped with the version `versao` computed (Cargo.toml says 0.0.0).
+      #   Rust 1.98 is the toolchain the code is linted with locally, so a
+      #   lint new in a later stable cannot fail a PR out of the blue.
       #   ubuntu-22.04, not latest (D-2026-09-28-release-packaging-9): the
       #   packages link against the glibc of the system that builds them, and
       #   the 24.04 one (2.39) would not run on Ubuntu 22.04, Debian 12 or
-      #   Mint 21. On 22.04 (2.35) they run there and on anything newer.
+      #   Mint 21.
       #   apt packages, and why:
       #     libwebkit2gtk-4.1-dev  Tauri's webview on Linux (webkit2gtk-sys,
       #                            soup3-sys, javascriptcore-rs-sys); it also
@@ -82,17 +91,15 @@ jobs:
       #     librsvg2-dev           the AppImage's gtk plugin (linuxdeploy)
       #                            looks librsvg-2.0 up with pkg-config to
       #                            bundle the SVG loader.
-      #   Not listed, because nothing in the Linux build uses them: the
-      #   appindicator libraries (the Linux tray is ksni over D-Bus), libxdo
-      #   and OpenSSL.
       # rust-windows: the same steps on windows-latest except the audit (the
-      #   Cargo.lock is the same file; auditing it twice proves nothing new),
-      #   with the MSI, the NSIS installer and the ddc-cli .zip. Coverage 0:
-      #   the panel still reports it, but the floor is measured on Linux.
-      # node-ui: `npm test` in apps/ddc-tray, which runs the node --test suites
-      #   and the Playwright suite (Chromium installed with its system
-      #   libraries only on a GitHub-hosted runner). Node 24: the node --test
-      #   glob needs Node >= 21.
+      #   Cargo.lock is the same file), with the MSI, the NSIS installer and
+      #   the ddc-cli .zip. Coverage 0: the panel still reports it, but the
+      #   floor is measured on Linux.
+      # node-ui: `npm test` in apps/ddc-tray: the node --test suites, whose
+      #   coverage of the popup's modules has the 80% floor
+      #   (D-2026-09-28-ci-full-pipeline-4), then the Playwright suite. The
+      #   DOM glue (src/app.js) is only exercised by Playwright and is not in
+      #   that number. Node 24: the test runner's glob and coverage flags.
       componentes: |
         [
           {"nome":"rust-linux","linguagem":"rust","versao":"1.98","cobertura":80,
@@ -105,39 +112,48 @@ jobs:
            "cobertura":0,"build_release":"ddc-tray",
            "empacotar_tauri":true,"caminho_tauri":"apps/ddc-tray/src-tauri",
            "binarios_extra":"ddc-cli","carimbar_versao":true},
-          {"nome":"node-ui","linguagem":"node","versao":"24","caminho":"apps/ddc-tray"}
+          {"nome":"node-ui","linguagem":"node","versao":"24","caminho":"apps/ddc-tray",
+           "cobertura":80}
         ]
 
-  # The release (D-2026-09-28-release-packaging-7): only on a push, only after
-  # every quality job passed on both systems, and only when there is a
-  # version to release. On `main` it creates the tag and publishes the GitHub
-  # Release with the seven packages, a SHA256SUMS and the CHANGELOG section;
-  # on `ensaio-release/**` the same release comes out as a draft. A pull
-  # request never gets here.
-  lancar:
-    needs: [versao, qualidade]
-    if: >-
-      github.event_name == 'push'
-      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ensaio-release/'))
-      && needs.versao.outputs.salto != 'nenhum'
-    # `packages: write` with no image: GitHub checks a reusable workflow's
-    # permissions statically, and lancar.yml's `alias` job (skipped here)
-    # asks for it. Without it the run dies in startup_failure; the measured
-    # message is in lancar.yml's header.
-    permissions:
-      contents: write
-      packages: write
-    uses: slipalison/github-workflows/.github/workflows/lancar.yml@d6d340a96e2d2bc645e6e5a4c1e2dfba5637b901
-    with:
-      versao: ${{ needs.versao.outputs.versao }}
-      tag: ${{ needs.versao.outputs.tag }}
-      # The same literal as the `versao` job: if it ever changes, it changes
-      # in both, in the same commit.
-      versao_inicial: "0.1.0"
+      # --------------------------------------------------------- release --
       # Only the two Rust components that package (`pacotes-rust-linux`,
       # `pacotes-rust-windows`). `pacotes-*` would also attach any artifact
       # another job of the run uploaded under that prefix, node-ui included,
       # which runs third-party npm code (D-2026-09-28-release-packaging-7).
-      artefatos: "pacotes-rust-*"
+      artefatos_release: "pacotes-rust-*"
       changelog: CHANGELOG.md
-      rascunho: ${{ github.ref != 'refs/heads/main' }}
+      ramo_de_ensaio: "ensaio-release/"
+
+      # -------------------------------------------------------- security --
+      # The repository is public, so CodeQL is free and its results, like the
+      # other scans' SARIF, land in the Security tab
+      # (D-2026-09-28-ci-full-pipeline-2). No IaC to scan: no Dockerfile,
+      # manifest or chart.
+      linguagens_codeql: '["rust","javascript-typescript","actions"]'
+
+      # ----------------------------------------------------------- sonar --
+      # Analysis on CI, not SonarQube Cloud's Automatic Analysis, which must
+      # stay OFF for this project: it read no Rust and no coverage, and with
+      # it on the CI scanner fails (D-2026-09-28-ci-full-pipeline-3). Sonar's
+      # Rust analyzer runs Clippy, which compiles the workspace: hence the
+      # same toolchain and the webview and udev headers (librsvg is only for
+      # the AppImage). The script writes the Rust and the UI LCOV reports.
+      sonar_projeto: slipalison_ddc-control
+      sonar_linguagem: rust
+      sonar_versao_linguagem: "1.98"
+      sonar_pacotes_sistema: "libwebkit2gtk-4.1-dev libudev-dev"
+      sonar_comando_testes: bash scripts/ci/sonar-coverage.sh
+      # Rust tests live in `tests.rs` modules and `tests/` directories, and
+      # the UI's in apps/ddc-tray/tests: the same two patterns split sources
+      # from tests, so no file is indexed twice.
+      sonar_parametros: |
+        sonar.sources=crates,apps/ddc-tray/src,apps/ddc-tray/src-tauri/src,apps/ddc-tray/src-tauri/build.rs
+        sonar.tests=crates,apps/ddc-tray/src-tauri/src,apps/ddc-tray/src-tauri/tests,apps/ddc-tray/tests
+        sonar.exclusions=**/tests.rs,**/tests/**
+        sonar.test.inclusions=**/tests.rs,**/tests/**
+        sonar.rust.cargo.manifestPaths=Cargo.toml
+        sonar.rust.lcov.reportPaths=resultados/lcov.info
+        sonar.javascript.lcov.reportPaths=resultados/lcov-ui.info
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
