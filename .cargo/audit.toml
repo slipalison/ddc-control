@@ -10,6 +10,8 @@
 # the advisory: the vulnerability fails the run, while the unmaintained and
 # unsound ones only print a warning (exit 0). An advisory no longer named
 # means the entry is stale, and it stays deleted.
+# The security scans of CI (Trivy) name two of these by GHSA id: they are
+# listed again in .trivyignore, and leave both files together.
 
 [advisories]
 ignore = [
