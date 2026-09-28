@@ -272,6 +272,12 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// A budget that only bounds a hang, for a call whose answer does not depend
+/// on time. A caught panic took 1.2 s to come back on a GitHub Windows runner
+/// (run 36345194940), and a tight budget turned its `Transport` into a
+/// `Timeout`.
+const UNHURRIED: Duration = Duration::from_secs(10);
+
 fn budgets(vcp: Duration) -> DdcHiBudgets {
     DdcHiBudgets {
         vcp,
@@ -457,12 +463,7 @@ fn maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors()
         FakeDisplay::new("buggy", Behaviour::Crash),
     ]);
     let client = spawn(&source, budgets(Duration::from_millis(250)));
-    let doomed = WorkerClient::spawn(
-        CrashingDisplays,
-        budgets(Duration::from_secs(1)),
-        no_backoff(),
-    )
-    .unwrap();
+    let doomed = WorkerClient::spawn(CrashingDisplays, budgets(UNHURRIED), no_backoff()).unwrap();
 
     let failures = [
         client.read_capabilities(&id("mute")).map(drop),
@@ -471,6 +472,7 @@ fn maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors()
     ];
     let stuck = client.read_vcp(&id("stuck"), VcpCode::BRIGHTNESS);
     gate.open();
+    let client = client.with_budgets(budgets(UNHURRIED));
     let crashed = client.read_vcp(&id("buggy"), VcpCode::BRIGHTNESS);
     let after_crash = client.enumerate().map(drop);
     let enumeration_crashed = doomed.enumerate().map(drop);
@@ -498,7 +500,7 @@ fn maps_backend_failures_to_transport_or_timeout_without_leaking_ddc_hi_errors()
 fn a_panic_inside_one_transaction_fails_only_that_call_and_the_worker_keeps_serving() {
     let trapezoid = VcpCode(0x7E);
     let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::CrashOn(trapezoid))]);
-    let client = spawn(&source, budgets(Duration::from_secs(1)));
+    let client = spawn(&source, budgets(UNHURRIED));
 
     let crashed = client.read_vcp(&id("a"), trapezoid);
     let next = client.read_vcp(&id("a"), VcpCode::BRIGHTNESS);

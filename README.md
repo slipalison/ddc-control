@@ -2,7 +2,7 @@
 
 Control everything your monitor's physical OSD offers — brightness, contrast, input source, color preset, volume, power — from software, over DDC/CI, with the same Rust binary on Windows and Linux.
 
-**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`), 3 (`cli`), 4 (`full-osd-control`) and 5 (`tray-app`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, lists every feature with its current value, probes the ones the capabilities leave out, and reads and writes features by name, with factory resets behind `--yes`; the `ddc-tray` app puts the everyday controls in a popup behind a system-tray icon (see [Tray app](#tray-app)). Reads are validated on real hardware. Writes pass the same checks and are tested against the in-memory backend; on real hardware only the tray's hardware test has written so far, one brightness change on the dev monitor, restored right after. The tray runs on Linux (KDE Plasma); on Windows it has not been built yet. CI and installers come next (phases `ci-crossbuild` and `release-packaging`). See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
+**Status:** pre-alpha. Phases 1 (`core-domain`), 2 (`ddc-backends`), 3 (`cli`), 4 (`full-osd-control`), 5 (`tray-app`) and 6 (`ci-crossbuild`) are implemented: the `ddc-cli` binary lists monitors, shows their capabilities, lists every feature with its current value, probes the ones the capabilities leave out, and reads and writes features by name, with factory resets behind `--yes`; the `ddc-tray` app puts the everyday controls in a popup behind a system-tray icon (see [Tray app](#tray-app)). Reads are validated on real hardware. Writes pass the same checks and are tested against the in-memory backend; on real hardware only the tray's hardware test has written so far, one brightness change on the dev monitor, restored right after. CI builds and tests the whole workspace on Linux and Windows on every pull request (see [CI](#ci)). The tray has been run on Linux (KDE Plasma) only: on Windows it builds and its tests pass in CI, but it has not been run on a Windows desktop yet. Installers come next (phase `release-packaging`). See `.jdi/ROADMAP.md` (run `npx -y jdi-cli render` to regenerate it).
 
 ## Install
 
@@ -313,7 +313,7 @@ No AppIndicator library is used on Linux: the tray icon is a StatusNotifierItem 
   - A **right click** opens the menu: **Open panel**, **Brightness 0%**, **25%**, **50%**, **75%**, **100%**, and **Quit**.
   - The wheel and the brightness entries act on the monitor the popup last loaded (before that, the first monitor listed), which the icon's tooltip names; they run off the main thread, and a failure is only printed to stderr.
   - **Where the popup opens:** on KDE Plasma under Wayland, next to the pointer, that is next to the icon (or the menu entry), inside the screen's work area, with no taskbar entry. The app loads a small KWin script for this at start, over D-Bus, and unloads it when it quits: through **Quit**, or on SIGTERM, SIGINT or SIGHUP (from `pkill`, the session or systemd, Ctrl+C, a closed terminal), which quit the app the same way; it waits at most 2 s for KWin, so a KWin that does not answer never keeps the app from quitting. Only a SIGKILL or a crash leaves the script loaded; it then matches only the popup of that dead process, and the next start replaces it. The script is written to `$XDG_RUNTIME_DIR`, which only you can write to, and nowhere else: without that directory no script is loaded. Elsewhere the popup opens where the compositor puts it (see [Known limitations](#known-limitations-of-the-tray-app)).
-- **Windows:** a left click on the icon shows the popup above it, or hides it when it is open; a right click opens the menu (**Open panel**, **Quit**). This path has not been built or run yet (see [Known limitations](#known-limitations-of-the-tray-app)).
+- **Windows:** a left click on the icon shows the popup above it, or hides it when it is open; a right click opens the menu (**Open panel**, **Quit**). This path builds and its tests pass on Windows in CI, but it has not been run on a Windows desktop yet (see [Known limitations](#known-limitations-of-the-tray-app)).
 - The popup hides when it loses the focus, on Esc and when it is closed. Only **Quit** ends the app, or, on Linux, a SIGTERM, SIGINT or SIGHUP, which quit it the same way (a second one while it quits ends it at once).
 - **Lists** (the monitor selector, the color preset and the lists under **All settings**) open inside the popup, never as a menu window of their own, which took the focus from the popup and closed it. A click, Enter, Space or Alt+↓ opens one; the arrows, Home, End, Page Up and Page Down move; Enter or a click picks; Esc, Tab or a click outside closes it without a change. Esc on an open list only closes the list; the next Esc hides the popup. A list opens below its button, or above it when the popup has more room there, and scrolls when it is taller than that room.
 - Sliders write while they move: 80 ms after the last move, coalesced to the last value, with at most one write in flight per feature, and the final value when released. The popup always shows the value the monitor reads back, not the one asked for; when they differ, the value is highlighted and announced to screen readers ("Brightness: the monitor applied 70%.").
@@ -376,7 +376,7 @@ cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
 - **The popup is anchored to the icon on KDE Plasma under Wayland only.** Wayland lets no app place its own window; on Plasma the app asks KWin to, through a script it loads over D-Bus, placed at the pointer when the popup opens. Elsewhere (GNOME, other Wayland compositors, X11 sessions) it opens where the compositor or the window manager puts it, usually centered. A layer-shell surface (`gtk-layer-shell`) could anchor it on more compositors, but it needs a system library at build and run time, so it was left out. Running the popup through XWayland (`GDK_BACKEND=x11`) was ruled out: it blurs at fractional scales such as 125%. A popup opened by a second launch (from a launcher, say) also opens at the pointer.
 - **GNOME** shows StatusNotifierItems only with the AppIndicator extension; without it there is no icon. The tray has been tried on KDE Plasma (Wayland) only. The wheel follows Plasma's convention (120 per notch, positive away from the user); GNOME's extension is known to send other units, so there the wheel may not step, or may step the other way.
 - **WebKitGTK's DMA-BUF renderer is off on Linux.** On the dev machine (KDE Plasma on Wayland, NVIDIA driver 615, WebKitGTK 2.54) it killed the app with `Error 71 (Protocol error) dispatching to Wayland display` as soon as the popup was shown. So at launch `ddc-tray` replaces itself (same process id, same arguments) with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, unless that variable is already set: a value you set, whatever it is, is kept (D-2026-09-26-tray-app-10). The popup is then drawn without DMA-BUF, a negligible cost for a 360×560 window.
-- **Windows is untested.** The Windows paths (Tauri's tray icon in `tray/notification_area.rs`: left click, anchoring above the icon; `icon.ico`; no console window in release builds) are written but have never been built for Windows: checking the tray for Windows from Linux stops in `tauri-winres`, which needs `llvm-rc`. That module compiles, and its tests pass, only when forced onto a Linux build. The phase `ci-crossbuild` builds it on Windows. DDC/CI through `dxva2` has not been exercised by the tray.
+- **Windows is built and unit-tested, not run.** [CI](#ci) builds the tray on `windows-latest`, lints it with clippy `-D warnings`, runs its tests there (128 of them, `tray/notification_area.rs`'s click tests included) and builds its release binary. Nothing has run it on a Windows desktop yet: the left click, the anchoring above the icon and DDC/CI through `dxva2` are still unproven. Locally, checking the tray for Windows from Linux still stops in `tauri-winres`, which needs `llvm-rc`.
 - **No autostart, profiles or global hotkeys** yet: phase `profiles-hotkeys`.
 - **No installer** yet: bundling is off, and packages (MSI/NSIS, deb/rpm/AppImage) come with phase `release-packaging`. Build it from source.
 
@@ -403,7 +403,7 @@ cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test
 
 Still to come:
 
-- CI on Linux and Windows (phase `ci-crossbuild`), then installers and release packages (phase `release-packaging`).
+- Installers and release packages (phase `release-packaging`).
 - Profiles, global hotkeys and autostart (phase `profiles-hotkeys`).
 
 Architecture is locked to Hexagonal (Ports & Adapters) — see `.jdi/PROJECT.md` and `.jdi/decisions/`.
@@ -431,6 +431,7 @@ rustup component add clippy rustfmt llvm-tools-preview
 rustup target add x86_64-unknown-linux-gnu      # cross `cargo check` of the pure-Rust crates from Windows
 rustup target add x86_64-pc-windows-msvc        # cross `cargo check` of the Windows backend from Linux
 cargo install cargo-llvm-cov --locked
+cargo install cargo-audit --locked
 git config core.hooksPath .githooks             # once per clone — see below
 ```
 
@@ -443,6 +444,7 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex '(^|[/\\])(main|build)\.rs$'
+cargo audit
 (cd apps/ddc-tray && npm ci --ignore-scripts && npx playwright test)
 ```
 
@@ -462,6 +464,27 @@ DDC_HW_TESTS=1 cargo test -p ddc-tray --locked -- --ignored rtk_qhd_hdr --test-t
 ```
 
 Linux: load `i2c-dev` and make sure your user can open `/dev/i2c-*` (a udev `uaccess` rule or group `i2c`). Never run the tool with `sudo`. Step by step: [`docs/linux-ddc-setup.md`](docs/linux-ddc-setup.md).
+
+## CI
+
+`.github/workflows/ci.yml` runs on every pull request, every push to `main` and on demand (`workflow_dispatch`). A newer commit on the same branch cancels the run still going. The file is only a caller: every step lives in the reusable workflows of [slipalison/github-workflows](https://github.com/slipalison/github-workflows) (`versao.yml` and `qualidade.yml`), extended there for this project and never copied here.
+
+| Job | Runner | What it runs |
+|---|---|---|
+| `versao` | ubuntu-latest | Computes the next version from the Conventional Commits (`0.1.0` while there is no tag) and fails a commit outside them. It creates no tag and no release. |
+| `qualidade / rust-linux` | ubuntu-latest | `cargo fmt --check`, `cargo audit`, `cargo clippy --all-targets --all-features -D warnings`, the tests under `cargo llvm-cov` with the 80% line floor, and `cargo build -p ddc-tray --release --locked`. Tauri's WebKitGTK and libudev headers come from apt. |
+| `qualidade / rust-windows` | windows-latest | The same, without the audit. The coverage panel reports but has no floor. |
+| `qualidade / node-ui` | ubuntu-latest | `npm ci --ignore-scripts` and `npm test` in `apps/ddc-tray`. |
+
+- **Coverage.** The 80% floor is on lines, measured on Linux over the whole workspace, the binaries' `main.rs` included (82.93% on 2026-09-27). The same run measured 87.93% on Windows, where the Linux-only tray code is not compiled; that panel only reports.
+- **Rust 1.98** on both runners, the toolchain the code is linted with locally, so a lint new in a later stable cannot fail a pull request out of the blue.
+- **Windows.** This is the only place the Windows code is built. `apps/ddc-tray/src-tauri/build.rs` embeds the app manifest into every binary of the crate, tests included, on `windows-msvc` targets: otherwise its test binaries would not start there (tauri-apps/tauri#13419).
+- **`cargo audit`.** It fails on any vulnerability not ignored in `.cargo/audit.toml`. That file ignores four advisories, each with the dependency path, why ddc-control does not reach the affected code and when to check it again, and nothing else: no severity threshold, no `--ignore` flag. Three of the four are warnings (unmaintained or unsound crates), which `cargo audit` prints without failing; the fourth, a vulnerability, fails it. To re-check one, delete its lines and run `cargo audit`: it must still name the advisory, and if it does not, the entry was stale and stays deleted.
+- **`npm test`** runs the `node --test` suites (TAP), then `scripts/playwright-browsers.mjs`, which installs Playwright's Chromium, then the Playwright suite. On a GitHub-hosted runner the install adds the browser's system libraries (`--with-deps`, apt as root on a throwaway machine). Anywhere else, a developer machine or a self-hosted runner, it only puts the browser in the user's cache, never with `sudo`; with the browser already there it does nothing.
+- **Hardware tests** never run in CI: no runner has a monitor, and they are `#[ignore]`d without `DDC_HW_TESTS=1`.
+- **Pinned template.** Until the github-workflows pull request that adds Windows runners, apt packages, `cargo audit` and the release build is merged, both `uses:` point at its head commit, not at a branch, so a run is tied to the exact template code under review. After the merge they move to `@main`.
+
+To reproduce a run locally, use the [quality gates](#dev-setup) plus `cd apps/ddc-tray && npm test`. The CI measures coverage without the `--ignore-filename-regex` of the local gate, so its number is lower.
 
 ## Commits
 
