@@ -18,7 +18,7 @@
 - **T2** `pipeline.yml`:
   - `timeout_qualidade`;
   - a `qualidade` espera o `versao` (`needs` + `!cancelled()`) e recebe `versao`;
-  - `artefatos_release`, `changelog` e `ramo_de_ensaio` → `lancar` (`rascunho` fora da produção, e a `vN` só na produção);
+  - `artefatos_release` e `changelog` → `lancar` (o `ramo_de_ensaio` saiu depois; ver a emenda da D-1);
   - `sonar_versao_linguagem` e `sonar_pacotes_sistema`.
 - **T3** `Portao`: sem `sonar_projeto` e sem `sonar_dispensa`, reprova; com os dois, também. A dispensa fica numa linha só. Provar o script extraído em 6 casos.
 - **T4** README ("O mínimo exigido", "Pacotes na release", pré-requisitos) e `exemplos/ci-rust-desktop.yml` pelo pipeline.
