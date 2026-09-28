@@ -4,7 +4,7 @@
 O `ci.yml` vira uma chamada só ao `pipeline.yml` do `slipalison/github-workflows`, com a esteira inteira:
 - qualidade, com a UI ganhando piso de cobertura;
 - segurança: Gitleaks, TruffleHog, Semgrep, Trivy, SBOM e CodeQL de Rust, JS/TS e Actions;
-- Sonar com Quality Gate: Rust pelo Clippy do Sonar e LCOV, JS por LCOV;
+- Sonar com Quality Gate: Rust pelas regras do Sonar e LCOV, JS por LCOV;
 - o `Portao` como check único.
 
 No template, o app desktop passa a entrar pelo `pipeline.yml`, e o Sonar só se desliga com o motivo escrito.
@@ -43,11 +43,14 @@ Evidência em `.jdi/phases/ci-full-pipeline/pipeline-evidence.env` (`KEY=VALUE`)
   - `WORKFLOWS_TEST_SHA` é filho direto de `WORKFLOWS_SHA`, e só troca `@main` por `@WORKFLOWS_SHA` em `pipeline.yml`;
   - o `WORKFLOWS_SHA` é o head do PR `WORKFLOWS_PR`, ou ancestral dele sem diferença em `.github/workflows/`.
       **Verify:** `export LC_ALL=C.UTF-8; . .jdi/phases/ci-full-pipeline/pipeline-evidence.env; GW=/home/slipalison/repos/github-workflows; git -C $GW fetch -q origin; gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.referenced_workflows[] | .path + " " + .sha' | sort -u > /tmp/rw.$$; grep -qxF "slipalison/github-workflows/.github/workflows/pipeline.yml@$WORKFLOWS_TEST_SHA $WORKFLOWS_TEST_SHA" /tmp/rw.$$; [ "$(grep -v '/pipeline.yml@' /tmp/rw.$$ | awk '{print $2}' | sort -u)" = "$WORKFLOWS_SHA" ]; [ "$(git -C $GW rev-parse "$WORKFLOWS_TEST_SHA^")" = "$WORKFLOWS_SHA" ]; [ "$(git -C $GW diff --name-only "$WORKFLOWS_SHA" "$WORKFLOWS_TEST_SHA")" = ".github/workflows/pipeline.yml" ]; d=$(git -C $GW diff -U0 "$WORKFLOWS_SHA" "$WORKFLOWS_TEST_SHA" | grep '^[-+] '); [ -n "$d" ]; ! printf '%s\n' "$d" | grep -v '^[-+] *uses: slipalison/github-workflows/\.github/workflows/[a-z-]*\.yml@'; [ "$(printf '%s\n' "$d" | grep '^-' | sed -E 's/^-//; s/@main$//')" = "$(printf '%s\n' "$d" | grep '^+' | sed -E "s/^\+//; s/@$WORKFLOWS_SHA\$//")" ]; H=$(gh pr view "$WORKFLOWS_PR" -R slipalison/github-workflows --json headRefOid --jq .headRefOid); git -C $GW merge-base --is-ancestor "$WORKFLOWS_SHA" "$H"; git -C $GW diff --quiet "$WORKFLOWS_SHA" "$H" -- .github/workflows; rm -f /tmp/rw.$$; printf 'OK\n'`
-- [ ] O Sonar analisou Rust e JS com cobertura, e o Quality Gate passou. No log do job `esteira / sonar / Sonar` do `RUN_ID`:
-  - os dois LCOV foram importados;
-  - o sensor do Clippy rodou;
-  - saiu `QUALITY GATE STATUS: PASSED`.
-      **Verify:** `export LC_ALL=C.UTF-8; . .jdi/phases/ci-full-pipeline/pipeline-evidence.env; J=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name=="esteira / sonar / Sonar") | .id'); gh api --allow-escape-sequences "repos/$REPO/actions/jobs/$J/logs" | sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.Z-]+ //' > /tmp/sl.$$; grep -q 'QUALITY GATE STATUS: PASSED' /tmp/sl.$$; grep -qE 'resultados/lcov\.info' /tmp/sl.$$; grep -qE 'resultados/lcov-ui\.info' /tmp/sl.$$; grep -qiE 'clippy' /tmp/sl.$$; rm -f /tmp/sl.$$; printf 'OK\n'`
+- [ ] O Sonar analisou Rust e JS com cobertura, e o Quality Gate passou (emenda: o analisador de Rust do Sonar não roda o Clippy, D-3).
+  - No log do job `esteira / sonar / Sonar` do `RUN_ID`:
+    - o script escreveu os dois relatórios (`Rust: <n> files, UI: <m> files`, com n e m > 0);
+    - o sensor de LCOV do Rust e o sensor `Rust Enterprise` terminaram;
+    - o sensor de JS leu o `resultados/lcov-ui.info`;
+    - saiu `QUALITY GATE STATUS: PASSED`.
+  - Na API do SonarCloud, o PR `PR` tem `alert_status` OK e cobertura ≥ 80%. Rust é a maior parte das linhas, então sem o LCOV dele a cobertura cairia abaixo disso.
+      **Verify:** `export LC_ALL=C.UTF-8; . .jdi/phases/ci-full-pipeline/pipeline-evidence.env; J=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name=="esteira / sonar / Sonar") | .id'); gh api --allow-escape-sequences "repos/$REPO/actions/jobs/$J/logs" | sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9T:.Z-]+ //' > /tmp/sl.$$; grep -qE '^Rust: [1-9][0-9]* files, UI: [1-9][0-9]* files$' /tmp/sl.$$; grep -qF 'Sensor Rust LCOV Coverage [rustenterprise] (done)' /tmp/sl.$$; grep -qF 'Sensor Rust Enterprise [rustenterprise] (done)' /tmp/sl.$$; grep -qE 'Analysing \[.*/resultados/lcov-ui\.info\]' /tmp/sl.$$; grep -qF 'QUALITY GATE STATUS: PASSED' /tmp/sl.$$; m=$(curl -fsS "https://sonarcloud.io/api/measures/component?component=slipalison_ddc-control&pullRequest=$PR&metricKeys=coverage,alert_status" | python3 -c 'import json,sys; d={m["metric"]:m["value"] for m in json.load(sys.stdin)["component"]["measures"]}; print(d["alert_status"], d["coverage"])'); set -- $m; [ "$1" = OK ]; python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= 80 else 1)' "$2"; rm -f /tmp/sl.$$; printf 'OK coverage=%s\n' "$2"`
 - [ ] O `node-ui` aplica o piso: o log do job diz `Aprovado: <n>% >= piso de 80%`, e nenhuma anotação do job fala em relatório ausente.
       **Verify:** `export LC_ALL=C.UTF-8; . .jdi/phases/ci-full-pipeline/pipeline-evidence.env; J=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name=="esteira / qualidade / node-ui") | .id'); gh api --allow-escape-sequences "repos/$REPO/actions/jobs/$J/logs" > /tmp/nl.$$; grep -qE 'Aprovado:\*\* [0-9.]+% >= piso de 80%' /tmp/nl.$$; rm -f /tmp/nl.$$; [ -z "$(gh api "repos/$REPO/check-runs/$J/annotations" --jq '.[].message' | grep -i 'nenhum relatorio')" ]; printf 'OK\n'`
 - [ ] As varreduras rodaram de verdade:
