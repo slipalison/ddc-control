@@ -53,7 +53,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - **Docs:** README com a tabela de campos e a seção "Empacotamento Tauri e versão carimbada"; exemplo com os campos e o `ubuntu-22.04` (com o porquê). **Commit:** `feat(qualidade): empacota tauri, binarios extra e carimba a versao`.
 - **Dependencies:** none
 - **Test:** script extraído + pins + actionlint; DoD 3/4 na T-5
-- **Status:** pending
+- **Status:** completed
 
 #### T-2: arquivos de `packaging/linux` e bundle do `tauri.conf.json`
 - **Specialist:** jdi-doer-ddc-control
@@ -65,7 +65,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - `cargo build -p ddc-tray --locked` aceita o config (o tauri-build valida). Gates verdes. **Commit:** `feat(release-packaging): bundle packages with udev rule and i2c-dev`.
 - **Dependencies:** none
 - **Test:** gates locais + os dois comandos do `postinstall.sh`; DoD 3 na T-5
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2
 
@@ -84,7 +84,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - **CI do gw verde no head:** `Scripts`, `Pins das actions`, `Sintaxe dos workflows` e `versao`.
 - **Dependencies:** T-1 (mesmo README e exemplo)
 - **Test:** Verify 8 local + CI do gw
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3
 
@@ -100,7 +100,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - O 1º run nasce com `versao`, os 3 jobs `qualidade /` e `lancar` skipped, sem `startup_failure`.
 - **Dependencies:** T-2, T-3
 - **Test:** 1º run criado
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4
 
@@ -114,7 +114,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - **Fim:** o run de PR fica verde. Com um `release-evidence.env` provisório, não commitado, os Verify 1, 3, 4 e 8 dão `OK` em `bash`. `objdump -T` do `usr/bin/ddc-tray` do deb e do `ddc-cli` do tar.gz não mostra nenhum `GLIBC_` > 2.35 (D-9). O corpo do PR do gw ganha os runs.
 - **Dependencies:** T-4
 - **Test:** ensaio dos Verify 1, 3, 4 e 8 + `objdump`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5 (parallel-eligible: arquivos disjuntos)
 
@@ -129,7 +129,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - Com o env provisório, os Verify 2, 5, 6 e 7 dão `OK`.
 - **Dependencies:** T-5
 - **Test:** ensaio dos Verify 2, 5, 6 e 7
-- **Status:** pending
+- **Status:** completed
 
 #### T-7: README, doc do Linux e CHANGELOG
 - **Specialist:** jdi-doer-ddc-control
@@ -142,7 +142,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - Nenhuma palavra todo/fixme (DoD 9). Nome e número sempre de um run. **Commit:** `docs(release-packaging): document packages and releases`.
 - **Dependencies:** T-5 (nomes medidos)
 - **Test:** Verify 9 + revisão humana (Deferred)
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 6
 
@@ -159,7 +159,7 @@ Bundles do Tauri (MSI/NSIS no Windows; deb/rpm/AppImage no Linux, com a regra ud
   - **Depois do `HEAD_SHA`:** nada muda em `crates apps packaging Cargo.* .cargo .github CHANGELOG.md LICENSE`, nas configs de lint nem no toolchain. README e docs também entram antes.
 - **Dependencies:** T-6, T-7
 - **Test:** os 9 `Verify:` do DoD
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - 8 tasks em 6 waves. W1 e W5 são paralelas (arquivos disjuntos); speedup ≈ 1.3x. T-5, T-6 e T-8 fazem vários commits de propósito, cada um atômico.
