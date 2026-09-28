@@ -8,7 +8,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+# 0.0.0 on purpose: CI stamps the version it computes from the commits into
+# the release build and the packages, with no bot commit on main
+# (D-2026-09-28-release-packaging-10). A local `--version` says 0.0.0.
+version = "0.0.0"
 edition = "2024"
 license = "MIT"
 
