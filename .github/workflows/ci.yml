@@ -39,7 +39,7 @@ jobs:
   versao:
     permissions:
       contents: read
-    uses: slipalison/github-workflows/.github/workflows/versao.yml@3688e060ed1b14ad135e7cd4938b99f804007c12
+    uses: slipalison/github-workflows/.github/workflows/versao.yml@d6d340a96e2d2bc645e6e5a4c1e2dfba5637b901
     with:
       versao_inicial: "0.1.0"
 
@@ -51,7 +51,7 @@ jobs:
     needs: [versao]
     permissions:
       contents: read
-    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@3688e060ed1b14ad135e7cd4938b99f804007c12
+    uses: slipalison/github-workflows/.github/workflows/qualidade.yml@d6d340a96e2d2bc645e6e5a4c1e2dfba5637b901
     with:
       # Tauri compiles three times per Rust job (clippy, llvm-cov, release),
       # then once more to bundle. With no cache, the first run took 13
@@ -127,7 +127,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: slipalison/github-workflows/.github/workflows/lancar.yml@3688e060ed1b14ad135e7cd4938b99f804007c12
+    uses: slipalison/github-workflows/.github/workflows/lancar.yml@d6d340a96e2d2bc645e6e5a4c1e2dfba5637b901
     with:
       versao: ${{ needs.versao.outputs.versao }}
       tag: ${{ needs.versao.outputs.tag }}
