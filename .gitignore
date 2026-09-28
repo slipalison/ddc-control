@@ -37,3 +37,6 @@ target
 
 # Claude Code: per-user local settings
 .claude/settings.local.json
+
+# Coverage reports: the CI quality job and scripts/ci/sonar-coverage.sh
+/resultados/
