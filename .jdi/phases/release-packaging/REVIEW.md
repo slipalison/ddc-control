@@ -2,119 +2,117 @@
 
 **Verdict:** APPROVED_PENDING_MANUAL
 
-> Loop iter 1. Escrito pelo orquestrador a partir do resultado integral do reviewer: o harness nega escrita de `.md` ao subagente.
+> Loop iter 2. Escrito pelo orquestrador a partir do resultado integral do reviewer: o harness nega escrita de `.md` ao subagente.
 >
-> O HEAD local é `6c5d69b`, e o `HEAD_SHA` da evidência é `299c3b8`. Entre os dois só mudou `.jdi/` (`git diff --quiet 299c3b8 HEAD -- . ':!.jdi'` sai 0). No github-workflows, o PR #14 (`pacotes-tauri-release`) está aberto, com head `3688e06` = `WORKFLOWS_SHA`, empilhado sobre o #13 (`9e91d1a`), também aberto. Os gates rodaram em `bash`, no Fedora (rustc 1.98.1).
+> **Estado dos repositórios**
+> - O HEAD local é `45c8433` e o `HEAD_SHA` da evidência é `f6063d7`. Entre os dois só mudou `.jdi/`.
+> - No github-workflows, o PR #14 (`pacotes-tauri-release`) está aberto, MERGEABLE e com head `d6d340a` = `WORKFLOWS_SHA`. Ele continua empilhado sobre o #13 (`9e91d1a`).
+>
+> Os gates rodaram em `bash`, no Fedora, com rustc 1.98.1.
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
-| Build | PASS | `cargo build --workspace --locked` sai 0. `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked` sai 0 para `x86_64-unknown-linux-gnu` e para `x86_64-pc-windows-msvc`. O `ddc-tray` no Windows só é provado pelo CI: no `RUN_ID` 36435173929, `qualidade / rust-windows` deu success, com `Build ddc-tray (release)` e os pacotes. |
+| Build | PASS | `cargo build --workspace --locked` sai 0. O `cargo check` de `ddc-core`, `ddc-adapters` e `ddc-cli` passa para Linux e para Windows msvc. O `ddc-tray` no Windows só o CI prova: no `RUN_ID` 36445031966, `rust-windows` deu success com os pacotes. |
 | Tests | PASS | 386 passed, 0 failed, 9 ignored (hardware), em 15 binários. |
-| Coverage | PASS | 83.36% de linhas (`main.rs`/`build.rs` excluídos); piso 80. Sem exclusão (Verify literal do PROJECT): 82.93%. A phase não mexeu em nenhum `.rs`. |
-| Lint | PASS | `cargo fmt --all --check` sai 0. `cargo clippy --workspace --all-targets --locked -- -D warnings` sai 0, também com `--all-features`. Nenhum `#[allow(` fora de testes. |
-| Hexagonal/Safety/Hygiene | PASS | 5.1–5.4 e 5.8 sem saída. 5.5a e 5.6 só com hits que já existiam. 5.7: `Confirm::Yes` só nas bordas, e os testes de hardware têm `#[ignore]` e `DDC_HW_TESTS`. 5.9 limpo. 5.10: `cargo audit` 0.22.2 sai 0 (1273 advisories); o `Cargo.lock` só mudou nas 4 linhas `version` dos membros. 5.11 limpo. |
-| Consistency | WARN | Os 11 arquivos de código do plano aparecem nos commits, com escopos e tipos certos. D-1, D-2 e D-2026-09-28-release-packaging-1..10 conformes, contando as emendas. Desvios registrados no PLAN (A-4/-5/-7) e no SUMMARY. W-1 e W-3 ficam com a D-2. |
-| Segurança do template (gw#14) | WARN | `pinar_actions.py --verificar` OK, e o `actions.lock.json` não mudou. actionlint 1.7.12 com shellcheck limpo. Nenhum `${{ }}` novo em `run:`. Sem acento. `tauri-cli` e `cargo-audit` musl batem com o `digest` das releases. W-1..W-5 abaixo. |
-| UI Validation | PASS | `npm ci --ignore-scripts` + `npx playwright test`: 138 passed, 6 skipped, 0 failed. `node --test`: 161/161, `# fail 0`. |
+| Coverage | PASS | 83.36% (`main.rs`/`build.rs` excluídos) contra o piso de 80%. Sem exclusão: 82.93%. Nenhum `.rs` mudou na phase. |
+| Lint | PASS | fmt OK. clippy `-D warnings` OK, também com `--all-features`. |
+| Hexagonal/Safety/Hygiene | PASS | 5.1–5.4, 5.8 e 5.9 sem saída. 5.5a e 5.6 com hits antigos. 5.7: bordas e hardware `#[ignore]`. 5.10: `cargo audit` 0.22.2 sai 0, e o `Cargo.lock` não mudou na iteração 2. 5.11 limpo. |
+| Consistency | PASS | Os commits da iteração 2 têm scope e tipo coerentes e citam a D-XX no corpo. As D-2026-09-28-release-packaging-1..10 estão conformes, com as emendas. As ressalvas W-1 e W-3 à D-2 foram fechadas. |
+| Segurança do template (gw#14, `3688e06..d6d340a`) | PASS | actionlint 1.7.12 e shellcheck 0.10.0 limpos. `pinar_actions.py --verificar` OK. `actions.lock.json`, `.github/actions` e `bin/` não mudaram. Todo `${{ }}` novo está em `env:`. W-1, W-2 e W-3 foram corrigidos e provados; W-4..W-6 corrigidos no texto. Restam W-9 e W-10, baixos. |
+| UI Validation | PASS | Playwright: 138 passed, 6 skipped. `node --test`: 161/161. |
 | DoD | PASS_PENDING_MANUAL | 12/12 auto (9 CONTEXT + 3 PROJECT), literais em `bash`; 2 manuais pendentes |
 
 ## Blockers
 - nenhum
 
 ## Warnings
-- **W-1 (segurança, gw `lancar.yml:414-415`, D-2): `Mover a tag de major` ignora o `rascunho`.**
-  - O passo tem só `if: inputs.tag_movel_major`. Com `tag_movel_major: true` e `rascunho: true`, um ENSAIO cria ou move por força a tag real `vN` para um commit fora da main.
-  - Isso contradiz a descrição do input (`lancar.yml:91`), o README e a D-2 ("nenhuma tag é criada").
-  - O próprio gw chama o `lancar` com `tag_movel_major: true` (`ci.yml:226` do gw).
-  - Não atinge o ddc-control.
-  - Corrigir antes do merge do gw#14: `if: inputs.tag_movel_major && !inputs.rascunho`, ou reprovar a combinação em `Conferir as entradas`.
-- **W-2 (segurança e cadeia de suprimento, gw `qualidade.yml:759`): o AppImage publicado leva binários baixados sem hash.**
-  - O `cargo tauri build` do tauri-cli 2.12 baixa no job, sem conferir hash, o `AppRun-x86_64` (`apprun-old`), o `linuxdeploy-07333c6` e o `linuxdeploy-plugin-appimage` da release `continuous`, que muda com o tempo (job 108971248763, linhas ~2102-2104; `prepare_tools` do tauri-bundler).
-  - O `AppRun` vira o ponto de entrada do `.AppImage` publicado.
-  - Sugestão: pré-semear essas ferramentas com sha256 conferido no diretório de ferramentas do tauri, porque o bundler pula o download quando o arquivo existe. No mínimo, declarar a exceção na seção "Segurança" do README do gw.
-- **W-3 (gw `lancar.yml:237-238` e `qualidade.yml:215-219`, D-2): `changelog` e `caminho_tauri` aceitam caminho absoluto.**
-  - `CHANGELOG=/etc/passwd` passa em `Conferir as entradas` (script extraído do `3688e06`), embora o comentário e o README digam "relativo".
-  - O trecho `## [Unreleased]` de qualquer arquivo do runner iria para o corpo público da release.
-  - Recusar `/` no começo.
-- **W-4 (gw README linha 201 e comentário `lancar.yml:193-208`): o egresso efetivo é maior que os "quatro destinos".**
-  - O harden-runner 2.21.1 em `block` libera os domínios meta do GitHub: `github.com`, `*.github.com`, `*.githubapp.com`, `ghcr.io` e 20 contas `productionresultssa*`.
-  - A lista explícita está certa. O texto de segurança precisa dizer isso.
-- **W-5 (gw `lancar.yml:357-378`, baixo): corrida entre ensaio e main.**
-  - Um ensaio da mesma versão rodando junto com o `lancar` da main apagaria, no `Apagar rascunho velho`, o rascunho em trânsito que o `gh release create` cria enquanto sobe os anexos.
-  - A release da main falharia sem publicar, então não há perda de segurança.
-  - Evitar `ensaio-release/*` perto do merge, ou filtrar também por `target_commitish`.
-- **W-6 (docs do gw):**
-  - `qualidade.yml:72` e o README (linha 751) dizem que a única diferença é a chave do cache, mas o `Alvo do runner` agora roda em todo componente rust.
-  - Em `exemplos/ci-rust-desktop.yml:32-44`, os parágrafos "A RELEASE…" e "A VERSAO…" partem a lista "O QUE CADA COMPONENTE PROVA".
-- **W-7 (texto, Deferred):**
-  - O corpo do rascunho mistura o CHANGELOG em inglês com os títulos em pt-BR das notas do `versao`.
-  - Sem tag anterior, as notas listam o histórico inteiro.
-  - O README do ddc-control diz "Every push to `main` publishes a GitHub Release", mas só publica com `salto != nenhum`.
-- **W-8 (herdado da ci-crossbuild, continua aberto):** `${{ }}` em `run:` nos passos dotnet/npm/go e `gocover-cobertura@latest` no `qualidade.yml` do gw (W-3 da ci-crossbuild); `so` aceita qualquer sufixo `ubuntu-*`/`windows-*` (W-6 da ci-crossbuild). Nenhum atinge o ddc-control.
+
+### Resolvidos desde a iteração 1
+- **Blocker do crítico (linha 8 do DoD):** o `Verify:` reescrito dá `OK` contra o `d6d340a`. Contra o `3688e06` sai 1, então discrimina.
+- **Linha 5:** o `;` virou `&&`.
+- **W-1:** `Conferir as entradas` reprova `tag_movel_major` junto com `rascunho` (`lancar.yml:228`), e `Mover a tag de major` tem `if: inputs.tag_movel_major && !inputs.rascunho` (`:449`).
+- **W-2:** resolvido. As provas estão nas Notas.
+- **W-3:** `changelog` (`lancar.yml:264`) e `caminho_tauri` (`qualidade.yml:226`) recusam `/` no começo.
+- **W-4:** os domínios meta liberados pelo harden-runner estão escritos no comentário e no README do gw.
+- **W-5:** documentado ("NÃO ENSAIE PERTO DO MERGE") no `lancar.yml`, no README do gw, no exemplo e no README do ddc-control. O risco residual é aceito: não há perda de segurança.
+- **W-6:** o `Alvo do runner` está citado, e a lista do exemplo foi refeita.
+- **W-7, parte do README:** "when its commits call for a new version", conferido contra `bin/versao.py:116-123`. O CHANGELOG também foi corrigido.
+- **Endurecimento da D-7:** `artefatos: "pacotes-rust-*"`. No ensaio, dos 4 artefatos do run só os 2 `pacotes-rust-*` foram baixados.
+
+### Abertos
+- **W-7 residual (texto, Deferred):** o corpo do rascunho mistura o CHANGELOG em inglês com os títulos em pt-BR das notas do `versao`. Sem tag anterior, ele lista o histórico inteiro (21.160 caracteres).
+- **W-8 (herdado da ci-crossbuild, fora do diff):** `${{ }}` em `run:` nos passos dotnet/npm/go, `gocover-cobertura@latest`, e `so` aceitando qualquer sufixo. Não atinge o ddc-control.
+- **W-9 (baixo, operacional; gw `qualidade.yml:774-779`):** as ferramentas estão fixadas por hash, mas em tags que o dono reescreve.
+  - Nenhuma das 4 releases é imutável. Os assets de `apprun-old` e `linuxdeploy-07333c6` já foram re-enviados antes, o último em 2026-09-20.
+  - O passo falha fechado: um novo re-envio derruba o empacotamento Linux até alguém revisar e trocar o hash.
+  - O README do gw declara a não-imutabilidade. Uma frase sobre o que fazer quando o sha256 falhar seria bem-vinda.
+- **W-10 (cosmético; gw `qualidade.yml:912`):** uma linha de 133 caracteres no comentário do `Guardar pacotes`.
 
 ## Notas
 
-### Pontos de segurança pedidos (conferidos)
-- **Lista `block` do `lancar`:** são 4 destinos, com comentário fora do bloco `|`. O ensaio final rodou em `block` sem bloqueio, e todos os `endpoint called` estão liberados. Ver W-4.
-- **Apagar rascunho velho:**
-  - filtra `select(.draft == true and .tag_name == "$TAG")` e apaga pelo id;
-  - a `TAG` já passou pela regex `v[0-9]+.[0-9]+.[0-9]+`;
-  - uma release publicada nunca casa, e `A tag ainda nao existe?` reprova antes;
-  - risco residual: W-5.
-- **Notas do CHANGELOG:** o `awk` lê o arquivo, e o título entra por `-v` só com dígitos. O trecho passa pelo `printf` builtin até `$RUNNER_TEMP/notas-release.md`, e o `gh` recebe só `--notes-file`. Nada de texto de terceiro chega ao argv de processo externo.
-- **Anexos:**
-  - nomes restritos a `[A-Za-z0-9._+-]`, sem subdiretório e sem `SHA256SUMS` duplicado;
-  - `sha256sum --` e o prefixo `pacotes-baixados/`;
-  - o download vem antes da criação (A-5).
-- **Gatilho `ensaio-release/**`:**
-  - o `lancar` exige `push` e ref `main` ou `ensaio-release/`, com `rascunho: ${{ github.ref != 'refs/heads/main' }}`;
-  - PR e `workflow_dispatch` nunca chegam ao `lancar`;
-  - push de tag não dispara;
-  - o `download-artifact` sem `run-id` só vê o próprio run.
-- **`postinstall.sh` (root):**
-  - só `modprobe i2c-dev`, `udevadm control --reload` e `udevadm trigger --subsystem-match=i2c-dev`, cada um com `2>/dev/null || true`, e `exit 0`;
-  - `sh -n` e shellcheck limpos;
-  - o `postinst` do deb e o `%post` do rpm são idênticos ao arquivo.
-- **Endurecimento sugerido (emenda da D-7):** `artefatos: "pacotes-*"` casaria um `pacotes-*` subido por qualquer job do run, como o `node-ui` com código npm de terceiros. Usar `pacotes-rust-*`.
+### W-2: as ferramentas do AppImage (passo `Ferramentas do AppImage`, `qualidade.yml:728`)
+- **Hashes contra os assets reais.** Baixei os 4 arquivos e calculei o sha256; todos batem.
+  - `AppRun-x86_64` (31552 bytes): `digest` da API bate.
+  - `linuxdeploy-07333c6-x86_64.AppImage`: `digest` bate.
+  - `linuxdeploy-plugin-appimage.AppImage`: a API dá `digest: null` (asset de 2025-02), mas o tamanho bate.
+  - `runtime-x86_64`: `digest` bate.
+- **URLs.**
+  - O plugin (`1-alpha-20250213-1`) e o runtime (`20251108`) vêm das últimas releases que não são `continuous`.
+  - O `AppRun` e o linuxdeploy usam as URLs exatas do `prepare_tools` do tauri-bundler 2.10.0 (`LINUXDEPLOY_COMMIT_HASH = "07333c6"`), do qual o tauri-cli 2.12.0 depende (`=2.10.0`).
+  - Os scripts do plugin gtk vêm por `include_bytes!`. Nada fica sem hash.
+- **Trava 1 (`Downloading`, `qualidade.yml:870`).**
+  - O padrão casa as 3 linhas reais do job 108971248763 (iteração 1), e dá 0 linhas nos jobs 109005130135 e 109014950511.
+  - `pipefail` com `tee` preserva a falha do `cargo tauri build`.
+- **Harden-runner.** As conexões do `cargo-tauri` e do `appimagetool` passaram de 4 para 0.
+- **Trava 2 (runtime).** Matriz 2x2 com o `conferir_runtime` extraído do YAML: o AppImage novo passa contra o runtime fixado e reprova contra o `continuous` de hoje; o AppImage da iteração 1 faz o contrário.
+  - As seções mascaradas somam 10.256 bytes (assinatura e update info). O `.text` é comparado inteiro.
+  - O AppImage anexado ao rascunho passa, e o `AppRun.wrapped` dele é o `AppRun-x86_64` fixado.
+- **O passo, testado à parte.** Com 1 hash adulterado, sai 1 antes do `mv`, e o passo Tauri reprova. Com alvo `aarch64`, `::error::`. As travas rodam antes do `Guardar pacotes`, então um AppImage não conferido nunca vira artefato.
+- **Windows.** O WiX e o NSIS o bundler já baixa com hash fixo no código. Fora do escopo da W-2.
 
-### Rascunho 398335754
-- `draft: true`, `tag_name: v0.1.0`, alvo `299c3b8…`, autor `github-actions[bot]`, `published_at: null`.
-- É a única release do repositório, que tem 0 tags.
-- 8 anexos. O `digest` da API bate com o `SHA256SUMS`.
-- Deb: `Version: 0.1.0`, `Maintainer: Alison Amorim`, `Depends: libwebkit2gtk-4.1-0, libgtk-3-0`, `Exec=ddc-tray`, GLIBC máx. 2.34.
-- Rpm: lista `/usr/bin/ddc-tray`, a regra udev, o `modules-load.d` e o `.desktop`.
-- Corpo de 20.394 caracteres (W-7).
+### W-1 e W-3: scripts extraídos do YAML parseado
+- **`Conferir as entradas`:**
+  - `MOVEL=true RASCUNHO=true` dá 1; as outras combinações dão 0.
+  - Reprovam: `/etc/passwd`, `/home/runner/x`, `//etc/passwd`, `../CHANGELOG.md`, `docs/../../x`, `a b` e `C:x`.
+  - Passam: `CHANGELOG.md`, `docs/CHANGELOG.md` e `./CHANGELOG.md`.
+- **`Conferir componente`:** `apps/ddc-tray/src-tauri` dá 0. `/etc`, `/home/runner/x`, `//x`, `../x`, `a/../../b`, `a b` e vazio dão 1.
+
+### Rascunho 398419349 e o 398335754
+- **398419349:**
+  - `draft: true`, `tag_name: v0.1.0`, alvo `f6063d7…`, autor `github-actions[bot]`, `published_at: null`;
+  - 8 anexos e corpo de 21.160 caracteres;
+  - é a única release do repositório, com 0 tags e nenhuma branch `ensaio-release/*`.
+- **398335754:** a API responde 404. O log do `lancar` do ensaio registra "Rascunho 398335754 de v0.1.0 apagado."
+- **Egresso do `lancar` no ensaio:** `block`, 0 bloqueios.
 
 ### Conformidade D-XX (resumo)
-- **D-1:** branch sobre `9e91d1a`; 3 `uses:` em `@3688e06…`; `release-evidence.env` com as 10 chaves.
-- **D-2:** atendida pela A-5 e com o egresso medido; ressalvas W-1 e W-3.
-- **D-3:** atendida. Desvios documentados: `dist/*`, chave do cache com o runner, 7z no Windows.
-- **D-4:** regra byte a byte igual, `modules-load.d`, `postinst` best-effort, `/usr/bin/ddc-tray`, `mainBinaryName`, limite do AppImage documentado.
-- **D-5/-6:** conjuntos de membros e as 7 categorias.
-- **D-7:** literal; `qualidade` com `needs: [versao]`.
+- **D-1:** os 3 `uses:` estão em `@d6d340a…`; `release-evidence.env` tem as 10 chaves.
+- **D-2:** atendida com as emendas, W-1 e W-3.
+- **D-3:** atendida. O passo `Ferramentas do AppImage` é extensão. Os 5 nomes do contrato não mudaram.
+- **D-4/-5/-6/-10:** linhas 3 e 4 do DoD.
+- **D-7 (emendada):** literal, com `pacotes-rust-*`.
 - **D-8:** PR com `lancar` skipped, ensaio verde, rascunho mantido, 0 tags, branch de ensaio apagada.
-- **D-9:** ubuntu-22.04, GLIBC máx. 2.34.
-- **D-10:** `0.0.0` no repositório; `Carimbar versao` e `Conferir versao dos binarios` em success nos dois SOs.
+- **D-9:** `ubuntu-22.04`.
 
 ## DoD Checklist (gate 8)
 
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | Run real de `pull_request` (`RUN_ID`) no `HEAD_SHA`: success, árvore igual, `versao`/`qualidade` success, `rust-linux` em ubuntu-22.04, `salto=inicial versao=0.1.0`, `lancar` skipped | CONTEXT | Auto | PASS | `OK` (bash). Run 36435173929 |
-| 2 | Template que rodou = PR #14 (`WORKFLOWS_SHA`): `referenced_workflows`, composites `@main` sem diff, CI do gw verde | CONTEXT | Auto | PASS | `OK` (bash). Head do #14 = `3688e06`; 3/3 checks success |
-| 3 | `pacotes-rust-linux`: 4 arquivos sem espaço; deb, rpm, AppImage e tar.gz inspecionados; `ddc-cli --version` executa; `Cargo.toml` em `0.0.0` | CONTEXT | Auto | PASS | `OK` (bash). `postinst`/`%post` idênticos, GLIBC máx. 2.34 (conferido à parte) |
+| 1 | Run real de `pull_request` (`RUN_ID`) no `HEAD_SHA`: success, árvore igual, `versao`/`qualidade` success, `rust-linux` em ubuntu-22.04, `salto=inicial versao=0.1.0`, `lancar` skipped | CONTEXT | Auto | PASS | `OK` (bash, literal). Run 36445031966 em `f6063d7` |
+| 2 | Template que rodou = PR #14 (`WORKFLOWS_SHA`): `referenced_workflows`, composites `@main` sem diff, CI do gw verde | CONTEXT | Auto | PASS | `OK` (bash). Head do #14 = `d6d340a` |
+| 3 | `pacotes-rust-linux`: 4 arquivos sem espaço; deb, rpm, AppImage e tar.gz inspecionados; `ddc-cli --version` executa; `Cargo.toml` em `0.0.0` | CONTEXT | Auto | PASS | `OK` (bash). À parte: o AppImage passa na trava do runtime fixado |
 | 4 | `pacotes-rust-windows`: MSI, NSIS e zip `{ddc-cli.exe, LICENSE}`; 5 passos em success nos dois jobs rust | CONTEXT | Auto | PASS | `OK` (bash) |
-| 5 | Ensaio `ENSAIO_RUN_ID`: push do mesmo `HEAD_SHA` em `ensaio-release/*`, success, `salto=inicial`, `lancar / Tag e release` em success | CONTEXT | Auto | PASS | `OK` (bash). Run 36435174227 |
-| 6 | Rascunho `DRAFT_RELEASE_ID`: draft/tag/alvo; assets = artefatos (7) + `SHA256SUMS`; `sha256sum -c --strict`; byte a byte; itens do `[Unreleased]` no corpo | CONTEXT | Auto | PASS | `OK` (bash). 398335754 |
-| 7 | Nenhuma tag `v*` | CONTEXT | Auto | PASS | `OK` (bash). 0 tags |
-| 8 | Validação de entrada do `lancar.yml` (script extraído do `WORKFLOWS_SHA`) | CONTEXT | Auto | PASS | `OK` (bash). Não cobre caminho absoluto; ver W-3 |
+| 5 | Ensaio `ENSAIO_RUN_ID`: push do mesmo `HEAD_SHA` em `ensaio-release/*`, success, `salto=inicial`, `lancar / Tag e release` em success, alias skipped | CONTEXT | Auto | PASS | `OK` (bash). Run 36447884185 |
+| 6 | Rascunho `DRAFT_RELEASE_ID`: draft/tag/alvo; assets = artefatos (7) + `SHA256SUMS`; `sha256sum -c --strict`; byte a byte; itens do `[Unreleased]` no corpo | CONTEXT | Auto | PASS | `OK` (bash). 398419349; o 398335754 dá 404 |
+| 7 | Nenhuma tag `v*` | CONTEXT | Auto | PASS | `OK` (bash) |
+| 8 | Validação de entrada do `lancar.yml` (YAML parseado: `env`, sem `if`/`continue-on-error`, antes do `gh release create`; valores perigosos, inclusive `changelog` absoluto, reprovam) | CONTEXT | Auto | PASS | `OK` contra `d6d340a`; exit 1 contra `3688e06` (discrimina) |
 | 9 | Nenhum `TODO`/`FIXME` sem issue | CONTEXT | Auto | PASS | `OK` (bash) |
 | 10 | `cargo test --workspace` exits 0 | PROJECT | Auto | PASS | 386 passed / 0 failed / 9 ignored |
-| 11 | Coverage >= 80% of lines | PROJECT | Auto | PASS | 82.93% sem exclusão; 83.36% com a exclusão do Gate 3 |
+| 11 | Coverage >= 80% of lines | PROJECT | Auto | PASS | 82.93% sem exclusão; 83.36% com a exclusão |
 | 12 | No `TODO`/`FIXME` without linked issue reference | PROJECT | Auto | PASS | `OK` (bash, literal) |
-| 13 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` (`CHANGELOG.md:8`) com 4 itens em Added e 3 em Changed; `## [0.1.0]` fica para a primeira release real |
-| 14 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: seção Install com os 7 arquivos, `sha256sum -c --ignore-missing SHA256SUMS`, aviso de instalador sem assinatura, Status e seção CI; a frase "Every push to `main` publishes" é imprecisa (W-7) |
+| 13 | CHANGELOG.md updated with entry per release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` em `CHANGELOG.md:8`, com o item da release corrigido e o do AppImage com ferramentas fixadas; `## [0.1.0]` fica para a primeira release real |
+| 14 | README accurately describes current behavior | PROJECT | Manual | MANUAL_REQUIRED | suggested: Install (`README.md:7`) com os 7 arquivos, `sha256sum -c --ignore-missing SHA256SUMS` e o aviso de instalador sem assinatura; "What publishes" (l.498) condiciona a publicação a `salto != nenhum`; "Do not rehearse near a merge" (l.499) |
 
 **Totals:** 14 items | Auto: 12 (12 PASS, 0 FAIL) | Manual: 2 pending
 
@@ -122,37 +120,35 @@
 Run `/jdi-confirm-dod release-packaging` to confirm each manual item with evidence. Without that, `/jdi-ship` will refuse the phase.
 
 ## Recommendation
-Nenhum gate bloqueia. Os 9 `Verify:` do CONTEXT e os 3 da baseline dão `OK` em `bash`. O rascunho 398335754 contém o que a D-8 pede, e os pontos de segurança pedidos se sustentam.
+Nenhum gate bloqueia. Os 9 `Verify:` do CONTEXT e os 3 da baseline dão `OK`. A linha 8 discrimina contra o head anterior. A iteração 2 fechou W-1..W-6, a parte do README da W-7 e o endurecimento da D-7. A W-2 foi provada de forma independente.
 
-Antes do merge do gw#14, corrigir:
-- W-1, com prioridade;
-- W-3;
-- W-4 e W-6, no texto;
-- W-2: pelo menos declarar a exceção, e de preferência pré-semear as ferramentas com sha256.
+Opcionais antes do merge:
+- W-10, reflow do comentário;
+- W-9, uma frase sobre falha de sha256.
 
-Cada correção muda o `WORKFLOWS_SHA` e pede repin e novos runs de PR e de ensaio.
+Qualquer mudança no gw pede repin, run de PR e ensaio.
 
 Ordem humana:
-1. Instalar os pacotes do rascunho. Não clicar em "Publish".
-2. Mergear o gw#13.
-3. Rebasear e mergear o gw#14.
-4. Trocar `@…` por `@main` no `ci.yml`.
-5. Mergear o #11.
+1. `/jdi-confirm-dod release-packaging`.
+2. Instalar os pacotes do rascunho 398419349. Não clicar em "Publish".
+3. Mergear o gw#13; depois rebasear e mergear o gw#14.
+4. Trocar `@d6d340a…` por `@main` no `ci.yml`.
+5. Mergear o #11. Não ensaiar perto desse merge.
+6. Na primeira release real, revisar o corpo (W-7 residual).
 
 ## DoD Critic (enhanced)
 
-- DoD row «8»: o `Verify:` extraía só o corpo `run:` do `Conferir as entradas` e injetava `ARTEFATOS`/`CHANGELOG` por conta própria. O mapeamento `env:` do passo e a ausência de `continue-on-error`/`if` nunca eram conferidos. O crítico demonstrou dois mutantes no gw (clone descartável), e nos dois o `Verify:` imprimiu OK, com actionlint e `pinar_actions` verdes:
-  - `ARTEFATOS: ${{ inputs.changelog }}` só nesse passo;
-  - `continue-on-error: true` no passo.
-- DoD row «5» (fragilidade, não objetiva): o `J=$(...);` fechava a cadeia `&&` com `;`.
-- As outras 10 linhas Auto foram julgadas não ocas. A linha 6 discrimina de fato: os 41 itens do `[Unreleased]` só casam pela seção do CHANGELOG, e não pelas notas do `versao`. A linha 9 resistiu a 9 mutações.
+- DoD row «8»: o harness rodava o texto CRU do `run:` e aceitava QUALQUER saída diferente de zero como "reprovou". O GitHub interpola `${{ }}` no texto antes do bash.
+  - Mutante demonstrado num clone descartável: a mensagem de erro do `lancar.yml:260` passa a citar `${{ inputs.artefatos }}`, como o `qualidade.yml` já faz em 7 passos.
+  - O Verify imprimia OK, e o actionlint também passava.
+  - No runner, `pacotes-$(id)` EXECUTARIA o `id` num job com `contents: write`.
+- DoD row «3» (suspeita, não objetiva): um `version` no `tauri.conf.json` ou no `Cargo.toml` da tray daria `0.1.0` aos pacotes sem depender do carimbo.
+- As outras 10 linhas Auto foram julgadas não ocas.
 
 **Verdict:** BLOCKED
 
-> Correção do orquestrador (verify reset iter 1 → 2, CONTEXT):
-> - a linha 8 lê o `lancar.yml` do `WORKFLOWS_SHA` com PyYAML e exige, no passo `Conferir as entradas` do job `lancar`, `env` `VERSAO`/`TAG`/`ARTEFATOS`/`CHANGELOG` = os inputs certos, nenhum `if`/`continue-on-error` (nem no job) e o passo antes do `gh release create`;
-> - o script testado é o `run` parseado;
-> - passam a reprovar também `changelog` `/etc/passwd` e `/home/runner/x` (W-3);
-> - a linha 5 trocou o `;` por `&&`.
+> Correção do orquestrador (verify reset iter 2 → 3, CONTEXT):
+> - a linha 8 exige `"${{" not in run` no YAML parseado. O script roda como o runner o roda (`bash --noprofile --norc -eo pipefail`), e cada valor perigoso tem de ser recusado com o `::error::` do PRÓPRIO script. Um erro qualquer do bash dá `ERRO` e reprova a linha.
+> - a linha 3 exige, no `HEAD_SHA`, `tauri.conf.json` sem `version` e `version.workspace = true` no crate da tray.
 >
-> Contra o `3688e06` a linha 8 agora NÃO imprime OK, porque o caminho absoluto ainda é aceito. A correção vem na iteração 2.
+> Provas: contra o `d6d340a`, as duas linhas dão `OK`. O mutante do crítico, recriado num clone descartável do gw, NÃO imprime OK.
