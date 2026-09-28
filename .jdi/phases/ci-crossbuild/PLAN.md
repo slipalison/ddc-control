@@ -229,3 +229,15 @@ Entrada: a REVIEW iter 1 (W-1..W-5 e o DoD Critic) e o DoD da CONTEXT, agora com
   6. `ci-evidence.env` reescrito num commit só de `.jdi/`.
 - Os 9 `Verify:` do DoD, rodados literalmente, imprimem `OK`.
 - **Status:** completed
+
+## Iteração 3 (ralph loop: reset do DoD critic, linha 5)
+- **Contexto:** o BLOCKED da iteração 2 veio só do crítico do DoD, na linha 5. O orquestrador reescreveu o `Verify:` dessa linha no CONTEXT, que agora compara o conjunto `nome:estado` de todos os testes dos dois logs com a lista congelada. Nenhum código mudou nesta iteração.
+- **Execução:** os 9 `Verify:` do `## Definition of Done` foram extraídos literalmente do CONTEXT (o trecho entre a crase de abertura depois de `**Verify:**` e o `echo OK` final) e rodados em `bash`, a partir da raiz, no HEAD `35ea5d3`. Todos imprimiram `OK`, com exit 0.
+- **Evidência:** a mesma de `ci-evidence.env`. O run verde 36345684775 está em `HEAD_SHA` `2871dc6`, e depois dele só `.jdi/` mudou. O NEG é o 36345194940 / `9ef86cc`. `WORKFLOWS_SHA` é `9e91d1a`, o head do gw#13.
+- **Linha 5 em números (run 36345684775):**
+  - Windows: 383 nomes, igual a passed + ignored, com 9 `ignored`.
+  - Linux: 395 nomes, igual a passed + ignored, com 9 `ignored`.
+  - 11 binários em cada SO. São 379 testes comuns, 16 só no Linux e 4 só no Windows, exatamente a lista congelada.
+- **Armadilha de medição:** o `echo` do zsh interpreta `\c` nos caminhos `D:\a\…` do log do Windows e trunca a saída, dando 0 nomes. Os `Verify:` precisam rodar em `bash`, como pedido.
+- **Sem NEG novo:** como nada em `crates/`, `apps/`, `Cargo.*`, `.cargo/` ou `.github/` mudou, a sequência da T-8 não foi refeita. Não houve push.
+- **Status:** completed

@@ -50,3 +50,46 @@
 
 ## Blocked tasks
 - nenhuma
+
+## Iteração 2 (fix de blockers do crítico + rodada de avisos)
+
+A sequência de evidência foi refeita com o template novo. Os 9 `Verify:` do CONTEXT dão `OK` com o HEAD em `0aaaf1c`.
+
+### github-workflows (PR #13, head `9e91d1a`)
+- W-2 (`33e00c7`): `so: windows-*` fora de `rust` reprova no `Conferir componente`. README, cabeçalho e exemplo dizem a mesma regra. O script extraído do YAML rodou em 20 combinações: 6 passam e 14 reprovam.
+- W-5 (`9e91d1a`): o nome do passo é `Build <pacote> (release)` quando há `build_release` e `Build de release` quando não há.
+- W-4/W-3: o corpo do PR #13 tem a tabela de runs por head e a nota para a mensagem do squash. A W-3 fica como follow-up e não foi alterada.
+- CI de lá verde no `9e91d1a` (run 36345116982).
+
+### ddc-control
+| Commit | O quê |
+|---|---|
+| `384def7` | `uses:` fixados em `@9e91d1a…` |
+| `9ef86cc` | NEG: remove só a exceção de RUSTSEC-2018-0005 |
+| `3446dd2` | reversão |
+| `2871dc6` | `test(ci-crossbuild)`: testes de panic com orçamento de 10 s, que só limita travamento |
+| `0aaaf1c` | `ci-evidence.env` + PLAN (só `.jdi/`) |
+
+- NEG 36345194940: `failure`, `cargo audit` citando RUSTSEC-2018-0005, `referenced_workflows` = `9e91d1a`.
+- Verde 36345684775 (`HEAD_SHA` = `2871dc6`):
+  - todos os jobs em success, com o mesmo `ci.yml` do NEG;
+  - cobertura 82,93%;
+  - 11 = 11 binários e 9 = 9 `ignored` entre Linux e Windows;
+  - `node-ui` com 161 testes node e 138 Playwright.
+- A mudança fora da lista veio do run NEG:
+  - no `rust-windows`, dois testes de panic do worker deram `Timeout`, porque o próprio panic levou ~1,2 s naquele runner;
+  - o bug foi reproduzido localmente com um panic hook que dorme 1,3 s;
+  - as chamadas que não dependem de tempo ganharam um orçamento de 10 s (`UNHURRIED`); o teste `stuck` mantém os 250 ms;
+  - nenhuma asserção mudou e nenhum teste foi ignorado.
+- Gates locais: fmt, clippy `--all-features`, 386 testes, cobertura 83,36%, `cargo audit` e `npm test` verdes.
+
+## Iteração 3 (sem código; reset da linha 5 pelo orquestrador)
+Os 9 `Verify:` do CONTEXT dão `OK` (exit 0) com o HEAD em `35ea5d3`. Depois do commit `57f1939`, que só mexe no PLAN, as linhas 1, 7 e 9 foram rodadas de novo e continuam `OK`. A evidência é a da iteração 2: verde 36345684775, NEG 36345194940, template `9e91d1a`.
+
+A linha 5 no run 36345684775:
+- Windows: 383 nomes, igual a passed + ignored;
+- Linux: 395 nomes, igual a passed + ignored;
+- 379 testes são comuns aos dois SOs;
+- a diferença é exatamente a lista congelada (16 só no Linux, 4 só no Windows).
+
+Nota: os `Verify:` precisam rodar em `bash`. O `echo` do zsh interpreta o `\c` dos caminhos `D:\a\…` do log do Windows e corta a saída.
