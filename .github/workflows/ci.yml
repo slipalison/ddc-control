@@ -8,13 +8,15 @@ name: CI
 #              outside them fails the run
 #   qualidade  one job per component: fmt, `cargo audit`, clippy, the tests
 #              with the coverage floor, the release build and the packages
-#   seguranca  Gitleaks and TruffleHog over the whole history, Semgrep, Trivy
+#   seguranca  Gitleaks over the whole history, TruffleHog over the new
+#              commits, Semgrep, Trivy
 #              on the lockfiles, the SBOM, and CodeQL for Rust, JS/TS and
 #              these workflows
 #   sonar      Sonar analysis and its Quality Gate, with Rust and JS coverage
-# and then `Portao`, one check that fails when any of them failed. Only on a
-# push to main, and only after all of them passed, `lancar` tags and publishes
-# the GitHub Release with the packages. There is no image and no deploy: with
+# and then `Portao`, one check that fails when any of them failed. Only on
+# main, on a push or a manual run (never a pull request), and only after all
+# of them passed, `lancar` tags and publishes the GitHub Release with the
+# packages. There is no image and no deploy: with
 # `imagem` and `app` empty, the pipeline skips both.
 #
 # Until 2026-09-28 this file called versao, qualidade and lancar directly, and

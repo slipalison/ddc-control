@@ -64,9 +64,11 @@ cargo llvm-cov --all-features --workspace --locked \
 # anything else means the report changed shape, and the rewrite would point
 # Sonar at files that do not exist.
 ui=apps/ddc-tray/coverage/lcov.info
-if grep '^SF:' "$ui" | grep -qv '^SF:src/'; then
-  printf '%s: an SF path outside src/:\n' "$ui" >&2
-  grep '^SF:' "$ui" | grep -v '^SF:src/' >&2
+# One awk, not `grep | grep -q`: under pipefail, an early `grep -q` exit can
+# SIGPIPE the first grep and turn this check off without a word.
+outside=$(awk '/^SF:/ && !/^SF:src\// { print }' "$ui")
+if [ -n "$outside" ]; then
+  printf '%s: an SF path outside src/:\n%s\n' "$ui" "$outside" >&2
   exit 1
 fi
 sed 's#^SF:src/#SF:apps/ddc-tray/src/#' "$ui" > resultados/lcov-ui.info
