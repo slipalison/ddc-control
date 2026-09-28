@@ -56,7 +56,7 @@ jobs:
       packages: write
       security-events: write # SARIF of the scans and of CodeQL
       actions: read          # CodeQL
-    uses: slipalison/github-workflows/.github/workflows/pipeline.yml@6bd2c63558741cf23ff8f173ba2dad4a5358c76e
+    uses: slipalison/github-workflows/.github/workflows/pipeline.yml@a13c1546a146f28ce515beb0d770d5a17a4879a5
     with:
       # The first release, while the repository had no `vX.Y.Z` tag.
       versao_inicial: "0.1.0"
@@ -135,10 +135,12 @@ jobs:
       # ----------------------------------------------------------- sonar --
       # Analysis on CI, not SonarQube Cloud's Automatic Analysis, which must
       # stay OFF for this project: it read no Rust and no coverage, and with
-      # it on the CI scanner fails (D-2026-09-28-ci-full-pipeline-3). Sonar's
-      # Rust analyzer runs Clippy, which compiles the workspace: hence the
-      # same toolchain and the webview and udev headers (librsvg is only for
-      # the AppImage). The script writes the Rust and the UI LCOV reports.
+      # it on the CI scanner fails (D-2026-09-28-ci-full-pipeline-3). The
+      # script writes the Rust and the UI LCOV reports, and its cargo llvm-cov
+      # compiles the workspace: hence the same toolchain and the webview and
+      # udev headers (librsvg is only for the AppImage). Sonar's Rust analyzer
+      # itself compiles nothing and runs no Clippy (measured on run
+      # 36494608449); Clippy with -D warnings is the quality jobs' gate.
       sonar_projeto: slipalison_ddc-control
       sonar_linguagem: rust
       sonar_versao_linguagem: "1.98"
