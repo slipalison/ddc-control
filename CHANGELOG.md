@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Security scans on every pull request and push, through the shared pipeline: Gitleaks over the whole history, TruffleHog (verified secrets) over the commits of the push or pull request, Semgrep, Trivy on `Cargo.lock` and `package-lock.json`, an SPDX SBOM, and CodeQL for Rust, JavaScript/TypeScript and the GitHub Actions workflows. The results go to the Security tab, and an `error` finding fails the run.
+- SonarQube Cloud analysis on CI, whose Quality Gate fails the run. It covers the Rust code (Sonar's own Rust rules, plus `cargo llvm-cov` coverage) and the popup's JS (coverage from `node --test`). `scripts/ci/sonar-coverage.sh` writes both reports, and runs locally too.
+- One `esteira / Portao` check that fails when any job of the pipeline failed, or when Sonar is off without a written reason.
+- An 80% line-coverage floor for the popup's JS modules: `npm run test:unit` writes `apps/ddc-tray/coverage/lcov.info`, and it measured 88.15%. Before, the CI job printed an error annotation for the missing report and passed.
+
+### Changed
+
+- CI is one call to the shared `pipeline.yml` of slipalison/github-workflows, instead of `versao`, `qualidade` and `lancar` called one by one. Job names gain the `esteira / ` prefix. v0.1.0 was released before this change, without the security scans, Sonar or the gate.
+- `npm test` in `apps/ddc-tray` runs `test:unit` (the `node --test` suites, with coverage), then the Playwright suite.
+
+### Removed
+
+- The release rehearsal on `ensaio-release/*` branches. A draft release there would have to pass the Sonar gate, and SonarQube Cloud's free plan analyzes only `main` and pull requests. The packages of every pull request remain downloadable as run artifacts.
+
+## [0.1.0] - 2026-09-28
+
+### Added
+
 - Cargo workspace with two crates, `crates/ddc-core` and `crates/ddc-adapters`, sharing workspace lints: `unsafe_code` denied; clippy `unwrap_used`, `expect_used` and `panic` warned, with `unwrap`/`expect` allowed in tests.
 - `ddc-core` domain model: `VcpCode` with named MCCS codes, `VcpValue`, `MonitorId`, `MonitorInfo`, `Feature` (kind, access, risk, allowed values), `Confirm`, `FeatureReading` and `DdcError`.
 - Seed risk table (`risk_for_code`): brightness, contrast, color preset, RGB gains, volume, sharpness and OSD language are `Safe`; every other code, including unclassified ones, is `Dangerous`.

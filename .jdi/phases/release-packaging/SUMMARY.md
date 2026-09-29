@@ -65,3 +65,37 @@ fmt, clippy (`--all-features -D warnings`), 386 testes, cobertura 83,36%, `npm t
 
 ## Blocked tasks
 - nenhuma
+
+## Iteração 2 (fix do crítico na linha 8 + rodada de avisos)
+Os 9 `Verify:` dão `OK` em `bash`. A linha 8, que falhava contra o `3688e06`, agora passa contra o `d6d340a`.
+
+| | Valor |
+|---|---|
+| `HEAD_SHA` | `f6063d7` (depois dele, só `.jdi/`) |
+| `WORKFLOWS_SHA` | `d6d340a` (gw#14, CI 36444714782 verde) |
+| `RUN_ID` (PR) | 36445031966, success, `lancar` skipped |
+| `ENSAIO_RUN_ID` | 36447884185, branch `ensaio-release/v0.1.0-f6063d7-2` (apagada) |
+| `DRAFT_RELEASE_ID` | **398419349**, rascunho `v0.1.0`, 8 anexos; o 398335754 foi apagado pelo workflow |
+
+- O primeiro ensaio (36446037437) caiu no Windows por queda de rede (`os error 10054`) ao baixar o `nsis_tauri_utils.dll`. Nada foi criado. O ensaio foi repetido em branch nova, sem `rerun`.
+- gw:
+  - `e0f00bb` W-1: `tag_movel_major` com `rascunho` reprova, e o `if` do passo ganhou `!inputs.rascunho`.
+  - `5da296b` W-3: caminho absoluto em `changelog` e `caminho_tauri` reprova.
+  - `0efa403` W-2: o passo `Ferramentas do AppImage` baixa de URL fixa, com sha256, `AppRun`, `linuxdeploy`, `linuxdeploy-plugin-appimage` (`1-alpha-20250213-1`, no lugar do `continuous`) e o runtime type2 (`20251108`, via `LDAI_RUNTIME_FILE`). Duas travas: nenhum `Downloading` do bundler, e o AppImage começa com o runtime conferido.
+  - `d6d340a` W-4/W-5/W-6: textos.
+- Prova da W-2 no job 109005130135: 0 linhas `Downloading` (eram 3), 4 sha256 `OK`, 0 conexões do bundler e runtime `2fca8b443c92` conferido.
+- ddc-control:
+  - `aaac501` `artefatos: "pacotes-rust-*"`;
+  - `59d16ef` repin;
+  - `f6063d7` README e CHANGELOG (W-7/W-5);
+  - `23e14ec` evidência;
+  - `bd278c9` PLAN.
+- Gates locais verdes: 386 testes, cobertura 83,36%, 161 + 138 na UI, actionlint e pins. `Conferir as entradas` testado em 15 combinações e `Conferir componente` em 38.
+- W-8 (herdado, fora do diff) continua aberto.
+
+## Iteração 3 (sem código; reset das linhas 8 e 3 pelo orquestrador)
+Os 9 `Verify:` dão `OK` (exit 0) antes e depois do commit `22e1153`, que só mexe no PLAN. A evidência é a da iteração 2: `RUN_ID` 36445031966, ensaio 36447884185, rascunho 398419349, `HEAD_SHA` `f6063d7` e `WORKFLOWS_SHA` `d6d340a`.
+
+Controles negativos:
+- A linha 8 sai 1 contra o `3688e06`, contra o `d6d340a` com `${{ inputs.artefatos }}` injetado no `::error::` e contra o `d6d340a` sem `::error::`.
+- As checagens novas da linha 3 reprovam na `origin/main`, onde a versão ainda é `0.1.0`.
