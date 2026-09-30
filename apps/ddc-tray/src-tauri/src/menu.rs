@@ -3,17 +3,21 @@
 //! [`menu_entries`] and maps a clicked item back with
 //! [`MenuAction::from_id`].
 //!
-//! On Windows the menu only offers "Open panel" and "Quit". On Linux the
-//! StatusNotifierItem's menu also carries the brightness shortcuts
-//! (D-2026-09-27-tray-app-2): there the icon is a status item whose menu
-//! the desktop draws, next to its click and wheel.
+//! On Windows the menu offers "Open panel", "Start with system" and "Quit".
+//! On Linux the StatusNotifierItem's menu also carries the brightness
+//! shortcuts (D-2026-09-27-tray-app-2): there the icon is a status item
+//! whose menu the desktop draws, next to its click and wheel. "Start with
+//! system" is a checkable item, marked exactly when the OS has the startup
+//! entry (D-2026-09-30-input-switch-autostart-9, -10).
 
+use crate::autostart::Autostart;
 use crate::i18n::Locale;
 
 /// The brightness shortcuts, in percent of the monitor's maximum.
 pub const BRIGHTNESS_STEPS: [u8; 5] = [0, 25, 50, 75, 100];
 
 const OPEN_PANEL_ID: &str = "open-panel";
+const AUTOSTART_ID: &str = "autostart";
 const QUIT_ID: &str = "quit";
 const BRIGHTNESS_ID_PREFIX: &str = "brightness-";
 
@@ -45,6 +49,8 @@ pub enum MenuAction {
     OpenPanel,
     /// Set the brightness of the shortcut target to this percentage.
     Brightness(u8),
+    /// Turn "Start with system" on or off.
+    Autostart,
     /// End the app.
     Quit,
 }
@@ -55,6 +61,7 @@ impl MenuAction {
         match self {
             Self::OpenPanel => OPEN_PANEL_ID.to_owned(),
             Self::Brightness(percent) => format!("{BRIGHTNESS_ID_PREFIX}{percent}"),
+            Self::Autostart => AUTOSTART_ID.to_owned(),
             Self::Quit => QUIT_ID.to_owned(),
         }
     }
@@ -62,7 +69,7 @@ impl MenuAction {
     /// The action of the menu item `id`; `None` for an id the tray menu
     /// never shows, a brightness off the [`BRIGHTNESS_STEPS`] included.
     pub fn from_id(id: &str) -> Option<Self> {
-        [Self::OpenPanel, Self::Quit]
+        [Self::OpenPanel, Self::Autostart, Self::Quit]
             .into_iter()
             .chain(BRIGHTNESS_STEPS.map(Self::Brightness))
             .find(|action| action.id() == id)
@@ -79,12 +86,23 @@ pub enum MenuEntry {
         /// What it reads, in the menu's locale.
         label: String,
     },
+    /// An item the user can pick, with a mark that says whether what it
+    /// controls is on.
+    Check {
+        /// What picking it does.
+        action: MenuAction,
+        /// What it reads, in the menu's locale.
+        label: String,
+        /// Whether the mark is on.
+        checked: bool,
+    },
     /// A divider between groups of items.
     Separator,
 }
 
-/// The tray menu, top to bottom, for `platform` in `locale`.
-pub fn menu_entries(locale: Locale, platform: Platform) -> Vec<MenuEntry> {
+/// The tray menu, top to bottom, for `platform` in `locale`; the mark of
+/// "Start with system" follows `autostart`, the OS's own state.
+pub fn menu_entries(locale: Locale, platform: Platform, autostart: Autostart) -> Vec<MenuEntry> {
     let labels = locale.labels();
     let mut entries = vec![item(MenuAction::OpenPanel, labels.open_panel)];
     if platform == Platform::Linux {
@@ -97,6 +115,11 @@ pub fn menu_entries(locale: Locale, platform: Platform) -> Vec<MenuEntry> {
         }));
     }
     entries.push(MenuEntry::Separator);
+    entries.push(MenuEntry::Check {
+        action: MenuAction::Autostart,
+        label: labels.autostart.to_owned(),
+        checked: autostart == Autostart::Enabled,
+    });
     entries.push(item(MenuAction::Quit, labels.quit));
     entries
 }
@@ -111,6 +134,7 @@ fn item(action: MenuAction, label: impl Into<String>) -> MenuEntry {
 #[cfg(test)]
 mod tests {
     use super::{BRIGHTNESS_STEPS, MenuAction, MenuEntry, Platform, menu_entries};
+    use crate::autostart::Autostart;
     use crate::i18n::Locale;
 
     fn item(action: MenuAction, label: &str) -> MenuEntry {
@@ -120,11 +144,19 @@ mod tests {
         }
     }
 
+    fn autostart_item(label: &str, checked: bool) -> MenuEntry {
+        MenuEntry::Check {
+            action: MenuAction::Autostart,
+            label: label.to_owned(),
+            checked,
+        }
+    }
+
     fn actions(entries: &[MenuEntry]) -> Vec<MenuAction> {
         entries
             .iter()
             .filter_map(|entry| match entry {
-                MenuEntry::Item { action, .. } => Some(*action),
+                MenuEntry::Item { action, .. } | MenuEntry::Check { action, .. } => Some(*action),
                 MenuEntry::Separator => None,
             })
             .collect()
@@ -136,12 +168,13 @@ mod tests {
     }
 
     #[test]
-    fn windows_offers_open_panel_and_quit() {
+    fn windows_offers_open_panel_start_with_system_and_quit() {
         assert_eq!(
-            menu_entries(Locale::En, Platform::Windows),
+            menu_entries(Locale::En, Platform::Windows, Autostart::Disabled),
             vec![
                 item(MenuAction::OpenPanel, "Open panel"),
                 MenuEntry::Separator,
+                autostart_item("Start with system", false),
                 item(MenuAction::Quit, "Quit"),
             ]
         );
@@ -150,19 +183,20 @@ mod tests {
     #[test]
     fn windows_speaks_brazilian_portuguese() {
         assert_eq!(
-            menu_entries(Locale::PtBr, Platform::Windows),
+            menu_entries(Locale::PtBr, Platform::Windows, Autostart::Disabled),
             vec![
                 item(MenuAction::OpenPanel, "Abrir painel"),
                 MenuEntry::Separator,
+                autostart_item("Iniciar com o sistema", false),
                 item(MenuAction::Quit, "Sair"),
             ]
         );
     }
 
     #[test]
-    fn linux_adds_the_brightness_shortcuts_between_open_and_quit() {
+    fn linux_adds_the_brightness_shortcuts_between_open_and_start_with_system() {
         assert_eq!(
-            menu_entries(Locale::En, Platform::Linux),
+            menu_entries(Locale::En, Platform::Linux, Autostart::Disabled),
             vec![
                 item(MenuAction::OpenPanel, "Open panel"),
                 MenuEntry::Separator,
@@ -172,6 +206,7 @@ mod tests {
                 item(MenuAction::Brightness(75), "Brightness 75%"),
                 item(MenuAction::Brightness(100), "Brightness 100%"),
                 MenuEntry::Separator,
+                autostart_item("Start with system", false),
                 item(MenuAction::Quit, "Quit"),
             ]
         );
@@ -180,7 +215,7 @@ mod tests {
     #[test]
     fn linux_speaks_brazilian_portuguese() {
         assert_eq!(
-            menu_entries(Locale::PtBr, Platform::Linux),
+            menu_entries(Locale::PtBr, Platform::Linux, Autostart::Disabled),
             vec![
                 item(MenuAction::OpenPanel, "Abrir painel"),
                 MenuEntry::Separator,
@@ -190,9 +225,31 @@ mod tests {
                 item(MenuAction::Brightness(75), "Brilho 75%"),
                 item(MenuAction::Brightness(100), "Brilho 100%"),
                 MenuEntry::Separator,
+                autostart_item("Iniciar com o sistema", false),
                 item(MenuAction::Quit, "Sair"),
             ]
         );
+    }
+
+    #[test]
+    fn the_autostart_item_is_checked_exactly_when_the_os_entry_exists_on_both_platforms() {
+        for platform in [Platform::Windows, Platform::Linux] {
+            for (state, checked) in [(Autostart::Enabled, true), (Autostart::Disabled, false)] {
+                let marks: Vec<bool> = menu_entries(Locale::En, platform, state)
+                    .into_iter()
+                    .filter_map(|entry| match entry {
+                        MenuEntry::Check {
+                            action: MenuAction::Autostart,
+                            checked,
+                            ..
+                        } => Some(checked),
+                        _ => None,
+                    })
+                    .collect();
+
+                assert_eq!(marks, [checked], "{platform:?} {state:?}");
+            }
+        }
     }
 
     #[test]
@@ -200,13 +257,22 @@ mod tests {
         assert_eq!(MenuAction::OpenPanel.id(), "open-panel");
         assert_eq!(MenuAction::Brightness(0).id(), "brightness-0");
         assert_eq!(MenuAction::Brightness(75).id(), "brightness-75");
+        assert_eq!(MenuAction::Autostart.id(), "autostart");
         assert_eq!(MenuAction::Quit.id(), "quit");
+    }
+
+    #[test]
+    fn the_autostart_action_maps_back_from_its_id() {
+        assert_eq!(
+            MenuAction::from_id(&MenuAction::Autostart.id()),
+            Some(MenuAction::Autostart)
+        );
     }
 
     #[test]
     fn every_menu_item_maps_back_from_its_id_on_both_platforms() {
         for platform in [Platform::Windows, Platform::Linux] {
-            for action in actions(&menu_entries(Locale::En, platform)) {
+            for action in actions(&menu_entries(Locale::En, platform, Autostart::Enabled)) {
                 assert_eq!(MenuAction::from_id(&action.id()), Some(action));
             }
         }
@@ -214,13 +280,17 @@ mod tests {
 
     #[test]
     fn the_ids_of_the_menu_are_unique() {
-        let mut ids: Vec<String> = actions(&menu_entries(Locale::En, Platform::Linux))
-            .into_iter()
-            .map(MenuAction::id)
-            .collect();
+        let mut ids: Vec<String> = actions(&menu_entries(
+            Locale::En,
+            Platform::Linux,
+            Autostart::Enabled,
+        ))
+        .into_iter()
+        .map(MenuAction::id)
+        .collect();
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), 7);
+        assert_eq!(ids.len(), 8);
     }
 
     #[test]
@@ -229,6 +299,8 @@ mod tests {
             "",
             "open",
             "Quit",
+            "Autostart",
+            "autostart-",
             "brightness-",
             "brightness-10",
             "brightness-101",

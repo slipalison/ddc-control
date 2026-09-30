@@ -13,7 +13,8 @@
 //!
 //! What both share lives here: the popup toggle and the menu's actions. A
 //! brightness shortcut sets the monitor the popup last selected, off the
-//! main thread.
+//! main thread. "Start with system" flips the OS's own startup entry, read
+//! afresh each time the menu is mounted (D-2026-09-30-input-switch-autostart-9).
 
 #[cfg(target_os = "linux")]
 mod kwin_placement;
@@ -33,6 +34,7 @@ use ddc_core::domain::MonitorId;
 use ddc_core::ports::MonitorControl;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use crate::autostart::{self, Autostart, SharedEntry};
 use crate::commands::{AppState, on_blocking_thread};
 use crate::dto::{PANEL_CHANGED, UiError};
 use crate::i18n::Locale;
@@ -93,8 +95,40 @@ fn run_menu_action<R: Runtime>(app: &AppHandle<R>, action: MenuAction) {
     match action {
         MenuAction::OpenPanel => on_main_thread(app, open_panel),
         MenuAction::Brightness(percent) => apply_brightness(app, percent),
+        MenuAction::Autostart => toggle_autostart(app),
         MenuAction::Quit => app.exit(0),
     }
+}
+
+/// The OS state of "Start with system", for a menu being mounted. It only
+/// reads; a state the OS will not tell reads as off, and is reported.
+fn autostart_state<R: Runtime>(app: &AppHandle<R>) -> Autostart {
+    match app.try_state::<SharedEntry>() {
+        Some(entry) => autostart::state_or_report(&**entry, report),
+        None => {
+            report("read the start-with-system entry", &"it is not set up");
+            Autostart::Disabled
+        }
+    }
+}
+
+/// Flips "Start with system" off the menu's thread: the entry is a file or
+/// a registry value, and the menu must not wait for it.
+fn toggle_autostart<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || flip_autostart(&app));
+}
+
+/// Flips the OS entry, then has the menu show the state the OS is in: a
+/// refused flip is reported and the item goes back to what is true.
+fn flip_autostart<R: Runtime>(app: &AppHandle<R>) {
+    match app.try_state::<SharedEntry>() {
+        Some(entry) => {
+            autostart::toggle_or_report(&**entry, report);
+        }
+        None => report("change the start-with-system entry", &"it is not set up"),
+    }
+    platform::autostart_changed(app);
 }
 
 /// Runs `task` on the main thread, where the popup's window lives and its
@@ -172,10 +206,16 @@ fn report_ui(action: &str, error: &UiError) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use ddc_adapters::{BackendCall, InMemoryMonitorBackend};
     use ddc_core::domain::{DdcError, MonitorId, VcpCode};
+    use tauri::test::{MockRuntime, mock_app};
+    use tauri::{App, Manager};
 
-    use super::{APP_NAME, TRAY_ID, brightness_shortcut};
+    use super::{APP_NAME, TRAY_ID, autostart_state, brightness_shortcut, flip_autostart};
+    use crate::autostart::fake::FakeEntry;
+    use crate::autostart::{Autostart, AutostartEntry, SharedEntry};
     use crate::dto::{ErrorKind, UiError};
     use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
     use crate::panel::BrightnessChange;
@@ -299,5 +339,54 @@ mod tests {
             })
         );
         assert_eq!(writes(&backend), []);
+    }
+
+    /// A mock app holding `entry` as the tray's "Start with system" entry.
+    fn app_with(entry: FakeEntry) -> (App<MockRuntime>, Arc<FakeEntry>) {
+        let app = mock_app();
+        let entry = Arc::new(entry);
+        app.manage::<SharedEntry>(entry.clone());
+        (app, entry)
+    }
+
+    #[test]
+    fn a_click_on_start_with_system_flips_the_os_entry_each_time() {
+        let (app, entry) = app_with(FakeEntry::new(Autostart::Disabled));
+
+        flip_autostart(app.handle());
+        assert_eq!(entry.held(), Autostart::Enabled);
+
+        flip_autostart(app.handle());
+        assert_eq!(entry.held(), Autostart::Disabled);
+    }
+
+    #[test]
+    fn a_refused_flip_leaves_the_entry_as_it_was() {
+        for before in [Autostart::Disabled, Autostart::Enabled] {
+            let (app, entry) = app_with(FakeEntry::refusing(before, "read-only home"));
+
+            flip_autostart(app.handle());
+
+            assert_eq!(entry.held(), before);
+            assert_eq!(autostart_state(app.handle()), before);
+        }
+    }
+
+    #[test]
+    fn the_menu_reads_the_os_state_each_time_it_is_mounted() {
+        let (app, entry) = app_with(FakeEntry::new(Autostart::Disabled));
+        assert_eq!(autostart_state(app.handle()), Autostart::Disabled);
+
+        entry.set(Autostart::Enabled).unwrap();
+
+        assert_eq!(autostart_state(app.handle()), Autostart::Enabled);
+    }
+
+    #[test]
+    fn a_menu_mounted_without_an_entry_reads_off_and_a_click_does_nothing() {
+        let app = mock_app();
+
+        assert_eq!(autostart_state(app.handle()), Autostart::Disabled);
+        flip_autostart(app.handle());
     }
 }

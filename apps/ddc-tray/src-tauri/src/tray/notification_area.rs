@@ -2,19 +2,27 @@
 //! Tauri's tray icon, whose left click toggles the popup anchored above it
 //! by the positioner and whose right click opens the menu.
 
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Runtime, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 use tauri_plugin_positioner::{Position, WindowExt};
 
-use super::{TRAY_ID, run_menu_action, toggle_popup};
+use super::{TRAY_ID, autostart_state, run_menu_action, toggle_popup};
+use crate::autostart::Autostart;
 use crate::i18n::Locale;
 use crate::menu::{MenuAction, MenuEntry, Platform, menu_entries};
 use crate::report;
 
+/// The menu's "Start with system" item, kept to show the OS state on it.
+struct AutostartCheck<R: Runtime>(CheckMenuItem<R>);
+
 /// Puts Tauri's tray icon in the notification area.
 pub(super) fn install<R: Runtime>(app: &AppHandle<R>, locale: Locale) -> tauri::Result<()> {
-    let menu = native_menu(app, &menu_entries(locale, Platform::Windows))?;
+    let entries = menu_entries(locale, Platform::Windows, autostart_state(app));
+    let (menu, autostart) = native_menu(app, &entries)?;
+    if let Some(check) = autostart {
+        app.manage(AutostartCheck(check));
+    }
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(tauri::include_image!("icons/tray.png"))
         .tooltip(locale.labels().tooltip)
@@ -31,6 +39,18 @@ pub(super) fn uninstall<R: Runtime>(_app: &AppHandle<R>) {}
 
 /// The tooltip here does not name the monitor: nothing to update.
 pub(super) fn selection_changed<R: Runtime>(_app: &AppHandle<R>) {}
+
+/// Marks "Start with system" as the OS has it: after a click, which Windows
+/// already flipped whether or not the OS obeyed, and before the menu opens.
+pub(super) fn autostart_changed<R: Runtime>(app: &AppHandle<R>) {
+    let Some(check) = app.try_state::<AutostartCheck<R>>() else {
+        return;
+    };
+    let checked = autostart_state(app) == Autostart::Enabled;
+    if let Err(error) = check.0.set_checked(checked) {
+        report("mark the start-with-system item", &error);
+    }
+}
 
 /// Places the popup above the icon, kept on the icon's screen.
 pub(super) fn place_popup<R: Runtime>(popup: &WebviewWindow<R>) {
@@ -52,8 +72,26 @@ fn is_left_click(event: &TrayIconEvent) -> bool {
     )
 }
 
-fn native_menu<R: Runtime>(app: &AppHandle<R>, entries: &[MenuEntry]) -> tauri::Result<Menu<R>> {
+/// Whether `event` is the end of a right click on the icon — the gesture
+/// that opens the menu.
+fn is_right_click(event: &TrayIconEvent) -> bool {
+    matches!(
+        event,
+        TrayIconEvent::Click {
+            button: MouseButton::Right,
+            button_state: MouseButtonState::Up,
+            ..
+        }
+    )
+}
+
+/// The native menu, and its "Start with system" item when `entries` has one.
+fn native_menu<R: Runtime>(
+    app: &AppHandle<R>,
+    entries: &[MenuEntry],
+) -> tauri::Result<(Menu<R>, Option<CheckMenuItem<R>>)> {
     let menu = Menu::new(app)?;
+    let mut autostart = None;
     for entry in entries {
         match entry {
             MenuEntry::Item { action, label } => {
@@ -65,10 +103,20 @@ fn native_menu<R: Runtime>(app: &AppHandle<R>, entries: &[MenuEntry]) -> tauri::
                     None::<&str>,
                 )?)?;
             }
+            MenuEntry::Check {
+                action,
+                label,
+                checked,
+            } => {
+                let item =
+                    CheckMenuItem::with_id(app, action.id(), label, true, *checked, None::<&str>)?;
+                menu.append(&item)?;
+                autostart = Some(item);
+            }
             MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
         }
     }
-    Ok(menu)
+    Ok((menu, autostart))
 }
 
 fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
@@ -82,6 +130,9 @@ fn on_tray_icon_event<R: Runtime>(tray: &TrayIcon<R>, event: TrayIconEvent) {
     tauri_plugin_positioner::on_tray_event(app, &event);
     if is_left_click(&event) {
         toggle_popup(app);
+    } else if is_right_click(&event) {
+        // The menu opens right after this event: show it the OS's state.
+        autostart_changed(app);
     }
 }
 
@@ -90,7 +141,7 @@ mod tests {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent, TrayIconId};
     use tauri::{PhysicalPosition, Rect};
 
-    use super::{TRAY_ID, is_left_click};
+    use super::{TRAY_ID, is_left_click, is_right_click};
 
     fn click(button: MouseButton, button_state: MouseButtonState) -> TrayIconEvent {
         TrayIconEvent::Click {
@@ -120,6 +171,24 @@ mod tests {
         ] {
             assert!(
                 !is_left_click(&click(button, state)),
+                "{button:?} {state:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_release_of_a_right_click_opens_the_menu() {
+        assert!(is_right_click(&click(
+            MouseButton::Right,
+            MouseButtonState::Up
+        )));
+        for (button, state) in [
+            (MouseButton::Right, MouseButtonState::Down),
+            (MouseButton::Left, MouseButtonState::Up),
+            (MouseButton::Middle, MouseButtonState::Up),
+        ] {
+            assert!(
+                !is_right_click(&click(button, state)),
                 "{button:?} {state:?}"
             );
         }

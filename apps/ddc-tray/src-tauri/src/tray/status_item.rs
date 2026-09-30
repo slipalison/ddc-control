@@ -10,13 +10,14 @@
 
 use std::sync::Arc;
 
-use ksni::menu::StandardItem;
+use ksni::menu::{CheckmarkItem, StandardItem};
 use ksni::{Category, Handle, Icon, MenuItem, Orientation, ToolTip, TrayMethods};
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 use super::kwin_placement::{self, LoadedScript};
 use super::{
-    APP_NAME, TRAY_ID, brightness_changed, on_main_thread, report_ui, run_menu_action, toggle_popup,
+    APP_NAME, TRAY_ID, autostart_state, brightness_changed, on_main_thread, report_ui,
+    run_menu_action, toggle_popup,
 };
 use crate::commands::{AppState, on_blocking_thread};
 use crate::i18n::Locale;
@@ -74,6 +75,16 @@ pub(super) fn uninstall<R: Runtime>(app: &AppHandle<R>) {
 
 /// Asks the host to read the tooltip again: it names the monitor selected.
 pub(super) fn selection_changed<R: Runtime>(app: &AppHandle<R>) {
+    refresh(app);
+}
+
+/// Asks the host to mount the menu again, which reads the OS entry of
+/// "Start with system" afresh.
+pub(super) fn autostart_changed<R: Runtime>(app: &AppHandle<R>) {
+    refresh(app);
+}
+
+fn refresh<R: Runtime>(app: &AppHandle<R>) {
     let Some(item) = app.try_state::<ItemHandle<R>>() else {
         return;
     };
@@ -129,11 +140,16 @@ impl<R: Runtime> ksni::Tray for StatusItem<R> {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        menu_entries(self.locale, Platform::Linux)
+        menu_entries(self.locale, Platform::Linux, autostart_state(&self.app))
             .into_iter()
             .map(menu_item)
             .collect()
     }
+
+    // Overridden so that ksni mounts the menu again before the host shows it:
+    // the mark of "Start with system" then follows the OS entry even when it
+    // changed outside the app.
+    fn menu_about_to_show(&mut self) {}
 }
 
 fn menu_item<R: Runtime>(entry: MenuEntry) -> MenuItem<StatusItem<R>> {
@@ -142,6 +158,17 @@ fn menu_item<R: Runtime>(entry: MenuEntry) -> MenuItem<StatusItem<R>> {
             label: menu_label(&label),
             activate: Box::new(move |item: &mut StatusItem<R>| run_menu_action(&item.app, action)),
             ..StandardItem::default()
+        }
+        .into(),
+        MenuEntry::Check {
+            action,
+            label,
+            checked,
+        } => CheckmarkItem {
+            label: menu_label(&label),
+            checked,
+            activate: Box::new(move |item: &mut StatusItem<R>| run_menu_action(&item.app, action)),
+            ..CheckmarkItem::default()
         }
         .into(),
         MenuEntry::Separator => MenuItem::Separator,
@@ -205,7 +232,42 @@ fn argb_from_rgba(rgba: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{argb_from_rgba, menu_label, tray_icon};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use ksni::{MenuItem, Tray};
+    use tauri::test::{MockRuntime, mock_app};
+    use tauri::{App, Manager};
+
+    use super::{StatusItem, argb_from_rgba, menu_label, tray_icon};
+    use crate::autostart::fake::FakeEntry;
+    use crate::autostart::{Autostart, AutostartEntry, SharedEntry};
+    use crate::i18n::Locale;
+    use crate::scroll::WheelQueue;
+
+    /// The item over a mock app whose "Start with system" entry is `entry`.
+    fn item_over(entry: &Arc<FakeEntry>) -> (App<MockRuntime>, StatusItem<MockRuntime>) {
+        let app = mock_app();
+        app.manage::<SharedEntry>(entry.clone());
+        let item = StatusItem {
+            app: app.handle().clone(),
+            locale: Locale::En,
+            icon: tray_icon(),
+            wheel: Arc::new(WheelQueue::new()),
+        };
+        (app, item)
+    }
+
+    /// The checkmark items of the menu as mounted now: label and mark.
+    fn checkmarks(item: &StatusItem<MockRuntime>) -> Vec<(String, bool)> {
+        item.menu()
+            .into_iter()
+            .filter_map(|entry| match entry {
+                MenuItem::Checkmark(check) => Some((check.label, check.checked)),
+                _ => None,
+            })
+            .collect()
+    }
 
     #[test]
     fn a_pixmap_moves_the_alpha_of_each_pixel_first() {
@@ -231,5 +293,39 @@ mod tests {
     fn a_menu_label_keeps_its_underscores_visible() {
         assert_eq!(menu_label("Brilho 25%"), "Brilho 25%");
         assert_eq!(menu_label("HDMI_1"), "HDMI__1");
+    }
+
+    #[test]
+    fn the_menu_marks_start_with_system_by_the_os_entry_each_time_it_is_mounted() {
+        let entry = Arc::new(FakeEntry::new(Autostart::Disabled));
+        let (_app, item) = item_over(&entry);
+        assert_eq!(checkmarks(&item), [("Start with system".to_owned(), false)]);
+
+        entry.set(Autostart::Enabled).unwrap();
+
+        assert_eq!(checkmarks(&item), [("Start with system".to_owned(), true)]);
+    }
+
+    #[test]
+    fn a_click_on_the_start_with_system_item_flips_the_os_entry() {
+        let entry = Arc::new(FakeEntry::new(Autostart::Disabled));
+        let (_app, mut item) = item_over(&entry);
+        let check = item
+            .menu()
+            .into_iter()
+            .find_map(|entry| match entry {
+                MenuItem::Checkmark(check) => Some(check),
+                _ => None,
+            })
+            .unwrap();
+
+        (check.activate)(&mut item);
+
+        // The flip runs on a blocking thread, off the click.
+        let give_up = Instant::now() + Duration::from_secs(5);
+        while entry.held() != Autostart::Enabled && Instant::now() < give_up {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(entry.held(), Autostart::Enabled);
     }
 }

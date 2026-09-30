@@ -7,6 +7,7 @@
 //! written only when the user toggles it in the tray menu.
 
 use std::fmt;
+use std::sync::Arc;
 
 use tauri::{AppHandle, Builder, Manager, Runtime};
 use tauri_plugin_autostart::AutoLaunchManager;
@@ -68,6 +69,10 @@ pub trait AutostartEntry: Send + Sync {
     /// The OS's refusal to write or remove the entry.
     fn set(&self, state: Autostart) -> Result<(), AutostartError>;
 }
+
+/// The entry the tray acts on, held as Tauri state from the composition
+/// root on.
+pub type SharedEntry = Arc<dyn AutostartEntry>;
 
 /// Flips the entry and answers the state the OS reports afterwards. The
 /// caller reports the error: a failed flip leaves the entry as it was.
@@ -162,40 +167,36 @@ pub fn register<R: Runtime>(builder: Builder<R>) -> Builder<R> {
     builder.plugin(tauri_plugin_autostart::Builder::new().build())
 }
 
+/// An entry held in memory, as the OS would hold it: what the tests of the
+/// modules that act on the entry use.
 #[cfg(test)]
-mod tests {
-    use std::cell::RefCell;
-    use std::fmt::Display;
+pub(crate) mod fake {
     use std::sync::Mutex;
 
-    use tauri::Manager;
-    use tauri::test::{mock_builder, mock_context, noop_assets};
-    use tauri_plugin_autostart::AutoLaunchManager;
+    use super::{Autostart, AutostartEntry, AutostartError};
 
-    use super::{Autostart, AutostartEntry, AutostartError, register, toggle, toggle_or_report};
-
-    /// An entry held in memory, as the OS would hold it.
-    struct FakeEntry {
+    pub(crate) struct FakeEntry {
         state: Mutex<Autostart>,
         refuses: Option<&'static str>,
     }
 
     impl FakeEntry {
-        fn new(state: Autostart) -> Self {
+        pub(crate) fn new(state: Autostart) -> Self {
             Self {
                 state: Mutex::new(state),
                 refuses: None,
             }
         }
 
-        fn refusing(state: Autostart, reason: &'static str) -> Self {
+        /// An entry whose writes the OS refuses with `reason`.
+        pub(crate) fn refusing(state: Autostart, reason: &'static str) -> Self {
             Self {
                 refuses: Some(reason),
                 ..Self::new(state)
             }
         }
 
-        fn held(&self) -> Autostart {
+        pub(crate) fn held(&self) -> Autostart {
             *self.state.lock().unwrap()
         }
     }
@@ -213,6 +214,19 @@ mod tests {
             Ok(())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::fmt::Display;
+
+    use tauri::Manager;
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    use tauri_plugin_autostart::AutoLaunchManager;
+
+    use super::fake::FakeEntry;
+    use super::{Autostart, AutostartError, register, toggle, toggle_or_report};
 
     #[test]
     fn toggle_enables_a_disabled_entry() {
