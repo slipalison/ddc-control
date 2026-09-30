@@ -94,6 +94,19 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Commit:** `test(input-switch-autostart): desktop entry in a sandboxed HOME`
 - **Status:** completed
 
+#### T-8: smoke do tray numa sessão D-Bus privada (DoD linha 9, D-13)
+- **Specialist:** jdi-doer-ddc-control
+- **Files modified:** `apps/ddc-tray/scripts/smoke-sni-private.sh` (novo), `apps/ddc-tray/scripts/fake-sni-watcher.py` (novo)
+- **Acceptance:**
+  - `smoke-sni-private.sh <ddc-tray>` sobe `dbus-run-session` com o `fake-sni-watcher.py` (Gio, `org.kde.StatusNotifierWatcher`: `RegisterStatusNotifierItem`/`RegisterStatusNotifierHost`, `RegisteredStatusNotifierItems`, `IsStatusNotifierHostRegistered`, `ProtocolVersion`, sinal `StatusNotifierItemRegistered`), espera o watcher responder e roda `smoke-sni.sh --fake --activate <ddc-tray>` SEM editar esse script; imprime a linha exata `smoke-sni-private: private session bus, stand-in StatusNotifierWatcher` antes de rodar; mata o watcher ao sair; `set -euo pipefail`; sai ≠ 0 com mensagem clara se `dbus-run-session`, `busctl`, `python3` ou `python3-gobject` (`gi`) faltar, ou se o watcher não responder em 5 s.
+  - A saída final do smoke é `smoke-sni: OK — PID <n> registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked`, EXECUTADA com um `ddc-tray` do usuário rodando na sessão real (prova de que a linha não depende do estado ambiente) e com `DBUS_SESSION_BUS_ADDRESS` do usuário diferente do privado.
+  - Prova negativa registrada no SUMMARY: com o binário trocado por um que sai em 1 s (`/bin/true`), o wrapper sai ≠ 0 e NÃO imprime a linha `smoke-sni: OK`.
+  - Nenhuma linha nova cita `/dev/i2c`, `DdcHiMonitorBackend` ou escreve em monitor real (`--fake`).
+- **Dependencies:** none
+- **Test:** DoD Verify linha 9
+- **Commit:** `test(input-switch-autostart): smoke the tray on a private bus`
+- **Status:** pending
+
 ### Wave 3
 
 #### T-7: README, CHANGELOG e nota de validação de hardware
@@ -109,7 +122,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Status:** completed
 
 ## Execution
-- Total tasks: 7 · Waves: 3 · Estimated parallel speedup: ~2,3x (o doer pode rodar T-1..T-7 em sequência)
+- Total tasks: 8 · Waves: 3 · Estimated parallel speedup: ~2,3x (o doer pode rodar T-1..T-7 em sequência)
 - DoD → task: linhas 1–2 → T-1; 3 → T-2 (T-4 mantém verde); 4 → T-4; 5 e 9 → T-5; 6 → T-3; 7 → T-6; 8 → T-1, T-3, T-6.
 - Deferred to PR review (hardware, logout/login, Windows Inicialização, redação) não vira task.
 
