@@ -30,7 +30,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** none
 - **Test:** `cargo test -p ddc-adapters --locked --lib -- ddc_hi_backend::worker::tests` + DoD Verify linhas 1 e 2
 - **Commit:** `fix(input-switch-autostart): settle input writes before reading back`
-- **Status:** pending
+- **Status:** completed
 
 #### T-2: avisos puros no view-model + i18n (teste primeiro)
 - **Specialist:** jdi-doer-ddc-control
@@ -42,7 +42,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** none
 - **Test:** `cd apps/ddc-tray && npm run test:unit` + DoD Verify linha 3
 - **Commit:** `fix(input-switch-autostart): pure notices for a kept or unread input`
-- **Status:** pending
+- **Status:** completed
 
 #### T-3: módulo `autostart` sobre o plugin + registro no composition root
 - **Specialist:** jdi-doer-ddc-control
@@ -54,7 +54,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** none
 - **Test:** `cargo test -p ddc-tray --locked --lib -- autostart::` + DoD Verify linhas 6 e 8
 - **Commit:** `feat(input-switch-autostart): autostart entry over the Tauri plugin`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2 (parallel-eligible)
 
@@ -68,7 +68,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-2
 - **Test:** iterar `npx playwright test tests/e2e/input-notice.spec.mjs tests/e2e/pseudo-locale.spec.mjs`; suíte inteira ao fechar + DoD Verify linhas 3 e 4
 - **Commit:** `fix(input-switch-autostart): show the read-back and input notices`
-- **Status:** pending
+- **Status:** completed
 
 #### T-5: item "Start with system" nos menus Linux e Windows
 - **Specialist:** jdi-doer-ddc-control
@@ -80,7 +80,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-3
 - **Test:** `cargo test -p ddc-tray --locked --lib -- menu:: i18n::` + smoke SNI + DoD Verify linhas 5 e 9
 - **Commit:** `feat(input-switch-autostart): start-with-system item in the tray menu`
-- **Status:** pending
+- **Status:** completed
 
 #### T-6: teste de integração do `.desktop` em `HOME` sandboxed (processo filho)
 - **Specialist:** jdi-doer-ddc-control
@@ -92,7 +92,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-3
 - **Test:** `cargo test -p ddc-tray --locked --test autostart_entry -- --exact enabling_then_disabling_in_a_sandboxed_home_writes_then_removes_the_desktop_entry --nocapture` + DoD Verify linhas 7 e 8
 - **Commit:** `test(input-switch-autostart): desktop entry in a sandboxed HOME`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3
 
@@ -106,7 +106,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-1, T-4, T-5, T-6
 - **Test:** sem teste novo; gates do repo seguem verdes
 - **Commit:** `docs(input-switch-autostart): autostart and input settling notes`
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - Total tasks: 7 · Waves: 3 · Estimated parallel speedup: ~2,3x (o doer pode rodar T-1..T-7 em sequência)
