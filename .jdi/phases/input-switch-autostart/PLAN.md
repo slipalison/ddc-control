@@ -105,7 +105,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** none
 - **Test:** DoD Verify linha 9
 - **Commit:** `test(input-switch-autostart): smoke the tray on a private bus`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3
 
