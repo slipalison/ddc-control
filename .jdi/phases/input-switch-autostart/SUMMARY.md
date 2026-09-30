@@ -1,6 +1,6 @@
 # Phase 9: Input switch fix and autostart — Summary  (slug: input-switch-autostart)
 
-**Status:** complete (iteração 1 do loop: T-1..T-8)
+**Status:** complete (iteração 1 do loop: T-1..T-8; iteração 2: correção dos 5 achados do critic)
 **Tasks:** 8/8 complete, 0 blocked
 
 Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a escrita de `SUMMARY.md` por um subagente. As saídas brutas do doer ficaram em `/tmp/t/` (`t1-red.txt`, `t2-red.txt`, `t4-red.txt`, `smoke-evidence.txt`, `cov.txt`).
@@ -57,6 +57,35 @@ Ressalvas: `shellcheck` não está instalado (usou `bash -n` e `py_compile`); `r
 - Cross-check Linux de `ddc-core`, `ddc-adapters`, `ddc-cli`: verde.
 - Cobertura Rust real (`--fail-under-lines 80`, ignore `main|build.rs`): 85,25% de linhas, exit 0. UI com `node --test`: 165 passed, 88,48%.
 
+## Iteração 2 — correção dos achados do critic (D-14, D-15, D-16)
+Commits: `1077707` (D-14), `45829cf` (D-15), `3451169` (W-1 do reviewer). Mensagens no log da branch.
+
+**D-14 / linha 1 (`1077707`).** `RetryPolicies` ganhou `input_settle: InputSettle { step, window }` (`Default` 250 ms / 3 s; `without_backoff()` de teste = 5 ms / 100 ms); `write_budget(budgets, policies, code)` recebe a política; `WorkerClient` guarda as `policies` e `settle_input` lê passo e janela dela. Testes novos, nomes da linha 1: `input_write_through_the_client_outlives_the_vcp_budget` (cliente REAL, `budgets.vcp` 60 ms, janela 100 ms, monitor que mantém o valor antigo: `Ok(())` e `elapsed >= janela`) e `input_write_default_settle_is_250_ms_steps_inside_a_3_s_window` (fixa o `Default` por literais). O conjunto `input_write_*`/`writes_to_other_codes_*` agora tem 7 nomes.
+- Mutação 1 (`WorkerClient::write_vcp` com `self.budgets.vcp` no lugar de `write_budget(...)`), vermelha: `panicked at .../worker/tests.rs:1172:5: left: Err(Timeout) right: Ok(())` e, na corrida do cliente, `60.068921ms < 100ms` (`FAILED. 0 passed; 1 failed`). Revertida byte a byte.
+- Mutação 2 (`INPUT_SETTLE_WINDOW` = 1500 ms), vermelha: `input_write_default_settle_is_250_ms_steps_inside_a_3_s_window FAILED (left: 1.5s, right: 3s)`; os outros 6 seguem verdes. Revertida.
+- Estabilidade: 15 execuções da lib `ddc-adapters` (75 testes) e 10 do conjunto `input_write*` sob 8 processos de CPU, todas verdes; o teste do cliente leva ~0,10 s.
+
+**D-15 / linhas 5, 6, 9 (`45829cf`).** `scripts/private-bus.sh` (lib para `source`: config do bus sem ativação de serviços, `run_on_private_bus`, `start_watcher`/`stop_watcher`, `require_tools`); `smoke-sni-private.sh` passou a usá-la com saída idêntica à anterior (comparada com PID normalizado nos casos OK, `/bin/true`, sem argumento e binário inexistente; `smoke-sni.sh` com 0 linhas de diff); `scripts/sni-dbusmenu.py` (Gio: `item`, `state`, `click` sobre `com.canonical.dbusmenu`); `scripts/smoke-autostart-private.sh` (sessão privada + watcher de stand-in + `HOME` em tempdir com `.config` + `DDC_TRAY_FAKE=1`, `LC_ALL`/`LANG=en_US.UTF-8`). Saída real (PID 2749669), com o `ddc-tray` do usuário (PID 4884) rodando e intacto:
+```
+smoke-autostart-private: private session bus, stand-in StatusNotifierWatcher, sandboxed HOME
+smoke-autostart: started target/release/ddc-tray as PID 2749669 with DDC_TRAY_FAKE=1 and HOME=/tmp/smoke-autostart-home.wNHqRY
+smoke-autostart: org.kde.StatusNotifierWatcher lists org.kde.StatusNotifierItem-2749669-1/StatusNotifierItem, owned by PID 2749669
+smoke-autostart: 'Start with system' is an unmarked checkmark and the autostart directory is empty
+smoke-autostart: /tmp/smoke-autostart-home.wNHqRY/.config/autostart/DDC Control.desktop has Exec=/home/slipalison/repos/ddc-control/target/release/ddc-tray
+smoke-autostart: the first click wrote the entry and the item is marked
+smoke-autostart: the second click removed the entry and the item is unmarked
+smoke-autostart: OK — the Start with system item wrote the desktop entry on click and removed it on the next one
+```
+Seis execuções seguidas saíram 0, sem tempdir sobrando. Saídas ≠ 0: binário que sai cedo (`/bin/true`: `FAIL: the app exited before registering a tray item with status 0`), sem argumento, dois argumentos, binário inexistente, `python3-gobject` ausente (`FAIL: python3 cannot load the gi module with Gio 2.0`), `busctl` ausente.
+- Mutação (apagar `let builder = autostart::register(builder);` de `run()`, rebuild release), vermelha no smoke NOVO: `smoke-autostart-private: FAIL: exactly one .desktop entry after the first click did not happen within 5 s`, com `ddc-tray: could not read the start-with-system entry: the autostart plugin is not registered` e `could not change ...`, exit 1; o `smoke-sni-private.sh` com o mesmo binário mutado seguia dando `smoke-sni: OK` (confirma o diagnóstico do critic). `lib.rs` revertido, sem diff.
+- Linha 5 Linux: `status_item.rs` `checked,` -> `checked: false,` faz `tray::status_item::tests::the_menu_marks_start_with_system_by_the_os_entry_each_time_it_is_mounted` falhar (`left: [("Start with system", false)] right: [("Start with system", true)]`). Revertido. Os 6 nomes da linha 5 existem com esses caminhos em `--list`.
+- Ressalva do plugin: o arquivo gravado se chama `DDC Control.desktop` (com espaço) e o `Exec=` termina com um espaço (o `auto-launch` reserva lugar para args); o smoke compara o valor de `Exec=` sem o espaço final, exigindo uma única linha `Exec=`.
+
+**D-16 / linha 10.** Rodada literalmente: `OK`; os arquivos novos não trazem marcador.
+**W-1 (`3451169`).** O "128 of them" saiu do README (não verificável daqui: falta o linker mingw) e o README passou a citar os smokes em `scripts/`.
+
+**Verify do DoD (iteração 2), bash `--noprofile --norc`, `LC_ALL=C.UTF-8`:** linhas 1 a 10 `OK` (linha 9 ~5 s com release compilado; linha 4 21 s). Gates: fmt e clippy `-D warnings` limpos; cross-check Linux verde; `cargo test --workspace --locked` 412 passed, 0 failed, 9 ignored; `cargo llvm-cov` TOTAL linhas 85,30% (3640 linhas, 535 perdidas). Nenhum teste/script escreveu em monitor real; `~/.config/autostart` real com o mesmo hash antes e depois.
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
@@ -67,10 +96,11 @@ Ressalvas: `shellcheck` não está instalado (usou `bash -n` e `py_compile`); `r
 - `crates/ddc-adapters/src/ddc_hi_backend/worker.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs`
 - `apps/ddc-tray/src/{app.js,view-model.js}`, `apps/ddc-tray/src/i18n/{en,pt-BR}.js`, `apps/ddc-tray/tests/ui/view-model.test.mjs`
 - `apps/ddc-tray/tests/e2e/{input-notice,pseudo-locale}.spec.mjs`
-- `apps/ddc-tray/scripts/{smoke-sni-private.sh,fake-sni-watcher.py}`
+- `apps/ddc-tray/scripts/{smoke-sni-private.sh,fake-sni-watcher.py,private-bus.sh,smoke-autostart-private.sh,sni-dbusmenu.py}`
+- `crates/ddc-adapters/src/ddc_hi_backend/retry.rs`
 - `apps/ddc-tray/src-tauri/Cargo.toml`, `Cargo.lock`, `apps/ddc-tray/src-tauri/src/{autostart,lib,menu,i18n,tray}.rs`, `apps/ddc-tray/src-tauri/src/tray/{status_item,notification_area}.rs`, `apps/ddc-tray/src-tauri/tests/autostart_entry.rs`
 - `README.md`, `CHANGELOG.md`, `docs/hardware-validation.md`
 
 ## Tests
-- Total: 410 passed (workspace), 0 failed, 9 ignored; Playwright 152 passed; UI `node --test` 165 passed.
-- Coverage: 85,25% (Rust, `cargo llvm-cov` real), 88,48% (UI).
+- Total: 412 passed (workspace), 0 failed, 9 ignored; Playwright 152 passed; UI `node --test` 165 passed.
+- Coverage: 85,30% (Rust, `cargo llvm-cov` real), 88,48% (UI).
