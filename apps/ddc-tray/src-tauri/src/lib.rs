@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod autostart;
 pub mod commands;
 pub mod dto;
 pub mod fixture;
@@ -108,6 +109,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_popup(app);
         }));
+    let builder = autostart::register(builder);
     // Windows: tracks where the tray icon is, to anchor the popup to it.
     #[cfg(not(target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_positioner::init());

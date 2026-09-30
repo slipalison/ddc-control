@@ -26,6 +26,10 @@ ddc-adapters = { workspace = true }
 # build, which serves `devCsp` instead of `csp` (D-2026-09-27-tray-app-10).
 tauri = { version = "2.12.0", features = ["image-png", "custom-protocol"] }
 tauri-plugin-single-instance = "2.5.0"
+# "Start with system" in the tray menu: writes the OS's own startup entry
+# (`~/.config/autostart/*.desktop`, `HKCU\...\Run`). Called only from Rust,
+# behind no capability (D-2026-09-30-input-switch-autostart-8).
+tauri-plugin-autostart = "2.6.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sys-locale = "0.3.2"
@@ -52,6 +56,12 @@ zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 # so SIGTERM/SIGINT/SIGHUP quit the app as its Quit item does and the KWin
 # script is unloaded, and `time`, to bound that unload.
 tokio = { version = "1.53.1", default-features = false, features = ["signal", "time"] }
+
+# The mock runtime, to build the app with its plugins in tests. The Tauri CLI
+# reads only [dependencies] and [build-dependencies], so the packages stay as
+# they were (D-2026-09-28-release-packaging-4).
+[dev-dependencies]
+tauri = { version = "2.12.0", features = ["test"] }
 
 [lints]
 workspace = true
