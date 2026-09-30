@@ -18,6 +18,15 @@ const VCP_BACKOFF: Duration = Duration::from_millis(200);
 /// refusing capabilities reads for a few hundred milliseconds after one
 /// fails, so attempts 50 ms apart all failed (D-2026-09-26-cli-2).
 const CAPABILITIES_BACKOFF: Duration = Duration::from_millis(500);
+/// Pause between two reads of the input source while the monitor settles.
+// WHY 250 ms: a read is one DDC/CI transaction of 50-100 ms; polling slower
+// than the monitor switches would keep the popup waiting for nothing.
+pub(crate) const INPUT_SETTLE_STEP: Duration = Duration::from_millis(250);
+/// How long a write of the input source waits for the monitor to show it.
+// WHY 3 s: a monitor that switches to an input with no signal scans it and
+// goes back on its own within a couple of seconds; the wait has to outlast
+// that to report what the monitor kept (D-2026-09-30-input-switch-autostart-3).
+pub(crate) const INPUT_SETTLE_WINDOW: Duration = Duration::from_secs(3);
 
 /// Time as the worker sees it; virtual in tests, so retries are checked
 /// without sleeping.
@@ -58,19 +67,34 @@ pub(crate) struct RetryPolicy {
     pub(crate) backoff: Duration,
 }
 
-/// The retry policy of each kind of transaction.
+/// How a write of the input source waits for the monitor to show the new
+/// input. The client budgets the write by the `window` and the worker polls
+/// by both, so the two cannot disagree (D-2026-09-30-input-switch-autostart-14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InputSettle {
+    /// Pause between two reads of the input source.
+    pub(crate) step: Duration,
+    /// How long after the write the reads go on.
+    pub(crate) window: Duration,
+}
+
+/// The retry policy of each kind of transaction, and the settling of the
+/// input source that follows its write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RetryPolicies {
     /// Get and Set VCP Feature.
     pub(crate) vcp: RetryPolicy,
     /// Capabilities request.
     pub(crate) capabilities: RetryPolicy,
+    /// Reads of the input source after a write of it.
+    pub(crate) input_settle: InputSettle,
 }
 
 impl Default for RetryPolicies {
     /// Three attempts each: VCP ones 200 ms apart
     /// (D-2026-09-26-full-osd-control-9), capabilities ones 500 ms apart
-    /// (D-2026-09-26-cli-2).
+    /// (D-2026-09-26-cli-2). The input source is read every 250 ms for up to
+    /// 3 s after it is written (D-2026-09-30-input-switch-autostart-3).
     fn default() -> Self {
         Self {
             vcp: RetryPolicy {
@@ -81,14 +105,19 @@ impl Default for RetryPolicies {
                 max_attempts: MAX_ATTEMPTS,
                 backoff: CAPABILITIES_BACKOFF,
             },
+            input_settle: InputSettle {
+                step: INPUT_SETTLE_STEP,
+                window: INPUT_SETTLE_WINDOW,
+            },
         }
     }
 }
 
 #[cfg(test)]
 impl RetryPolicies {
-    /// The default attempts with no pause between them, so tests on the
-    /// system clock never sleep between attempts.
+    /// The default attempts with no pause between them, and the input
+    /// settling shrunk to 5 ms steps inside a 100 ms window, so tests on the
+    /// system clock never sleep long.
     pub(crate) fn without_backoff() -> Self {
         let instant = |policy: RetryPolicy| RetryPolicy {
             backoff: Duration::ZERO,
@@ -98,6 +127,10 @@ impl RetryPolicies {
         Self {
             vcp: instant(defaults.vcp),
             capabilities: instant(defaults.capabilities),
+            input_settle: InputSettle {
+                step: Duration::from_millis(5),
+                window: Duration::from_millis(100),
+            },
         }
     }
 }

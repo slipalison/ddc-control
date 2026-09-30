@@ -183,21 +183,15 @@ impl From<DdcError> for TransactError {
     }
 }
 
-/// Pause between two reads of the input source while the monitor settles.
-// WHY 250 ms: a read is one DDC/CI transaction of 50-100 ms; polling slower
-// than the monitor switches would keep the popup waiting for nothing.
-pub(crate) const INPUT_SETTLE_STEP: Duration = Duration::from_millis(250);
-/// How long a write of the input source waits for the monitor to show it.
-// WHY 3 s: a monitor that switches to an input with no signal scans it and
-// goes back on its own within a couple of seconds; the wait has to outlast
-// that to report what the monitor kept (D-2026-09-30-input-switch-autostart-3).
-pub(crate) const INPUT_SETTLE_WINDOW: Duration = Duration::from_secs(3);
-
 /// How long a caller waits for a write of `code`. A write of the input source
-/// waits out [`INPUT_SETTLE_WINDOW`] on top of the VCP budget.
-pub(crate) fn write_budget(budgets: &DdcHiBudgets, code: VcpCode) -> Duration {
+/// waits out the settle window of `policies` on top of the VCP budget.
+pub(crate) fn write_budget(
+    budgets: &DdcHiBudgets,
+    policies: &RetryPolicies,
+    code: VcpCode,
+) -> Duration {
     if code == VcpCode::INPUT_SOURCE {
-        budgets.vcp + INPUT_SETTLE_WINDOW
+        budgets.vcp + policies.input_settle.window
     } else {
         budgets.vcp
     }
@@ -314,19 +308,20 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
     }
 
     /// Waits for the monitor to show the input it was just told to switch
-    /// to: reads the input every [`INPUT_SETTLE_STEP`] until it reads
-    /// `value`, or until [`INPUT_SETTLE_WINDOW`] after the write, never past
+    /// to: reads the input every settle step of the policies until it reads
+    /// `value`, or until the settle window after the write, never past
     /// `deadline`. A monitor that keeps the old input is not an error: the
     /// write was accepted, and the caller's own read after it tells what the
     /// monitor kept (D-2026-09-30-input-switch-autostart-3).
     fn settle_input(&mut self, id: &MonitorId, value: u16, deadline: Instant) {
-        let end = (self.clock.now() + INPUT_SETTLE_WINDOW).min(deadline);
+        let settle = self.policies.input_settle;
+        let end = (self.clock.now() + settle.window).min(deadline);
         loop {
             let left = end.saturating_duration_since(self.clock.now());
             if left.is_zero() {
                 return;
             }
-            self.clock.sleep(left.min(INPUT_SETTLE_STEP));
+            self.clock.sleep(left.min(settle.step));
             if !self.input_unsettled(id, value) {
                 return;
             }
@@ -436,6 +431,7 @@ fn handle_of<'a, H>(displays: &'a mut [(MonitorId, H)], id: &MonitorId) -> Optio
 pub(crate) struct WorkerClient<S: DisplaySource> {
     jobs: Sender<Job<S>>,
     budgets: DdcHiBudgets,
+    policies: RetryPolicies,
     _worker: JoinHandle<()>,
 }
 
@@ -456,6 +452,7 @@ impl<S: DisplaySource> WorkerClient<S> {
         Ok(Self {
             jobs,
             budgets,
+            policies,
             _worker: worker,
         })
     }
@@ -535,7 +532,7 @@ impl<S: DisplaySource> MonitorBackend for WorkerClient<S> {
     }
 
     fn write_vcp(&self, id: &MonitorId, code: VcpCode, value: u16) -> Result<(), DdcError> {
-        let budget = write_budget(&self.budgets, code);
+        let budget = write_budget(&self.budgets, &self.policies, code);
         self.transact(id, budget, move |worker, id, deadline| {
             worker.write_vcp(id, code, value, deadline)
         })

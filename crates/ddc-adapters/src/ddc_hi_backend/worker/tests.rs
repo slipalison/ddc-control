@@ -8,10 +8,12 @@ use ddc_core::ports::MonitorBackend;
 
 use super::super::DdcHiBudgets;
 use super::super::identity::DisplayIdentity;
-use super::super::retry::{Clock, RetryPolicies, SystemClock};
+use super::super::retry::{
+    Clock, INPUT_SETTLE_STEP, INPUT_SETTLE_WINDOW, RetryPolicies, SystemClock,
+};
 use super::{
-    DdcHandle, DisplaySource, HandleError, INPUT_SETTLE_STEP, INPUT_SETTLE_WINDOW, TransactError,
-    VcpReply, Worker, WorkerClient, write_budget,
+    DdcHandle, DisplaySource, HandleError, TransactError, VcpReply, Worker, WorkerClient,
+    write_budget,
 };
 
 /// Holds a transaction until the test opens it.
@@ -1008,9 +1010,18 @@ fn write_then_read(
     (run, source.calls())
 }
 
+/// The budget the default client gives a write of the input source.
+fn input_write_budget() -> Duration {
+    write_budget(
+        &DdcHiBudgets::default(),
+        &RetryPolicies::default(),
+        VcpCode::INPUT_SOURCE,
+    )
+}
+
 /// [`write_then_read`] of an input, under the budget the client gives it.
 fn write_input(value: u16, script: impl IntoIterator<Item = Scripted>) -> (Run<()>, Vec<Call>) {
-    let budget = write_budget(&DdcHiBudgets::default(), VcpCode::INPUT_SOURCE);
+    let budget = input_write_budget();
     write_then_read(VcpCode::INPUT_SOURCE, value, budget, script)
 }
 
@@ -1101,7 +1112,7 @@ fn input_write_survives_reads_that_fail_or_lie_while_settling() {
 #[test]
 fn writes_to_other_codes_do_not_settle() {
     for code in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE] {
-        let budget = write_budget(&DdcHiBudgets::default(), code);
+        let budget = write_budget(&DdcHiBudgets::default(), &RetryPolicies::default(), code);
 
         let (run, calls) = write_then_read(code, 80, budget, [Scripted::Holds(1); 20]);
 
@@ -1117,10 +1128,11 @@ fn writes_to_other_codes_do_not_settle() {
 #[test]
 fn input_write_budget_covers_the_settle_window() {
     let budgets = DdcHiBudgets::default();
+    let policies = RetryPolicies::default();
     let keeps_old = [Scripted::Holds(DISPLAYPORT_1); 20];
     let input = VcpCode::INPUT_SOURCE;
 
-    let budget = write_budget(&budgets, input);
+    let budget = write_budget(&budgets, &policies, input);
     let (full, _) = write_then_read(input, DISPLAYPORT_2, budget, keeps_old);
     let (cut, _) = write_then_read(input, DISPLAYPORT_2, budgets.vcp, keeps_old);
 
@@ -1129,8 +1141,52 @@ fn input_write_budget_covers_the_settle_window() {
     assert_eq!(slept(&full), INPUT_SETTLE_WINDOW);
     assert!(slept(&cut) < INPUT_SETTLE_WINDOW, "{:?}", cut.sleeps);
     for other in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE, VcpCode(0xE1)] {
-        assert_eq!(write_budget(&budgets, other), budgets.vcp, "{other}");
+        assert_eq!(
+            write_budget(&budgets, &policies, other),
+            budgets.vcp,
+            "{other}"
+        );
     }
+}
+
+/// Through the real client, a write of the input source is not cut short by
+/// the plain VCP budget: the monitor that keeps the old input for the whole
+/// settle window still gets `Ok`, not the `Timeout` the popup would show as a
+/// failed switch. The settling runs on the system clock here, shrunk by the
+/// injected policies (D-2026-09-30-input-switch-autostart-14).
+#[test]
+fn input_write_through_the_client_outlives_the_vcp_budget() {
+    let settle = no_backoff().input_settle;
+    let vcp = settle.window * 3 / 5;
+    assert!(vcp < settle.window);
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
+    source.script_reads([Scripted::Holds(DISPLAYPORT_1); 100]);
+    let client = spawn(&source, budgets(vcp));
+    client.enumerate().unwrap();
+
+    let started = Instant::now();
+    let result = client.write_vcp(&id("a"), VcpCode::INPUT_SOURCE, DISPLAYPORT_2);
+    let waited = started.elapsed();
+
+    let calls = source.calls();
+    assert_eq!(result, Ok(()));
+    assert!(waited >= settle.window, "{waited:?} < {:?}", settle.window);
+    assert_eq!(calls[0], written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2));
+    assert!(calls.len() > 2, "{calls:?}");
+    assert!(calls[1..].iter().all(|call| *call == input_read()));
+}
+
+/// D-2026-09-30-input-switch-autostart-3: the defaults that protect the user
+/// are written down as numbers, so shrinking the window is noticed.
+#[test]
+fn input_write_default_settle_is_250_ms_steps_inside_a_3_s_window() {
+    let policies = RetryPolicies::default();
+    let budgets = DdcHiBudgets::default();
+
+    assert_eq!(policies.input_settle.step, Duration::from_millis(250));
+    assert_eq!(policies.input_settle.window, Duration::from_secs(3));
+    assert_eq!(input_write_budget(), budgets.vcp + Duration::from_secs(3),);
+    assert!(no_backoff().input_settle.window < policies.input_settle.window);
 }
 
 /// The caller's deadline wins over the window: the settling never sleeps
@@ -1188,7 +1244,7 @@ fn an_input_read_back_is_compared_by_its_low_byte() {
 fn a_failed_input_write_is_not_followed_by_reads() {
     let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Fail(FLAKY))]);
     source.script_reads([Scripted::Holds(DISPLAYPORT_2); 20]);
-    let budget = write_budget(&DdcHiBudgets::default(), VcpCode::INPUT_SOURCE);
+    let budget = input_write_budget();
 
     let run = on_bus(&source, budget, |worker, id, deadline| {
         worker.write_vcp(id, VcpCode::INPUT_SOURCE, DISPLAYPORT_2, deadline)
