@@ -53,6 +53,12 @@ export default Object.freeze({
   'confirm.accept': 'Apply',
   'confirm.cancel': 'Cancel',
 
+  'notice.kept': '{feature}: the monitor kept {kept} instead of {asked}.',
+  'notice.inputKept':
+    'The monitor is still on {kept}, not {asked}. {asked} may have no signal; the monitor goes back to an input that has one.',
+  'notice.inputUnread':
+    'The monitor did not answer after the input change. It may have switched to an input this computer cannot reach.',
+
   'error.not_found': 'Monitor not found. It may have been disconnected.',
   'error.unsupported': 'This monitor does not support this setting.',
   'error.invalid_value': 'The monitor does not accept this value.',

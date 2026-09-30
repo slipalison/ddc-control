@@ -16,11 +16,13 @@ import {
   monitorOrder,
   monitorPicker,
   panelView,
+  readBackNotice,
   recallMonitor,
   rememberMonitor,
   statusView,
   storageOf,
   withReadBack,
+  writeFailureText,
 } from '../../src/view-model.js';
 
 const golden = JSON.parse(
@@ -245,6 +247,61 @@ test('the value read back replaces the shown one, a list value by its low byte',
   assert.equal(switched.value.current, 0x11);
   assert.deepEqual(switched.value.options, input.value.options);
   assert.equal(controlView(switched, en).currentLabel, 'HDMI-1');
+});
+
+// D-2026-09-30-input-switch-autostart-5: the monitor may keep a value other
+// than the asked one, and the popup says so instead of only flagging it.
+const inputControl = golden.panel.controls.find((control) => control.key === 'input');
+const INPUT_CODE = 0x60;
+const DISPLAYPORT_1 = 0x0f;
+const DISPLAYPORT_2 = 0x10;
+
+test('a read-back that differs from the request gives a notice naming both values', () => {
+  const slider = readBackNotice(brightness(75, 100), { asked: 80, readBack: { current: 75, max: 100 } }, en);
+  const input = readBackNotice(
+    inputControl,
+    { asked: DISPLAYPORT_2, readBack: { current: DISPLAYPORT_1, max: 0x12 } },
+    pt,
+  );
+
+  assert.equal(slider, 'Brightness: the monitor kept 75% instead of 80%.');
+  assert.match(input, /DisplayPort-1/);
+  assert.match(input, /DisplayPort-2/);
+});
+
+test('the input notice says the asked input may have no signal', () => {
+  const change = { asked: DISPLAYPORT_2, readBack: { current: DISPLAYPORT_1, max: 0x12 } };
+  const generic = readBackNotice(brightness(75, 100), { asked: 80, readBack: { current: 75, max: 100 } }, en);
+
+  assert.match(readBackNotice(inputControl, change, en), /DisplayPort-2 may have no signal/);
+  assert.match(readBackNotice(inputControl, change, pt), /DisplayPort-2 pode estar sem sinal/);
+  assert.doesNotMatch(generic, /signal/);
+  assert.doesNotMatch(readBackNotice(brightness(75, 100), { asked: 80, readBack: { current: 75, max: 100 } }, pt), /sinal/);
+});
+
+test('a read-back equal to the request gives no notice', () => {
+  const same = readBackNotice(brightness(75, 100), { asked: 75, readBack: { current: 75, max: 100 } }, en);
+  const exact = readBackNotice(inputControl, { asked: DISPLAYPORT_2, readBack: { current: DISPLAYPORT_2, max: 0x12 } }, en);
+  const highByte = readBackNotice(inputControl, { asked: 0x11, readBack: { current: 0x0111, max: 0x12 } }, en);
+
+  assert.deepEqual([same, exact, highByte], [null, null, null]);
+});
+
+test('a failed read after an input write says the monitor may have switched away', () => {
+  for (const kind of ['timeout', 'transport', 'not_found']) {
+    const error = { kind, message: 'no answer' };
+
+    assert.match(writeFailureText(error, INPUT_CODE, en), /may have switched/, kind);
+    assert.match(writeFailureText(error, INPUT_CODE, pt), /pode ter comutado/, kind);
+  }
+  const refused = { kind: 'invalid_value', message: 'value 2 is not an allowed value for feature 0x60' };
+  assert.equal(writeFailureText(refused, INPUT_CODE, en), errorText(refused, en));
+  for (const kind of ['unsupported', 'needs_confirmation', 'backend_unavailable', 'weird']) {
+    assert.equal(writeFailureText({ kind, message: '' }, INPUT_CODE, pt), errorText({ kind, message: '' }, pt), kind);
+  }
+  const timeout = { kind: 'timeout', message: '' };
+  assert.equal(writeFailureText(timeout, 0x10, en), errorText(timeout, en));
+  assert.equal(writeFailureText(null, INPUT_CODE, en), errorText(null, en));
 });
 
 test('loading and ready states offer no retry', () => {
