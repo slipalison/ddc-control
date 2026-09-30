@@ -221,7 +221,8 @@ Start `target/release/ddc-tray` and left-click its tray icon. On the dev machine
 - roll the mouse wheel over the icon one notch at a time while the popup shows the RTK: brightness moves 5% per notch and the open popup follows; put brightness back;
 - use the menu's **Brightness** entries (right click) only while the popup shows the RTK (they set the monitor the popup last loaded), then put brightness back;
 - open the input and power dialogs only to read them, and close them with **Cancel** or Esc;
-- open **All settings** and run **Probe hidden settings**, which only read, without changing any entry.
+- open **All settings** and run **Probe hidden settings**, which only read, without changing any entry;
+- check and uncheck **Start with system** in the tray menu if you want to: it only writes and removes one file under `~/.config/autostart` (`ls ~/.config/autostart` before and after shows it), never touches a monitor, and unchecking it undoes it. Leave it unchecked when done.
 
 Choose **Quit** in the tray menu when done, and record anything the popup shows that `ddc-cli` reads differently.
 
@@ -229,7 +230,7 @@ Choose **Quit** in the tray menu when done, and record anything the popup shows 
 
 On any monitor, never press **Apply** in the confirmation dialog, which means never completing:
 
-- an input switch (the input chips): the screen may go dark, and only the monitor's own buttons bring it back;
+- an input switch (the input chips): the screen may go dark, and only the monitor's own buttons bring it back. The popup waits up to 3 s after a switch and explains an input the monitor kept, but that does not make the switch safe to try;
 - a power mode change (the power button in the header): the monitor may turn off;
 - a change to any entry tagged **Caution** under **All settings** or among the probed ones: OSD control `0xCA`, auto setup `0x1E`, geometry `0x20`, `0x30` and `0x7E`, the manufacturer-specific `0xE6` and `0xF1`, or any other code the core marks dangerous — the codes of [Never run](#never-run). A **Caution** slider opens the dialog when released: cancel it.
 
