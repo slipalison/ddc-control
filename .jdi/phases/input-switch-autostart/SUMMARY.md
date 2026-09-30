@@ -1,7 +1,7 @@
 # Phase 9: Input switch fix and autostart — Summary  (slug: input-switch-autostart)
 
-**Status:** partial (iteração 1 do loop: T-1..T-7 prontas; T-8 nasceu depois, da D-13)
-**Tasks:** 7/8 complete, 0 blocked
+**Status:** complete (iteração 1 do loop: T-1..T-8)
+**Tasks:** 8/8 complete, 0 blocked
 
 Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a escrita de `SUMMARY.md` por um subagente. As saídas brutas do doer ficaram em `/tmp/t/` (`t1-red.txt`, `t2-red.txt`, `t4-red.txt`, `smoke-evidence.txt`, `cov.txt`).
 
@@ -13,7 +13,8 @@ Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a es
 - T-5 (`1c5e05a`): item "Start with system" nos menus Linux (ksni `CheckmarkItem`, remontado por `menu_about_to_show`) e Windows (`CheckMenuItem`, `set_checked` com o estado real do SO).
 - T-6 (`5e94b60`): `tests/autostart_entry.rs`, só Linux, pai + filho com `HOME` em tempdir.
 - T-7 (`a3111c2`): README, CHANGELOG `[Unreleased]` e `docs/hardware-validation.md`.
-- Status das tasks no PLAN: `36152e9`.
+- T-8 (`d55cc60`, status no PLAN `e70ec5f`): `apps/ddc-tray/scripts/smoke-sni-private.sh` + `fake-sni-watcher.py` (D-13). O wrapper se re-executa sob `dbus-run-session --config-file=<tmp>` (config mínimo, sem ativação de serviços: com o padrão, o GTK ativaria `xdg-desktop-portal` e o `xdg-document-portal` montaria FUSE no mesmo `/run/user/1000/doc` da sessão real), sobe o watcher de stand-in (espera até 5 s que responda `ProtocolVersion`), imprime a linha `smoke-sni-private: private session bus, stand-in StatusNotifierWatcher` e roda o `smoke-sni.sh --fake --activate` SEM editá-lo (diff de 0 linhas), propagando o código de saída; trap mata o watcher; uma guarda recusa o passo interno na sessão real (`SMOKE_SNI_OUTER_BUS`).
+- Status das tasks T-1..T-7 no PLAN: `36152e9`.
 
 ## Blocked tasks
 - _(none)_
@@ -32,7 +33,23 @@ Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a es
 6. OK — os 4 `autostart::tests::*`.
 7. OK — o arquivo lista exatamente pai e filho; o pai imprimiu o `.desktop` cru com `Exec=.../target/debug/deps/autostart_entry-<hash>`; `ls -A ~/.config/autostart` real idêntico antes e depois.
 8. OK — nenhuma menção nova a `DDC_HW_TESTS`, `DdcHiMonitorBackend` ou `/dev/i2c` fora dos 3 arquivos do adapter; `capabilities/` só com `default.json`, sem `autostart`; `cargo tree -i tauri-plugin-autostart` resolve.
-9. Na sessão real NÃO rodou: há um `ddc-tray` do usuário rodando (PID 4884, `~/.local/bin/ddc-tray`) e a single-instance faz o binário do smoke sair (`the app exited before registering ... is another instance already running?`). Passou numa sessão D-Bus privada com um watcher de stand-in: `smoke-sni: OK — PID 2450397 registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked`. Isso gerou a D-2026-09-30-input-switch-autostart-13 e a task T-8.
+9. (Iteração 1, antes da T-8) na sessão real NÃO rodou: há um `ddc-tray` do usuário rodando (PID 4884, `~/.local/bin/ddc-tray`) e a single-instance faz o binário do smoke sair (`the app exited before registering ... is another instance already running?`). Passou numa sessão D-Bus privada com um watcher de stand-in: `smoke-sni: OK — PID 2450397 registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked`. Isso gerou a D-2026-09-30-input-switch-autostart-13 e a task T-8; com ela a linha 9 foi reescrita e passa (abaixo).
+
+## T-8 — linha 9 do DoD, rodada literalmente (bash, `LC_ALL=C.UTF-8`, `cargo build -p ddc-tray --release --locked -q` antes), com o `ddc-tray` do usuário (PID 4884) rodando e sem encerrá-lo
+Antes: `user bus: unix:path=/run/user/1000/bus`; o barramento privado era outro. Resultado `OK`, `exit=0`:
+```
+smoke-sni-private: private session bus, stand-in StatusNotifierWatcher
+smoke-sni: started target/release/ddc-tray as PID 2580669 with DDC_TRAY_FAKE=1
+smoke-sni: org.kde.StatusNotifierWatcher lists org.kde.StatusNotifierItem-2580669-1, owned by PID 2580669
+smoke-sni: the app serves the simulated monitor
+smoke-sni: called org.kde.StatusNotifierItem.Activate on org.kde.StatusNotifierItem-2580669-1/StatusNotifierItem
+smoke-sni: the app printed 'ddc-tray: popup shown' after Activate
+smoke-sni: the popup was still shown 1.5 s later
+smoke-sni: OK — PID 2580669 registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked
+```
+Depois: `pgrep -a ddc-tray` só com o PID 4884; nenhum watcher, `dbus-run-session`, `dbus-daemon` ou portal ficou para trás.
+Prova negativa: com `/bin/true` no lugar do `ddc-tray` (e com um script que faz `sleep 1` e sai) o wrapper sai 1 e não imprime `smoke-sni: OK` (`smoke-sni: FAIL: the app exited before registering a tray item with status 0 — is another instance already running?`). Outros caminhos de falha exercitados: sem `dbus-run-session`/`busctl`/`python3` (PATH restrito), `gi` ausente (simulado), watcher mudo (`did not answer ... within 5 s`, em 5,13 s), watcher que morre cedo, argumento ausente/inexistente, passo interno na sessão real.
+Ressalvas: `shellcheck` não está instalado (usou `bash -n` e `py_compile`); `register_object` do Gio é deprecado (a troca exige GLib >= 2.84), mantido com filtro de warning pontual e comentário; o stand-in não trata `StatusNotifierItemUnregistered` (o smoke não consulta e cada execução sobe um watcher novo). `cargo test --workspace --locked` passou.
 
 ## Gates
 - `cargo fmt --all --check` e `clippy --workspace --all-targets --locked -- -D warnings`: limpos.
@@ -50,6 +67,7 @@ Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a es
 - `crates/ddc-adapters/src/ddc_hi_backend/worker.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs`
 - `apps/ddc-tray/src/{app.js,view-model.js}`, `apps/ddc-tray/src/i18n/{en,pt-BR}.js`, `apps/ddc-tray/tests/ui/view-model.test.mjs`
 - `apps/ddc-tray/tests/e2e/{input-notice,pseudo-locale}.spec.mjs`
+- `apps/ddc-tray/scripts/{smoke-sni-private.sh,fake-sni-watcher.py}`
 - `apps/ddc-tray/src-tauri/Cargo.toml`, `Cargo.lock`, `apps/ddc-tray/src-tauri/src/{autostart,lib,menu,i18n,tray}.rs`, `apps/ddc-tray/src-tauri/src/tray/{status_item,notification_area}.rs`, `apps/ddc-tray/src-tauri/tests/autostart_entry.rs`
 - `README.md`, `CHANGELOG.md`, `docs/hardware-validation.md`
 
