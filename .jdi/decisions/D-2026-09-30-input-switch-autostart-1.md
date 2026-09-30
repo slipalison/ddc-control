@@ -1,0 +1,1 @@
+D-2026-09-30-input-switch-autostart-1: Phase 'Input switch fix and autostart' (slug: input-switch-autostart) added. Reason: pedido do usuário, 2026-09-30 — a troca de entrada para DisplayPort 2 volta para DisplayPort 1, e o ddc-tray precisa iniciar com o sistema.
