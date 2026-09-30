@@ -1,0 +1,1 @@
+D-2026-09-30-input-switch-autostart-9 (2026-09-30): O estado de "iniciar com o sistema" é a própria entrada do SO (`is_enabled()` do plugin), nunca um arquivo de config nosso (fonte única de verdade, DRY). O menu lê o estado ao montar e de novo após cada alternância. Padrão DESLIGADO: nada o liga sozinho — nem instalador, nem primeira execução.
