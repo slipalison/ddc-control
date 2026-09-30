@@ -9,7 +9,10 @@ use ddc_core::ports::MonitorBackend;
 use super::super::DdcHiBudgets;
 use super::super::identity::DisplayIdentity;
 use super::super::retry::{Clock, RetryPolicies, SystemClock};
-use super::{DdcHandle, DisplaySource, HandleError, TransactError, VcpReply, Worker, WorkerClient};
+use super::{
+    DdcHandle, DisplaySource, HandleError, INPUT_SETTLE_STEP, INPUT_SETTLE_WINDOW, TransactError,
+    VcpReply, Worker, WorkerClient, write_budget,
+};
 
 /// Holds a transaction until the test opens it.
 #[derive(Debug, Clone, Default)]
@@ -94,10 +97,52 @@ impl Call {
     }
 }
 
+/// One read that a test scripts, ahead of what the display's [`Behaviour`]
+/// would answer.
+#[derive(Debug, Clone, Copy)]
+enum Scripted {
+    /// The monitor answers for the code asked, with this current value.
+    Holds(u16),
+    /// The monitor answers for this other code: a late reply left on the bus.
+    Echoes(VcpCode, u16),
+    /// A bus error that asking again may cure.
+    Fails,
+    /// The monitor answers that it does not support the code.
+    Refuses,
+    /// The transport panics.
+    Crashes,
+}
+
+/// Maximum of every scripted reply, what the dev monitor reports for 0x60.
+const SCRIPTED_MAX: u16 = 0x12;
+
+impl Scripted {
+    fn play(self, asked: VcpCode) -> Result<VcpReply, HandleError> {
+        let reply = |echoed, current| {
+            Ok(VcpReply {
+                value: VcpValue {
+                    current,
+                    max: SCRIPTED_MAX,
+                },
+                echoed: Some(echoed),
+            })
+        };
+        match self {
+            Self::Holds(current) => reply(asked, current),
+            Self::Echoes(code, current) => reply(code, current),
+            Self::Fails => Err(HandleError::new(FLAKY)),
+            Self::Refuses => Err(HandleError::unsupported(REFUSED)),
+            Self::Crashes => crash(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Bus {
     displays: Vec<FakeDisplay>,
     calls: Vec<Call>,
+    /// Reads scripted for the next reads, in order, on any display.
+    script: VecDeque<Scripted>,
     enumerations: usize,
     /// Replies left behind by requests that gave up: each read that gets an
     /// answer takes the oldest of them instead of its own.
@@ -127,6 +172,12 @@ impl FakeDisplays {
     /// Queues `replies` to arrive, in order, for the next reads.
     fn leave_on_the_bus(&self, replies: &[VcpReply]) {
         lock(&self.0).stale.extend(replies);
+    }
+
+    /// Scripts the next reads, in order; once it runs out, reads answer as
+    /// the display's behaviour says.
+    fn script_reads(&self, reads: impl IntoIterator<Item = Scripted>) {
+        lock(&self.0).script.extend(reads);
     }
 
     fn enumerations(&self) -> usize {
@@ -207,6 +258,15 @@ impl FakeHandle {
         }
     }
 
+    /// The next scripted read, logged as a transaction that reached the
+    /// display.
+    fn next_scripted(&self, code: VcpCode) -> Option<Scripted> {
+        let mut bus = lock(&self.bus);
+        let scripted = bus.script.pop_front()?;
+        bus.calls.push(Call::Read(self.name, code));
+        Some(scripted)
+    }
+
     fn turn(&self, call: Call) -> Option<Behaviour> {
         let mut bus = lock(&self.bus);
         bus.calls.push(call);
@@ -255,6 +315,9 @@ impl DdcHandle for FakeHandle {
     }
 
     fn read_vcp(&mut self, code: VcpCode) -> Result<VcpReply, HandleError> {
+        if let Some(scripted) = self.next_scripted(code) {
+            return scripted.play(code);
+        }
         let own = VcpReply {
             value: FAKE_VALUE,
             echoed: Some(code),
@@ -921,4 +984,223 @@ fn a_reply_for_another_code_is_a_transient_failure() {
         ..BLUE_BLACK_LEVEL_REPLY
     };
     assert_eq!(own.answering(trapezoid), Ok(own.value));
+}
+
+const DISPLAYPORT_1: u16 = 15;
+const DISPLAYPORT_2: u16 = 16;
+const HDMI_1: u16 = 17;
+
+/// Writes `value` to `code` on display "a", on a worker run in the test
+/// thread in virtual time under `budget`, the reads after the write going as
+/// `script` says. Returns the run and every transaction that reached the
+/// display.
+fn write_then_read(
+    code: VcpCode,
+    value: u16,
+    budget: Duration,
+    script: impl IntoIterator<Item = Scripted>,
+) -> (Run<()>, Vec<Call>) {
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
+    source.script_reads(script);
+    let run = on_bus(&source, budget, |worker, id, deadline| {
+        worker.write_vcp(id, code, value, deadline)
+    });
+    (run, source.calls())
+}
+
+/// [`write_then_read`] of an input, under the budget the client gives it.
+fn write_input(value: u16, script: impl IntoIterator<Item = Scripted>) -> (Run<()>, Vec<Call>) {
+    let budget = write_budget(&DdcHiBudgets::default(), VcpCode::INPUT_SOURCE);
+    write_then_read(VcpCode::INPUT_SOURCE, value, budget, script)
+}
+
+fn written(code: VcpCode, value: u16) -> Call {
+    Call::Write("a", code, value)
+}
+
+fn input_read() -> Call {
+    Call::Read("a", VcpCode::INPUT_SOURCE)
+}
+
+/// The virtual time a run spent, which only sleeps spend.
+fn slept(run: &Run<()>) -> Duration {
+    run.sleeps.iter().sum()
+}
+
+/// After the write the monitor needs time to show the new input: the
+/// worker reads the input until it reads the value asked, and stops at the
+/// first read that does (D-2026-09-30-input-switch-autostart-3).
+#[test]
+fn input_write_returns_once_the_monitor_reads_back_the_value() {
+    let old = DISPLAYPORT_1;
+    let asked = DISPLAYPORT_2;
+
+    let (run, calls) = write_input(
+        asked,
+        [
+            Scripted::Holds(old),
+            Scripted::Holds(old),
+            Scripted::Holds(asked),
+            Scripted::Holds(old),
+        ],
+    );
+
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(
+        calls,
+        [
+            written(VcpCode::INPUT_SOURCE, asked),
+            input_read(),
+            input_read(),
+            input_read()
+        ]
+    );
+    assert_eq!(run.sleeps, [INPUT_SETTLE_STEP; 3]);
+}
+
+/// A monitor that keeps the old input, like one that goes back from an
+/// input with no signal, is not an error: the write was accepted, and the
+/// read after it tells what the monitor kept.
+#[test]
+fn input_write_returns_ok_after_the_settle_window_when_the_monitor_keeps_the_old_value() {
+    let (run, calls) = write_input(DISPLAYPORT_2, [Scripted::Holds(DISPLAYPORT_1); 20]);
+
+    let reads = u32::try_from(calls.len() - 1).unwrap();
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(calls[0], written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2));
+    assert!(calls[1..].iter().all(|call| *call == input_read()));
+    assert_eq!(INPUT_SETTLE_STEP * reads, INPUT_SETTLE_WINDOW);
+    assert_eq!(slept(&run), INPUT_SETTLE_WINDOW);
+    assert!(run.sleeps.iter().all(|sleep| *sleep == INPUT_SETTLE_STEP));
+}
+
+/// A read that fails, one that answers for another code and one that shows
+/// another input all leave the settling going.
+#[test]
+fn input_write_survives_reads_that_fail_or_lie_while_settling() {
+    let (run, calls) = write_input(
+        DISPLAYPORT_1,
+        [
+            Scripted::Fails,
+            Scripted::Holds(DISPLAYPORT_2),
+            Scripted::Echoes(VcpCode::BRIGHTNESS, DISPLAYPORT_1),
+            Scripted::Holds(HDMI_1),
+            Scripted::Fails,
+            Scripted::Holds(DISPLAYPORT_1),
+            Scripted::Holds(HDMI_1),
+        ],
+    );
+
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(calls.len(), 1 + 6);
+    assert_eq!(run.sleeps, [INPUT_SETTLE_STEP; 6]);
+}
+
+/// Only the input source is slow to show: any other write is left as the
+/// monitor takes it.
+#[test]
+fn writes_to_other_codes_do_not_settle() {
+    for code in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE] {
+        let budget = write_budget(&DdcHiBudgets::default(), code);
+
+        let (run, calls) = write_then_read(code, 80, budget, [Scripted::Holds(1); 20]);
+
+        assert_eq!(run.result, Ok(()), "{code}");
+        assert_eq!(calls, [written(code, 80)], "{code}");
+        assert!(run.sleeps.is_empty(), "{code}");
+    }
+}
+
+/// The budget the client waits under is the one the settling is tested
+/// under: the whole window fits in it, which the plain VCP budget would cut
+/// short.
+#[test]
+fn input_write_budget_covers_the_settle_window() {
+    let budgets = DdcHiBudgets::default();
+    let keeps_old = [Scripted::Holds(DISPLAYPORT_1); 20];
+    let input = VcpCode::INPUT_SOURCE;
+
+    let budget = write_budget(&budgets, input);
+    let (full, _) = write_then_read(input, DISPLAYPORT_2, budget, keeps_old);
+    let (cut, _) = write_then_read(input, DISPLAYPORT_2, budgets.vcp, keeps_old);
+
+    assert_eq!(budget, budgets.vcp + INPUT_SETTLE_WINDOW);
+    assert_eq!(full.result, Ok(()));
+    assert_eq!(slept(&full), INPUT_SETTLE_WINDOW);
+    assert!(slept(&cut) < INPUT_SETTLE_WINDOW, "{:?}", cut.sleeps);
+    for other in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE, VcpCode(0xE1)] {
+        assert_eq!(write_budget(&budgets, other), budgets.vcp, "{other}");
+    }
+}
+
+/// The caller's deadline wins over the window: the settling never sleeps
+/// past the time the caller waits for.
+#[test]
+fn settling_never_outlasts_the_callers_deadline() {
+    let budget = Duration::from_secs(1);
+
+    let (run, _) = write_then_read(
+        VcpCode::INPUT_SOURCE,
+        DISPLAYPORT_2,
+        budget,
+        [Scripted::Holds(DISPLAYPORT_1); 20],
+    );
+
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(slept(&run), budget);
+}
+
+/// A panic in the transport or a refusal from the monitor is final, as in any
+/// read, and does not undo a write the monitor accepted.
+#[test]
+fn a_panic_or_a_refusal_while_settling_ends_the_input_write_with_ok() {
+    for ending in [Scripted::Crashes, Scripted::Refuses] {
+        let (run, calls) = write_input(
+            DISPLAYPORT_2,
+            [
+                Scripted::Fails,
+                ending,
+                Scripted::Holds(DISPLAYPORT_1),
+                Scripted::Holds(DISPLAYPORT_1),
+            ],
+        );
+
+        assert_eq!(run.result, Ok(()), "{ending:?}");
+        assert_eq!(calls.len(), 1 + 2, "{ending:?}");
+        assert_eq!(run.sleeps, [INPUT_SETTLE_STEP; 2], "{ending:?}");
+    }
+}
+
+/// The popup shows the low byte of a non-continuous reading, and so does the
+/// settling: a monitor that fills the high byte has still switched.
+#[test]
+fn an_input_read_back_is_compared_by_its_low_byte() {
+    let (run, calls) = write_input(DISPLAYPORT_2, [Scripted::Holds(0x0100 | DISPLAYPORT_2)]);
+
+    assert_eq!(run.result, Ok(()));
+    assert_eq!(calls.len(), 1 + 1);
+    assert_eq!(run.sleeps, [INPUT_SETTLE_STEP]);
+}
+
+/// A write the monitor did not take is reported as any failed write, with no
+/// waiting for a switch that never started.
+#[test]
+fn a_failed_input_write_is_not_followed_by_reads() {
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Fail(FLAKY))]);
+    source.script_reads([Scripted::Holds(DISPLAYPORT_2); 20]);
+    let budget = write_budget(&DdcHiBudgets::default(), VcpCode::INPUT_SOURCE);
+
+    let run = on_bus(&source, budget, |worker, id, deadline| {
+        worker.write_vcp(id, VcpCode::INPUT_SOURCE, DISPLAYPORT_2, deadline)
+    });
+
+    assert_transport(&run.result, FLAKY);
+    assert!(
+        source
+            .calls()
+            .iter()
+            .all(|call| matches!(call, Call::Write(..))),
+        "{:?}",
+        source.calls()
+    );
 }

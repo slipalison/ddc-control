@@ -183,6 +183,26 @@ impl From<DdcError> for TransactError {
     }
 }
 
+/// Pause between two reads of the input source while the monitor settles.
+// WHY 250 ms: a read is one DDC/CI transaction of 50-100 ms; polling slower
+// than the monitor switches would keep the popup waiting for nothing.
+pub(crate) const INPUT_SETTLE_STEP: Duration = Duration::from_millis(250);
+/// How long a write of the input source waits for the monitor to show it.
+// WHY 3 s: a monitor that switches to an input with no signal scans it and
+// goes back on its own within a couple of seconds; the wait has to outlast
+// that to report what the monitor kept (D-2026-09-30-input-switch-autostart-3).
+pub(crate) const INPUT_SETTLE_WINDOW: Duration = Duration::from_secs(3);
+
+/// How long a caller waits for a write of `code`. A write of the input source
+/// waits out [`INPUT_SETTLE_WINDOW`] on top of the VCP budget.
+pub(crate) fn write_budget(budgets: &DdcHiBudgets, code: VcpCode) -> Duration {
+    if code == VcpCode::INPUT_SOURCE {
+        budgets.vcp + INPUT_SETTLE_WINDOW
+    } else {
+        budgets.vcp
+    }
+}
+
 type Job<S> = Box<dyn FnOnce(&mut Worker<S, SystemClock>) + Send>;
 
 /// Owner of the displays; runs one job at a time on its own thread.
@@ -286,7 +306,46 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         let refused = move |_| DdcError::UnsupportedFeature(code);
         self.transact(id, deadline, policy, refused, |handle| {
             handle.write_vcp(code, value)
-        })
+        })?;
+        if code == VcpCode::INPUT_SOURCE {
+            self.settle_input(id, value, deadline);
+        }
+        Ok(())
+    }
+
+    /// Waits for the monitor to show the input it was just told to switch
+    /// to: reads the input every [`INPUT_SETTLE_STEP`] until it reads
+    /// `value`, or until [`INPUT_SETTLE_WINDOW`] after the write, never past
+    /// `deadline`. A monitor that keeps the old input is not an error: the
+    /// write was accepted, and the caller's own read after it tells what the
+    /// monitor kept (D-2026-09-30-input-switch-autostart-3).
+    fn settle_input(&mut self, id: &MonitorId, value: u16, deadline: Instant) {
+        let end = (self.clock.now() + INPUT_SETTLE_WINDOW).min(deadline);
+        loop {
+            let left = end.saturating_duration_since(self.clock.now());
+            if left.is_zero() {
+                return;
+            }
+            self.clock.sleep(left.min(INPUT_SETTLE_STEP));
+            if !self.input_unsettled(id, value) {
+                return;
+            }
+        }
+    }
+
+    /// Whether the input still has to be waited for after one more read of
+    /// it. The loop around this read is the retry, so the read is a single
+    /// [`isolated`] attempt: a failed or garbled reply counts as "not yet".
+    /// A panic or a refusal is final, as for any read.
+    fn input_unsettled(&mut self, id: &MonitorId, value: u16) -> bool {
+        let Some(handle) = handle_of(&mut self.displays, id) else {
+            return false;
+        };
+        let code = VcpCode::INPUT_SOURCE;
+        match isolated(|| handle.read_vcp(code)?.answering(code)) {
+            Ok(read) => !same_input(read.current, value),
+            Err(error) => !(error.is_unsupported() || error.is_panic()),
+        }
     }
 
     /// Runs `op` on the handle of `id` under `policy`, each attempt
@@ -357,6 +416,13 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
     fn knows(&self, id: &MonitorId) -> bool {
         self.displays.iter().any(|(known, _)| known == id)
     }
+}
+
+/// Whether a reading of the input source shows the input that was written.
+// WHY low byte only: a non-continuous value is the low byte of its reading,
+// as the popup and the MCCS catalog read it; a monitor may fill the high byte.
+fn same_input(read: u16, written: u16) -> bool {
+    read & 0xFF == written & 0xFF
 }
 
 fn handle_of<'a, H>(displays: &'a mut [(MonitorId, H)], id: &MonitorId) -> Option<&'a mut H> {
@@ -469,7 +535,8 @@ impl<S: DisplaySource> MonitorBackend for WorkerClient<S> {
     }
 
     fn write_vcp(&self, id: &MonitorId, code: VcpCode, value: u16) -> Result<(), DdcError> {
-        self.transact(id, self.budgets.vcp, move |worker, id, deadline| {
+        let budget = write_budget(&self.budgets, code);
+        self.transact(id, budget, move |worker, id, deadline| {
             worker.write_vcp(id, code, value, deadline)
         })
     }

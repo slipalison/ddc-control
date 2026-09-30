@@ -10,6 +10,10 @@
 //! (D-2026-09-26-full-osd-control-6). Callers wait on a per-operation budget
 //! (D-7) and get [`DdcError::Timeout`] past it. Monitors are identified by
 //! EDID when available (D-2).
+//!
+//! A write of the input source (0x60) returns only after the monitor reads
+//! the input back, or 3 s later when it never does, and waits that long on
+//! top of the VCP budget (D-2026-09-30-input-switch-autostart-3).
 
 mod hardware;
 mod identity;
@@ -36,7 +40,8 @@ const ENUMERATE_BUDGET: Duration = Duration::from_secs(5);
 /// operation before getting [`DdcError::Timeout`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DdcHiBudgets {
-    /// `read_vcp` and `write_vcp`.
+    /// `read_vcp` and `write_vcp`. A write of the input source waits 3 s
+    /// more, for the monitor to show the new input.
     pub vcp: Duration,
     /// `read_capabilities`.
     pub capabilities: Duration,
@@ -72,7 +77,10 @@ impl Default for DdcHiBudgets {
 /// (D-2026-09-26-full-osd-control-6). Failures that outlast the retries
 /// answer [`DdcError::Transport`], or `MonitorNotFound` when a fresh
 /// enumeration fits the rest of the budget and no longer lists the monitor.
-/// A caller whose budget runs out answers [`DdcError::Timeout`]. Dropping
+/// A write of the input source polls the input until the monitor reads the
+/// new one back (250 ms apart, at most 3 s) and answers `Ok` either way: what
+/// the monitor kept is for the caller's read to tell. A caller whose budget
+/// runs out answers [`DdcError::Timeout`]. Dropping
 /// the backend stops the worker once its current transaction ends; it never
 /// waits for it.
 #[derive(Debug)]
