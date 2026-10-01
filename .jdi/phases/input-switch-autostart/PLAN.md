@@ -137,6 +137,7 @@ As iterações 2 e 3 do loop corrigiram achados do DoD Critic, não tasks do pla
 - Rodada 2, iteração 2 (D-2026-10-01-input-switch-autostart-4): T-1 ganha o limite de leituras `ceil(janela / passo)` em (f); os Verify das linhas 8 (`--list` ancorado) e 10 (arquivos não-Rust do diff) mudam sem código.
 - Rodada 2, iteração 3 (D-2026-10-01-input-switch-autostart-5): T-1 prova o assentamento exato sobre uma tabela de 8 políticas extremas em relógio virtual ((b) e (e)); (f) tolera uma leitura; a linha 8 recusa `#[path]` nos 3 arquivos de produção.
 - Rodada 2, iteração 4 (D-2026-10-01-input-switch-autostart-6): T-1 estende a tabela para 10 políticas e (e) para dois clientes por política e os 255 códigos; (f) ganha o limite de baixo; a linha 1 declara as faixas cobertas e fixa o corpo de `write_vcp`; as linhas 1 e 8 conferem os `.rs` compilados pelo dep-info.
+- Rodada 2, iteração 5 (D-2026-10-01-input-switch-autostart-7): sem código; as linhas 1 e 8 verificam o crate `ddc-adapters` congelado pela árvore git (mais `Cargo.toml`/`Cargo.lock` da raiz); a linha 2 confere `ddc-cli` e `commands.rs` sem diff.
 
 ## Files modified (all tasks)
 - `crates/ddc-adapters/Cargo.toml`, `crates/ddc-adapters/src/ddc_hi_backend.rs`, `crates/ddc-adapters/src/ddc_hi_backend/{worker,retry,tests}.rs`, `crates/ddc-adapters/src/ddc_hi_backend/{worker,retry}/tests.rs`
@@ -150,7 +151,7 @@ As iterações 2 e 3 do loop corrigiram achados do DoD Critic, não tasks do pla
 - Rust: `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo test --workspace --locked`; cross-check Linux em T-1.
 - UI: `cd apps/ddc-tray && npm run test:unit` e `npx playwright test` (light + dark).
 - Minimum coverage: 80% linhas (`cargo llvm-cov --workspace --locked --fail-under-lines 80`) + piso de UI do pipeline.
-- Os 10 `Verify:` do DoD do CONTEXT.md (emendados por D-13, D-14, D-15, D-16 e D-17), executados pelo reviewer.
+- Os 10 `Verify:` do DoD do CONTEXT.md (emendados por D-13 a D-19 e D-2026-10-01-input-switch-autostart-1 a -7), executados pelo reviewer.
 
 ## Risks
 - O plugin exige `AppHandle`: os testes (T-3, T-6) precisam do runtime de teste do Tauri (`tauri` feature `test` em dev-dep), o que amplia o tempo de build de teste. A Tauri CLI lê toda entrada `tauri` do `Cargo.toml` (D-2026-09-28-release-packaging-4): conferir que a dev-dep não muda features nem dependências dos pacotes deb/rpm.

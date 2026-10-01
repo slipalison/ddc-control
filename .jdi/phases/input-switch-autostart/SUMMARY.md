@@ -322,6 +322,30 @@ O limite tem margem ZERO. Medido no HEAD, deu 18 a 20 leituras, com 20 em 7 de 1
 
 **Harness recongelado (orquestrador):** `worker/tests.rs` `79d40888…`.
 
+## Rodada 2, iteração 5 — nona rodada do critic (D-2026-10-01-7)
+É a 10ª iteração absoluta, e NENHUM código mudou: o HEAD do código segue `3a3afa6`. O orquestrador fez só o fechamento estrutural do DoD.
+
+**Por quê.** Em 9 iterações, cada fechamento por teste da linha 1 expôs uma variante no código de produção vizinho: `run`, `spawn`, `Clock`, `call`, `transact`, `serve` e a troca de módulo só em release. O critic mostrou que até as correções pontuais deixavam passar N5dl e N5serve.
+
+**O que mudou no DoD.**
+- **Linha 1 (D-7):** o Verify verifica o código REVISADO, com quatro conferências:
+  - a árvore git de `crates/ddc-adapters` é `e87361dd…`;
+  - o `Cargo.toml` e o `Cargo.lock` da raiz são os blobs `a32052f8…` e `56607a7f…`;
+  - o working tree não difere do HEAD nesses caminhos;
+  - não há arquivo não rastreado sob o crate.
+
+  Os ids dependem só do conteúdo e continuam valendo depois do squash-merge. As fixações anteriores (SHA-256 dos testes, corpo de `write_vcp`, `INPUT_SETTLE_*`, dep-info) continuam. O "NÃO afirmado" ganhou o monitor real (W-3) e as camadas acima do adapter. A faixa P1 passou a "k ≤ 99 900".
+- **Linha 2:** passa a afirmar o que confere: `crates/ddc-core`, `crates/ddc-cli` e `apps/ddc-tray/src-tauri/src/commands.rs` sem nenhum byte de diff contra a base.
+- **Linha 8:** ganha a mesma conferência da árvore. Isso fecha a W-24 (macro com `include_str!`) e a H8 (helper sem `cfg`).
+
+**Provas negativas do orquestrador.** Os casos abaixo fazem as linhas sair com exit 1, e com tudo restaurado as linhas 1, 2 e 8 voltam a `OK`.
+
+| Mudança | Linhas que falham |
+|---|---|
+| Arquivo não rastreado `crates/ddc-adapters/src/ddc_hi_backend/release.md` | 1 e 8 |
+| Uma linha a mais em `crates/ddc-adapters/src/lib.rs` | 1 |
+| Uma linha a mais em `apps/ddc-tray/src-tauri/src/commands.rs` | 2 |
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
