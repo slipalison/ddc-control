@@ -116,28 +116,6 @@ impl Default for RetryPolicies {
     }
 }
 
-#[cfg(test)]
-impl RetryPolicies {
-    /// The default attempts with no pause between them, and the input
-    /// settling shrunk to 5 ms steps inside a 100 ms window, so tests on the
-    /// system clock never sleep long.
-    pub(crate) fn without_backoff() -> Self {
-        let instant = |policy: RetryPolicy| RetryPolicy {
-            backoff: Duration::ZERO,
-            ..policy
-        };
-        let defaults = Self::default();
-        Self {
-            vcp: instant(defaults.vcp),
-            capabilities: instant(defaults.capabilities),
-            input_settle: InputSettle {
-                step: Duration::from_millis(5),
-                window: Duration::from_millis(100),
-            },
-        }
-    }
-}
-
 impl RetryPolicy {
     /// Runs `op` until it succeeds, the monitor refuses it as unsupported,
     /// the transport panics, the attempts run out, or the next backoff would end at or past
@@ -197,3 +175,6 @@ pub(crate) enum Failure {
         last: HandleError,
     },
 }
+
+#[cfg(test)]
+mod tests;

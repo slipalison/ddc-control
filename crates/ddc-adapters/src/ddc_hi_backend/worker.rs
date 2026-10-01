@@ -427,7 +427,9 @@ fn handle_of<'a, H>(displays: &'a mut [(MonitorId, H)], id: &MonitorId) -> Optio
 pub(crate) struct WorkerClient<S: DisplaySource> {
     jobs: Sender<Job<S>>,
     budgets: DdcHiBudgets,
-    policies: RetryPolicies,
+    /// Seen by the rest of `ddc_hi_backend` so the backend's own unit tests
+    /// can check the policies its constructor wires in.
+    pub(super) policies: RetryPolicies,
     _worker: JoinHandle<()>,
 }
 
@@ -461,12 +463,6 @@ impl<S: DisplaySource> WorkerClient<S> {
     /// settle window it was started with, never the defaults.
     fn write_budget_of(&self, code: VcpCode) -> Duration {
         write_budget(&self.budgets, &self.policies, code)
-    }
-
-    /// The retry policies this client was started with.
-    #[cfg(test)]
-    pub(crate) fn policies(&self) -> &RetryPolicies {
-        &self.policies
     }
 
     /// Queues `op` and waits at most `budget` for its answer; the worker

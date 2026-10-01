@@ -58,7 +58,7 @@ fn production_backends() -> Vec<DdcHiMonitorBackend> {
 fn the_real_backend_hands_the_default_retry_policies_to_its_client() {
     for backend in production_backends() {
         assert_eq!(
-            *backend.client.policies(),
+            backend.client.policies,
             RetryPolicies::default(),
             "{backend:?}"
         );
