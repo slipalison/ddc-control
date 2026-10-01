@@ -1,6 +1,6 @@
 # Phase 9: Input switch fix and autostart — Summary  (slug: input-switch-autostart)
 
-**Status:** complete (iteração 1 do loop: T-1..T-8; iterações 2 e 3: correção dos achados do critic)
+**Status:** complete (iteração 1 do loop: T-1..T-8; iterações 2 a 4: correção dos achados do critic)
 **Tasks:** 8/8 complete, 0 blocked
 
 Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a escrita de `SUMMARY.md` por um subagente. As saídas brutas do doer ficaram em `/tmp/t/` (`t1-red.txt`, `t2-red.txt`, `t4-red.txt`, `smoke-evidence.txt`, `cov.txt`).
@@ -116,6 +116,33 @@ smoke-autostart: OK — the Start with system item wrote the desktop entry on cl
 **Verify do DoD (iteração 3), bash `--noprofile --norc`, `LC_ALL=C.UTF-8`, ambiente gráfico mantido:** linhas 1 a 10 `OK` (1: 1,9 s; 4: 22,2 s; 9: 5,8 s) e a linha do PROJECT.md (TODO em `*.rs`) `OK`. Gates por commit: fmt, clippy `-D warnings`, `cargo test --workspace --locked` (412 passed, 0 failed, 9 ignored) e cross-check Linux, todos exit 0. `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex "(main|build)\.rs$"`: `COV_EXIT=0`, `TOTAL ... 3640 535 85.30%` (Lines 85,30%). A suíte não escreveu em monitor real; o `ddc-tray` do usuário (PID 4884) seguiu rodando e o `~/.config/autostart` real ficou idêntico.
 Ressalvas: o teste (f) segue no relógio do sistema (W-11) — a detecção determinística de M2 vem de (b) e (e), em relógio virtual; a mutação B só rodou com `/dev/i2c-*` mascarado; o app com o backend real poderia enumerar monitores antes do clique (por isso o isolamento).
 
+## Iteração 4 — terceira rodada do critic e pré-crítica (D-19, D-2026-10-01-1)
+Retomada pelo `/jdi-issue` em 2026-10-01 ("continue o desenvolvimento"). Base `134b665`, HEAD `9a02a69`. Os 3 primeiros commits corrigem os achados da 3ª rodada do critic (REVIEW.md da iteração 3). Os 3 últimos fecham as lacunas que a D-2026-10-01-input-switch-autostart-1 previu para a 4ª rodada, nos rows 1, 4 e 8, emendados em `433852c`. Escrito pelo orquestrador a partir do relatório do doer.
+
+**Commits.**
+- `1ed13b0` test: teste (h), `ddc_hi_backend::tests::the_real_backend_hands_the_default_retry_policies_to_its_client`. O `DdcHiMonitorBackend::new()`, com e sem `with_budgets`, entrega `RetryPolicies::default()` ao seu cliente. É a fiação de produção que a 3ª rodada achou descoberta.
+- `53f18e9` refactor: `WorkerClient::write_budget_of(&self, code)`, chamado por `write_vcp`. O teste (e) o chama num cliente com política custom, sem dormir.
+- `4f17fb0` test: (g) fixa por literais também os 5 ms / 100 ms de `RetryPolicies::without_backoff()`.
+- `da95bda` e `433852c` docs: DoD apertado, na 3ª rodada do critic e na pré-crítica.
+- `1b847ff` test (row 1 (f)): `input_write_through_the_client_outlives_the_vcp_budget` ganha uma 2ª parte, sem mudar o nome. Um 2º `WorkerClient` real, com as mesmas `budgets(vcp)` e `no_backoff()`, escreve `0x60` num display `Behaviour::Block(gate)`. O resultado tem de ser `Err(DdcError::Timeout)` com `elapsed >= vcp + window` e `elapsed < vcp + window + 1 s`. O gate só abre depois da medição.
+- `4c149fc` test (row 4): `expectAccessible` (`support.mjs`) anota o teste com `axe` DEPOIS do `expect(blocking, ...).toEqual([])`.
+- `9a02a69` test (row 8): `production_backends()` sai de `ddc_hi_backend.rs` e vai para `ddc_hi_backend/tests.rs`, com o mesmo corpo. As únicas linhas `cfg(test)` que a phase acrescenta aos 3 arquivos de produção são as do acessor `policies()` de `worker.rs`.
+
+**Mutações (cada uma revertida e conferida byte a byte).**
+- Row 1 (f): `write_vcp` com `let budget = write_budget(&self.budgets, &RetryPolicies::default(), code);` e `write_budget_of` mantido vivo. Fica VERMELHO: `panicked at .../worker/tests.rs:1251:5: 3.060067524s >= 160ms + 1 s`, `FAILED. 0 passed; 1 failed ... finished in 3.16s`. O módulo dá `50 passed; 1 failed` e o Verify do row 1 sai sem `OK`. Revertida, o teste roda em `finished in 0.26s` (3 execuções).
+- Row 4: `await expectAccessible(page);` comentado em `an input read back as asked shows no notice`. O `grep -c` antigo continuava em 5. O Verify literal sai sem `OK`: o jq dá `a has 8 entries, e has 10`, sem `light`/`dark › an input read back as asked shows no notice`, embora os 10 testes passem. No Playwright 1.63.0 a anotação de runtime aparece em `tests[].annotations` e em `results[].annotations`, e cada projeto vira um `spec` com 1 teste. O jq trata os dois casos.
+- Row 8: antes do move o Verify dava `exit=1`; depois, `OK`. Mutação da fiação (`window: Duration::ZERO` em `DdcHiMonitorBackend::new()`): VERMELHA, `left: ... InputSettle { step: 250ms, window: 0ns }` contra `right: ... window: 3s`. Prova negativa: um `#[cfg(test)] fn helper() {}` em `ddc_hi_backend.rs` faz o row 8 dar `exit=1`.
+
+**Gates (HEAD `9a02a69`).**
+- `cargo fmt --all --check`, `clippy --workspace --all-targets --locked -- -D warnings` e o cross-check Linux saem exit 0.
+- `cargo test --workspace --locked`: 413 passed, 0 failed, 9 ignored (eram 412; o +1 é o teste (h)).
+- `npm run test:unit`: 165 pass, cobertura 88,48%. Playwright: 152 passed, 6 skipped (`screenshots.spec.mjs`).
+- `cargo llvm-cov --workspace --locked --fail-under-lines 80 --ignore-filename-regex '(main|build)\.rs$' --summary-only`: exit 0, `TOTAL ... 3642 535 85.31%`.
+
+**Verify do DoD.** Os 10 rodaram literalmente (`env -i`, `bash --noprofile --norc`, `LC_ALL=C.UTF-8`, ambiente gráfico e D-Bus do usuário) e todos saíram `OK`. Tempos: row 1 2 s, row 4 18 s, row 9 22 s.
+Nenhum teste, script ou mutação escreveu em monitor real, e não foram usados `--ignored` nem `DDC_HW_TESTS`. O `ddc-tray` do usuário seguiu rodando e o `~/.config/autostart` real ficou com o mesmo sha256.
+Ressalvas: o limite de baixo de (f) depende de `recv_timeout` nunca expirar antes do prazo, o que a std garante; a folga de tempo é 0,26 s contra o limite de 0,5 s. Os 3 últimos commits saíram sem a linha `Claude-Session:` da atribuição, que chegou depois.
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
@@ -132,5 +159,5 @@ Ressalvas: o teste (f) segue no relógio do sistema (W-11) — a detecção dete
 - `README.md`, `CHANGELOG.md`, `docs/hardware-validation.md`
 
 ## Tests
-- Total: 412 passed (workspace), 0 failed, 9 ignored; Playwright 152 passed; UI `node --test` 165 passed.
-- Coverage: 85,30% (Rust, `cargo llvm-cov` real), 88,48% (UI).
+- Total: 413 passed (workspace), 0 failed, 9 ignored; Playwright 152 passed; UI `node --test` 165 passed.
+- Coverage: 85,31% (Rust, `cargo llvm-cov` real), 88,48% (UI).

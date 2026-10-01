@@ -131,6 +131,7 @@ As iterações 2 e 3 do loop corrigiram achados do DoD Critic, não tasks do pla
 - T-1: o passo e a janela do assentamento moram em `RetryPolicies.input_settle` (`retry.rs` entrou em `files_modified`; as constantes são privadas de `retry.rs`); a linha 1 do DoD tem 7 testes, não 5 (D-14, D-17).
 - T-8 e D-15: além dos 2 scripts de T-8, `apps/ddc-tray/scripts/private-bus.sh` (lib para `source`), `smoke-autostart-private.sh` e `sni-dbusmenu.py` entram em `files_modified`; `smoke-sni-private.sh` passou a usar `private-bus.sh` com saída idêntica (D-18).
 - DoD: 10 linhas Auto no CONTEXT (a 10ª é D-16, TODO/FIXME em arquivos não-Rust).
+- Iteração 4 (D-2026-09-30-input-switch-autostart-19, D-2026-10-01-input-switch-autostart-1): T-1 ganha `WorkerClient::write_budget_of` e o teste (h) da fiação em `ddc_hi_backend/tests.rs` (que entra em `files_modified`, com `production_backends()`); (f) ganha o limite de cima do orçamento; T-4 toca `apps/ddc-tray/tests/e2e/support.mjs` (anotação `axe` em `expectAccessible`).
 
 ## Files modified (all tasks)
 - `crates/ddc-adapters/src/ddc_hi_backend.rs`, `crates/ddc-adapters/src/ddc_hi_backend/{worker,retry}.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs`
