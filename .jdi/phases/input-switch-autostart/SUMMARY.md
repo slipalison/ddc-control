@@ -286,6 +286,42 @@ O limite tem margem ZERO. Medido no HEAD, deu 18 a 20 leituras, com 20 em 7 de 1
 
 **Harness recongelado (orquestrador).** `worker/tests.rs` passa a `b1509c2a…`.
 
+## Rodada 2, iteração 4 — oitava rodada do critic (D-2026-10-01-6)
+9ª iteração absoluta. HEAD do código: `3a3afa6`. O orquestrador escreveu esta seção a partir do relatório do doer.
+
+**Commit.** `3a3afa6` (test) muda só `worker/tests.rs` (+131 −47). `worker.rs` e `retry.rs` não mudam, e os nomes dos 7 testes também não.
+- **Tabela de (b):** passa a ter 10 políticas, com as novas `1 µs/100 ms` (100 000 leituras virtuais, em 0,03 s) e `1 dia/1 µs` (sleeps `[1 µs]`). As mensagens de falha resumem os vetores de sleep em sequências.
+- **(e):** dois clientes por política. O curto tem `vcp = min(70 ms, janela/2)`; o folgado, `1000·janela + 1 s`, com `capabilities` e `enumerate` maiores. Os dois exigem `vcp + janela` para `0x60` e `vcp` para os outros 255 códigos. `full`/`cut` ficam só no cliente curto.
+- **(f):** ganha o limite de baixo `reads * 2 >= ceil(janela/passo)`.
+
+**Mutações.** Todas passam no fmt e no clippy, rodaram 3/3 e foram revertidas byte a byte.
+
+| mutação | quem pega |
+|---|---|
+| M1r32, M1g20, M1gs1 | (b), linha `1µs, 100ms`: leituras 32, 20 e 100 contra 100 000 |
+| M1cw32 | (b) e (e) |
+| M1bv | (e), cliente folgado: `202s != 101.1s` |
+| N1 e M1gw100 | (b), linha `1 dia, 1µs`: sleeps `10.000001s` e `100ms` contra `1µs`; e (e) |
+| N2spawn50 e N2clk16 (pisos só no caminho de produção) | (f): `2 reads` e `7 reads … fewer than half of the 20` |
+| N3 (reset orçado como o input) | (e): `0x04: 150ms != 50ms` |
+| M1g, M1m, M1f, M1c, M1s, M1d, M1bf150 | seguem vermelhas |
+| N4slack e N4floor (`write_vcp`) | lib `76 passed`, mas o Verify 1 sai sem `OK` pelo corpo fixado |
+
+**Estabilidade.** O (f) passou 30/30 em 0,32 s, com 20 leituras, dentro da faixa de 10 a 21. (b) roda em 0,03 s e (e) em 0,04 s.
+
+**Gates.**
+- fmt, clippy `-D warnings` e cross-check Linux: exit 0.
+- `cargo test --workspace --locked`: 413 passed, 0 failed, 9 ignored.
+- Cobertura: linhas 85,25%.
+
+**Verify.**
+- Linhas 2 a 10: `OK`. A linha 9 passou de primeira.
+- Linha 1: falhou só pelo SHA-256 antigo e dá `OK` com o hash novo. O Verify dela confere o corpo de `write_vcp` e o dep-info.
+
+**Hardware.** Todo `cargo` rodou em `bwrap`, com os `/dev/i2c-*` cobertos e observados. Houve só o evento do controle positivo, dentro do sandbox. O `~/.config/autostart` real não mudou.
+
+**Harness recongelado (orquestrador):** `worker/tests.rs` `79d40888…`.
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
