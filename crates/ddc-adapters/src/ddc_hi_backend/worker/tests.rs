@@ -1236,7 +1236,9 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
 }
 
 /// D-2026-09-30-input-switch-autostart-3: the defaults that protect the user
-/// are written down as numbers, so shrinking the window is noticed.
+/// are written down as numbers, so shrinking the window is noticed. So are
+/// the shrunk numbers of the tests that sleep for real: widening them slows
+/// those tests unnoticed (D-2026-09-30-input-switch-autostart-19).
 #[test]
 fn input_write_default_settle_is_250_ms_steps_inside_a_3_s_window() {
     let policies = RetryPolicies::default();
@@ -1245,7 +1247,8 @@ fn input_write_default_settle_is_250_ms_steps_inside_a_3_s_window() {
     assert_eq!(policies.input_settle.step, Duration::from_millis(250));
     assert_eq!(policies.input_settle.window, Duration::from_secs(3));
     assert_eq!(input_write_budget(), budgets.vcp + Duration::from_secs(3),);
-    assert!(no_backoff().input_settle.window < policies.input_settle.window);
+    assert_eq!(no_backoff().input_settle.step, Duration::from_millis(5));
+    assert_eq!(no_backoff().input_settle.window, Duration::from_millis(100));
 }
 
 /// The caller's deadline wins over the window: the settling never sleeps
