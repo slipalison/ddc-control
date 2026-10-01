@@ -120,7 +120,9 @@ export function hides(page) {
 /**
  * Axe on the page as it is now, with the WCAG 2.0 A/AA and 2.1 AA rules:
  * a critical or serious violation fails the test; moderate and minor ones
- * are reported as an annotation and on stdout.
+ * are reported as an annotation and on stdout. A check that passed leaves
+ * an `axe` annotation, so the report shows which tests ran it
+ * (D-2026-10-01-input-switch-autostart-1).
  */
 export async function expectAccessible(page) {
   await expectNoNativeSelect(page);
@@ -139,6 +141,7 @@ export async function expectAccessible(page) {
   }
   const blocking = found.filter((violation) => BLOCKING_IMPACTS.has(violation.impact));
   expect(blocking, 'axe critical/serious violations').toEqual([]);
+  test.info().annotations.push({ type: 'axe', description: 'no critical or serious violation' });
 }
 
 // --------------------------------------------------------------- locators
