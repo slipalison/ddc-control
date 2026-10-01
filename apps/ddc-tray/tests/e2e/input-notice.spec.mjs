@@ -50,6 +50,16 @@ async function expectToast(page, text) {
   await expect(page.locator('#toast-text')).toHaveText(text);
 }
 
+/**
+ * The toast names each of `literals`, written out here rather than drawn
+ * from the template under test, so a template that drops a name is caught.
+ */
+async function expectToastNaming(page, literals) {
+  for (const literal of literals) {
+    await expect(page.locator('#toast-text')).toContainText(literal);
+  }
+}
+
 const KEPT_AND_ASKED = { kept: 'DisplayPort-1', asked: 'HDMI-1' };
 const HDMI_1_WRITE = { monitorId: MONITORS.rtk, code: INPUT, value: HDMI_1, confirmed: true };
 
@@ -62,6 +72,7 @@ test.describe('in English', () => {
     await switchToHdmi1(page, en);
 
     await expectToast(page, en('notice.inputKept', KEPT_AND_ASKED));
+    await expectToastNaming(page, ['DisplayPort-1', 'HDMI-1']);
     await expect(page.locator('#toast-text')).toContainText('may have no signal');
     expect(await writes(page)).toEqual([HDMI_1_WRITE]);
     await expectAccessible(page);
@@ -74,6 +85,7 @@ test('the toast names the kept and the asked input (pt-BR)', async ({ page }) =>
   await switchToHdmi1(page, t);
 
   await expectToast(page, t('notice.inputKept', KEPT_AND_ASKED));
+  await expectToastNaming(page, ['DisplayPort-1', 'HDMI-1']);
   await expect(page.locator('#toast-text')).toContainText('pode estar sem sinal');
   await expect(inputChip(page, 'DisplayPort-1')).toBeChecked();
   expect(await writes(page)).toEqual([HDMI_1_WRITE]);
@@ -100,7 +112,7 @@ test('a failed read after an input write says the monitor may have switched away
   await switchToHdmi1(page, t);
 
   await expectToast(page, t('notice.inputUnread'));
-  await expect(page.locator('#toast-text')).toContainText('pode ter comutado');
+  await expectToastNaming(page, ['troca de entrada', 'pode ter comutado']);
   await expect(inputChip(page, 'DisplayPort-1')).toBeChecked();
   await expect(inputChip(page, 'HDMI-1')).not.toBeChecked();
   expect(await writes(page)).toEqual([]);
@@ -122,6 +134,7 @@ test('a setting other than the input that the monitor did not apply shows the ge
       asked: t('format.percent', { value: 76 }),
     }),
   );
+  await expectToastNaming(page, ['Brilho', '75%', '76%']);
   await expect(page.locator('#toast-text')).not.toContainText('sinal');
   expect(await writes(page)).toEqual([
     { monitorId: MONITORS.rtk, code: BRIGHTNESS, value: 76, confirmed: false },
