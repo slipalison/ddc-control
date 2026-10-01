@@ -1227,13 +1227,17 @@ fn input_write_budget_covers_the_settle_window() {
 /// Through the real client, a write of the input source is not cut short by
 /// the plain VCP budget: the monitor that keeps the old input for the whole
 /// settle window still gets `Ok`, not the `Timeout` the popup would show as a
-/// failed switch. Nor is it given more than the injected window: a write the
-/// monitor never ends times out once the VCP budget and that window are
-/// spent, not after the default 3 s window. A longer budget still answers the
-/// first write `Ok`, so only the second one catches it. And a write of any
-/// other code keeps the plain VCP budget: a brightness write the monitor never
-/// ends times out once that budget is spent, before the settle window would
-/// add to it (D-2026-09-30-input-switch-autostart-3: other codes unchanged).
+/// failed switch. It reads the monitor at most `ceil(window / step)` times,
+/// as `sleep` never returns early: a worker that put a floor under the
+/// policy's window, under any name, reads it more often and fails here
+/// (D-2026-10-01-input-switch-autostart-4). Nor is it given more than the
+/// injected window: a write the monitor never ends times out once the VCP
+/// budget and that window are spent, not after the default 3 s window. A
+/// longer budget still answers the first write `Ok`, so only the second one
+/// catches it. And a write of any other code keeps the plain VCP budget: a
+/// brightness write the monitor never ends times out once that budget is
+/// spent, before the settle window would add to it
+/// (D-2026-09-30-input-switch-autostart-3: other codes unchanged).
 /// The settling runs on the system clock here, shrunk by the injected
 /// policies (D-2026-09-30-input-switch-autostart-14;
 /// D-2026-10-01-input-switch-autostart-1, -2).
@@ -1266,12 +1270,20 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
     gate.open();
 
     let calls = source.calls();
+    let most = usize::try_from(settle.window.as_nanos().div_ceil(settle.step.as_nanos())).unwrap();
     let budget = vcp + settle.window;
     assert_eq!(result, Ok(()));
     assert!(waited >= settle.window, "{waited:?} < {:?}", settle.window);
     assert_eq!(calls[0], written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2));
     assert!(calls.len() > 2, "{calls:?}");
     assert!(calls[1..].iter().all(|call| *call == input_read()));
+    let reads = calls.len() - 1;
+    assert!(
+        reads <= most,
+        "{reads} reads of the input, more than the {most} that fit a {:?} window in {:?} steps",
+        settle.window,
+        settle.step
+    );
     assert_eq!(never_ends, Err(DdcError::Timeout));
     assert!(gave_up >= budget, "{gave_up:?} < {budget:?}");
     assert!(
