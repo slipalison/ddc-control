@@ -1008,25 +1008,46 @@ fn default_step() -> Duration {
     RetryPolicies::default().input_settle.step
 }
 
-/// Input settling that is not the default one: 500 ms steps inside a 4 s
-/// window, longer than the default one. A worker or a client that took the
-/// step or the window from anywhere but the policy it was given gets these
-/// wrong, and so does a worker that cut the window to the default one. The
-/// settling runs in virtual time, so the longer window costs no real time
-/// (D-2026-10-01-input-switch-autostart-3).
-fn custom_settle_policies() -> RetryPolicies {
+/// Input settling that is not the default one, one policy per row, none of
+/// them with the default step or the default window: steps from 5 ms to
+/// 12 h, windows from 100 ms to a day, a window that is not a multiple of its
+/// step (500 ms in 4.25 s and 300 ms in 1 s) and a step as long as its window.
+/// A worker or a client that took the step or the window from anywhere but
+/// the policy it was given, or put a floor or a ceiling under either, under
+/// any name, absolute or relative, gets at least one row wrong. The settling
+/// runs in virtual time, so a window of a day costs no real time
+/// (D-2026-10-01-input-switch-autostart-3, -5).
+fn custom_settle_table() -> Vec<RetryPolicies> {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
     let defaults = RetryPolicies::default();
-    let custom = InputSettle {
-        step: Duration::from_millis(500),
-        window: Duration::from_secs(4),
-    };
-    assert_ne!(custom.step, defaults.input_settle.step);
-    assert_ne!(custom.window, defaults.input_settle.window);
-    assert!(custom.window > defaults.input_settle.window);
-    RetryPolicies {
-        input_settle: custom,
-        ..defaults
-    }
+    [
+        (Duration::from_millis(5), Duration::from_millis(100)),
+        (Duration::from_millis(500), Duration::from_secs(4)),
+        (Duration::from_millis(500), Duration::from_millis(4250)),
+        (Duration::from_millis(300), Duration::from_secs(1)),
+        (Duration::from_secs(2), Duration::from_secs(10)),
+        (
+            Duration::from_secs(10 * MINUTE),
+            Duration::from_secs(20 * MINUTE),
+        ),
+        (Duration::from_secs(7), Duration::from_secs(7)),
+        (
+            Duration::from_secs(12 * HOUR),
+            Duration::from_secs(24 * HOUR),
+        ),
+    ]
+    .into_iter()
+    .map(|(step, window)| {
+        let input_settle = InputSettle { step, window };
+        assert_ne!(step, defaults.input_settle.step, "{input_settle:?}");
+        assert_ne!(window, defaults.input_settle.window, "{input_settle:?}");
+        RetryPolicies {
+            input_settle,
+            ..defaults
+        }
+    })
+    .collect()
 }
 
 /// Writes `value` to `code` on display "a", on a worker run in the test
@@ -1086,12 +1107,28 @@ fn slept(run: &Run<()>) -> Duration {
     run.sleeps.iter().sum()
 }
 
+/// How many times a settling under `settle` reads a monitor that never shows
+/// the input asked: once after each step that starts inside the window,
+/// `ceil(window / step)`.
+fn settle_reads(settle: InputSettle) -> usize {
+    usize::try_from(settle.window.as_nanos().div_ceil(settle.step.as_nanos())).unwrap()
+}
+
+/// The sleeps of that settling: a whole step before every read but the last,
+/// and what is left of the window before the last one, so they add up to the
+/// window and never pass it.
+fn settle_sleeps(settle: InputSettle) -> Vec<Duration> {
+    let whole = settle_reads(settle) - 1;
+    let mut sleeps = vec![settle.step; whole];
+    sleeps.push(settle.window - settle.step * u32::try_from(whole).unwrap());
+    sleeps
+}
+
 /// A monitor that shows the old input at every read of the settling of
 /// `settle`: one scripted read per step of the whole window, so no read
 /// inside the window falls through to the display's own answer.
 fn keeps_old_input_through(settle: InputSettle) -> Vec<Scripted> {
-    let polls = settle.window.as_nanos().div_ceil(settle.step.as_nanos());
-    vec![Scripted::Holds(DISPLAYPORT_1); usize::try_from(polls).unwrap()]
+    vec![Scripted::Holds(DISPLAYPORT_1); settle_reads(settle)]
 }
 
 /// After the write the monitor needs time to show the new input: the
@@ -1127,34 +1164,49 @@ fn input_write_returns_once_the_monitor_reads_back_the_value() {
 
 /// A monitor that keeps the old input, like one that goes back from an
 /// input with no signal, is not an error: the write was accepted, and the
-/// read after it tells what the monitor kept. Under a policy that is not the
-/// default one, the worker waits that policy's window in that policy's
-/// steps (D-2026-09-30-input-switch-autostart-17).
+/// read after it tells what the monitor kept. For every policy of
+/// [`custom_settle_table`], in virtual time, the worker writes once, then
+/// reads the input exactly `ceil(window / step)` times, sleeping that
+/// policy's step before every read but the last and only what is left of the
+/// window before the last one: the sleeps add up to the window and never pass
+/// it. A worker that took the step or the window from anywhere but the
+/// policy, put a floor or a ceiling under either, or slept a whole step past
+/// the window gets a row wrong. The budget only bounds a hang, so the policy
+/// alone decides when the settling ends
+/// (D-2026-09-30-input-switch-autostart-17; D-2026-10-01-input-switch-autostart-5).
 #[test]
 fn input_write_returns_ok_after_the_settle_window_when_the_monitor_keeps_the_old_value() {
-    let policies = custom_settle_policies();
-    let settle = policies.input_settle;
-    let budget = write_budget(&DdcHiBudgets::default(), &policies, VcpCode::INPUT_SOURCE);
+    for policies in custom_settle_table() {
+        let settle = policies.input_settle;
+        let budget = settle.window + UNHURRIED;
 
-    let keeps_old = keeps_old_input_through(settle);
-    let scripted = keeps_old.len();
+        let (run, calls) = write_then_read_with(
+            policies,
+            VcpCode::INPUT_SOURCE,
+            DISPLAYPORT_2,
+            budget,
+            keeps_old_input_through(settle),
+        );
 
-    let (run, calls) = write_then_read_with(
-        policies,
-        VcpCode::INPUT_SOURCE,
-        DISPLAYPORT_2,
-        budget,
-        keeps_old,
-    );
-
-    let reads = u32::try_from(calls.len() - 1).unwrap();
-    assert_eq!(run.result, Ok(()));
-    assert_eq!(calls[0], written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2));
-    assert!(calls[1..].iter().all(|call| *call == input_read()));
-    assert_eq!(calls.len() - 1, scripted);
-    assert_eq!(settle.step * reads, settle.window);
-    assert_eq!(slept(&run), settle.window);
-    assert!(run.sleeps.iter().all(|sleep| *sleep == settle.step));
+        let writes = calls
+            .iter()
+            .filter(|call| matches!(call, Call::Write(..)))
+            .count();
+        assert_eq!(run.result, Ok(()), "{settle:?}");
+        assert_eq!(writes, 1, "{settle:?}: writes");
+        assert_eq!(
+            calls.first(),
+            Some(&written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2)),
+            "{settle:?}"
+        );
+        assert!(
+            calls[1..].iter().all(|call| *call == input_read()),
+            "{settle:?}: a transaction after the write is not a read of the input"
+        );
+        assert_eq!(calls.len() - 1, settle_reads(settle), "{settle:?}: reads");
+        assert_eq!(run.sleeps, settle_sleeps(settle), "{settle:?}: sleeps");
+        assert_eq!(slept(&run), settle.window, "{settle:?}: time slept");
+    }
 }
 
 /// A read that fails, one that answers for another code and one that shows
@@ -1196,41 +1248,55 @@ fn writes_to_other_codes_do_not_settle() {
 
 /// The budget a client waits under is the one the settling is tested under:
 /// the whole window of the policy the client was given fits in it, which the
-/// plain VCP budget would cut short. Asked of a client whose policy and
-/// budgets are not the default ones, so a client that budgeted by any other
-/// window (the default one, say) or ignored the policy fails here, with no
-/// sleeping (D-2026-09-30-input-switch-autostart-19).
+/// plain VCP budget would cut short. Asked, with no sleeping, of one client
+/// per policy of [`custom_settle_table`], with budgets that are not the
+/// default ones and a VCP budget shorter than every window: `0x60` gets that
+/// VCP budget plus that policy's window, any other code the VCP budget alone.
+/// A client that budgeted by any other window (the default one, say), ignored
+/// the policy, or put a floor or a ceiling under the budget gets a row wrong
+/// (D-2026-09-30-input-switch-autostart-19; D-2026-10-01-input-switch-autostart-5).
 #[test]
 fn input_write_budget_covers_the_settle_window() {
-    let budgets = budgets(Duration::from_millis(400));
-    let policies = custom_settle_policies();
-    let window = policies.input_settle.window;
-    let keeps_old = keeps_old_input_through(policies.input_settle);
+    let budgets = budgets(Duration::from_millis(70));
     let input = VcpCode::INPUT_SOURCE;
-    assert!(budgets.vcp < window);
-    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
-    let client = WorkerClient::spawn(source, budgets, policies).unwrap();
+    for policies in custom_settle_table() {
+        let settle = policies.input_settle;
+        let keeps_old = keeps_old_input_through(settle);
+        assert!(budgets.vcp < settle.window, "{settle:?}");
+        let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
+        let client = WorkerClient::spawn(source, budgets, policies).unwrap();
 
-    let budget = client.write_budget_of(input);
-    let (full, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budget, keeps_old.clone());
-    let (cut, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budgets.vcp, keeps_old);
+        let budget = client.write_budget_of(input);
+        let (full, _) =
+            write_then_read_with(policies, input, DISPLAYPORT_2, budget, keeps_old.clone());
+        let (cut, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budgets.vcp, keeps_old);
 
-    assert_eq!(budget, budgets.vcp + window);
-    assert_eq!(full.result, Ok(()));
-    assert_eq!(slept(&full), window);
-    assert!(slept(&cut) < window, "{:?}", cut.sleeps);
-    for other in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE, VcpCode(0xE1)] {
-        assert_eq!(client.write_budget_of(other), budgets.vcp, "{other}");
+        assert_eq!(budget, budgets.vcp + settle.window, "{settle:?}");
+        assert_eq!(full.result, Ok(()), "{settle:?}");
+        assert_eq!(slept(&full), settle.window, "{settle:?}");
+        assert!(slept(&cut) < settle.window, "{settle:?}: {:?}", cut.sleeps);
+        for other in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE, VcpCode(0xE1)] {
+            assert_eq!(
+                client.write_budget_of(other),
+                budgets.vcp,
+                "{settle:?}: {other}"
+            );
+        }
     }
 }
 
 /// Through the real client, a write of the input source is not cut short by
 /// the plain VCP budget: the monitor that keeps the old input for the whole
 /// settle window still gets `Ok`, not the `Timeout` the popup would show as a
-/// failed switch. It reads the monitor at most `ceil(window / step)` times,
-/// as `sleep` never returns early: a worker that put a floor under the
-/// policy's window, under any name, reads it more often and fails here
-/// (D-2026-10-01-input-switch-autostart-4). Nor is it given more than the
+/// failed switch. It reads the monitor at most `ceil(window / step) + 1`
+/// times. The one read to spare is for a system timer that truncates the
+/// sleep it is asked for, as the high-resolution timer of Windows does to
+/// 100 ns units: the last sleep, cut to what is left of the window, can then
+/// end a hair before the window and leave room for one more read, with
+/// nothing wrong in the worker. The exact step and window are proven in
+/// virtual time by the table of
+/// `input_write_returns_ok_after_the_settle_window_when_the_monitor_keeps_the_old_value`
+/// (D-2026-10-01-input-switch-autostart-5). Nor is it given more than the
 /// injected window: a write the monitor never ends times out once the VCP
 /// budget and that window are spent, not after the default 3 s window. A
 /// longer budget still answers the first write `Ok`, so only the second one
@@ -1270,7 +1336,7 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
     gate.open();
 
     let calls = source.calls();
-    let most = usize::try_from(settle.window.as_nanos().div_ceil(settle.step.as_nanos())).unwrap();
+    let most = settle_reads(settle) + 1;
     let budget = vcp + settle.window;
     assert_eq!(result, Ok(()));
     assert!(waited >= settle.window, "{waited:?} < {:?}", settle.window);
@@ -1280,7 +1346,7 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
     let reads = calls.len() - 1;
     assert!(
         reads <= most,
-        "{reads} reads of the input, more than the {most} that fit a {:?} window in {:?} steps",
+        "{reads} reads of the input, more than the {most} allowed: ceil({:?} / {:?}) and one to spare",
         settle.window,
         settle.step
     );
