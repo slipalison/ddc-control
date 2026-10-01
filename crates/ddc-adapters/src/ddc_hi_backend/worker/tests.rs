@@ -8,9 +8,7 @@ use ddc_core::ports::MonitorBackend;
 
 use super::super::DdcHiBudgets;
 use super::super::identity::DisplayIdentity;
-use super::super::retry::{
-    Clock, INPUT_SETTLE_STEP, INPUT_SETTLE_WINDOW, RetryPolicies, SystemClock,
-};
+use super::super::retry::{Clock, InputSettle, RetryPolicies, SystemClock};
 use super::{
     DdcHandle, DisplaySource, HandleError, TransactError, VcpReply, Worker, WorkerClient,
     write_budget,
@@ -417,8 +415,18 @@ fn on_bus<T>(
     budget: Duration,
     op: impl FnOnce(&mut InstantWorker, &MonitorId, Instant) -> Result<T, TransactError>,
 ) -> Run<T> {
+    on_bus_with(source, RetryPolicies::default(), budget, op)
+}
+
+/// [`on_bus`] under `policies` instead of the default ones.
+fn on_bus_with<T>(
+    source: &FakeDisplays,
+    policies: RetryPolicies,
+    budget: Duration,
+    op: impl FnOnce(&mut InstantWorker, &MonitorId, Instant) -> Result<T, TransactError>,
+) -> Run<T> {
     let clock = VirtualClock::new();
-    let mut worker = Worker::new(source.clone(), RetryPolicies::default(), clock.clone());
+    let mut worker = Worker::new(source.clone(), policies, clock.clone());
     worker.enumerate();
 
     let result =
@@ -992,6 +1000,31 @@ const DISPLAYPORT_1: u16 = 15;
 const DISPLAYPORT_2: u16 = 16;
 const HDMI_1: u16 = 17;
 
+/// The pause between two reads of the input source in the default policies.
+/// Taken from the policy, because the worker has no other source for it;
+/// `input_write_default_settle_is_250_ms_steps_inside_a_3_s_window` pins the
+/// number.
+fn default_step() -> Duration {
+    RetryPolicies::default().input_settle.step
+}
+
+/// Input settling that is not the default one: 100 ms steps inside a 1 s
+/// window. A worker or a client that took the step or the window from
+/// anywhere but the policy it was given gets these wrong.
+fn custom_settle_policies() -> RetryPolicies {
+    let defaults = RetryPolicies::default();
+    let custom = InputSettle {
+        step: Duration::from_millis(100),
+        window: Duration::from_secs(1),
+    };
+    assert_ne!(custom.step, defaults.input_settle.step);
+    assert_ne!(custom.window, defaults.input_settle.window);
+    RetryPolicies {
+        input_settle: custom,
+        ..defaults
+    }
+}
+
 /// Writes `value` to `code` on display "a", on a worker run in the test
 /// thread in virtual time under `budget`, the reads after the write going as
 /// `script` says. Returns the run and every transaction that reached the
@@ -1002,9 +1035,20 @@ fn write_then_read(
     budget: Duration,
     script: impl IntoIterator<Item = Scripted>,
 ) -> (Run<()>, Vec<Call>) {
+    write_then_read_with(RetryPolicies::default(), code, value, budget, script)
+}
+
+/// [`write_then_read`] under `policies` instead of the default ones.
+fn write_then_read_with(
+    policies: RetryPolicies,
+    code: VcpCode,
+    value: u16,
+    budget: Duration,
+    script: impl IntoIterator<Item = Scripted>,
+) -> (Run<()>, Vec<Call>) {
     let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
     source.script_reads(script);
-    let run = on_bus(&source, budget, |worker, id, deadline| {
+    let run = on_bus_with(&source, policies, budget, |worker, id, deadline| {
         worker.write_vcp(id, code, value, deadline)
     });
     (run, source.calls())
@@ -1066,23 +1110,35 @@ fn input_write_returns_once_the_monitor_reads_back_the_value() {
             input_read()
         ]
     );
-    assert_eq!(run.sleeps, [INPUT_SETTLE_STEP; 3]);
+    assert_eq!(run.sleeps, [default_step(); 3]);
 }
 
 /// A monitor that keeps the old input, like one that goes back from an
 /// input with no signal, is not an error: the write was accepted, and the
-/// read after it tells what the monitor kept.
+/// read after it tells what the monitor kept. Under a policy that is not the
+/// default one, the worker waits that policy's window in that policy's
+/// steps (D-2026-09-30-input-switch-autostart-17).
 #[test]
 fn input_write_returns_ok_after_the_settle_window_when_the_monitor_keeps_the_old_value() {
-    let (run, calls) = write_input(DISPLAYPORT_2, [Scripted::Holds(DISPLAYPORT_1); 20]);
+    let policies = custom_settle_policies();
+    let settle = policies.input_settle;
+    let budget = write_budget(&DdcHiBudgets::default(), &policies, VcpCode::INPUT_SOURCE);
+
+    let (run, calls) = write_then_read_with(
+        policies,
+        VcpCode::INPUT_SOURCE,
+        DISPLAYPORT_2,
+        budget,
+        [Scripted::Holds(DISPLAYPORT_1); 20],
+    );
 
     let reads = u32::try_from(calls.len() - 1).unwrap();
     assert_eq!(run.result, Ok(()));
     assert_eq!(calls[0], written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2));
     assert!(calls[1..].iter().all(|call| *call == input_read()));
-    assert_eq!(INPUT_SETTLE_STEP * reads, INPUT_SETTLE_WINDOW);
-    assert_eq!(slept(&run), INPUT_SETTLE_WINDOW);
-    assert!(run.sleeps.iter().all(|sleep| *sleep == INPUT_SETTLE_STEP));
+    assert_eq!(settle.step * reads, settle.window);
+    assert_eq!(slept(&run), settle.window);
+    assert!(run.sleeps.iter().all(|sleep| *sleep == settle.step));
 }
 
 /// A read that fails, one that answers for another code and one that shows
@@ -1104,7 +1160,7 @@ fn input_write_survives_reads_that_fail_or_lie_while_settling() {
 
     assert_eq!(run.result, Ok(()));
     assert_eq!(calls.len(), 1 + 6);
-    assert_eq!(run.sleeps, [INPUT_SETTLE_STEP; 6]);
+    assert_eq!(run.sleeps, [default_step(); 6]);
 }
 
 /// Only the input source is slow to show: any other write is left as the
@@ -1123,23 +1179,27 @@ fn writes_to_other_codes_do_not_settle() {
 }
 
 /// The budget the client waits under is the one the settling is tested
-/// under: the whole window fits in it, which the plain VCP budget would cut
-/// short.
+/// under: the whole window of the policy it was given fits in it, which the
+/// plain VCP budget would cut short. A client that budgeted by any other
+/// window than the policy's fails here, as the policies are not the default
+/// ones (D-2026-09-30-input-switch-autostart-17).
 #[test]
 fn input_write_budget_covers_the_settle_window() {
-    let budgets = DdcHiBudgets::default();
-    let policies = RetryPolicies::default();
+    let budgets = budgets(Duration::from_millis(400));
+    let policies = custom_settle_policies();
+    let window = policies.input_settle.window;
     let keeps_old = [Scripted::Holds(DISPLAYPORT_1); 20];
     let input = VcpCode::INPUT_SOURCE;
+    assert!(budgets.vcp < window);
 
     let budget = write_budget(&budgets, &policies, input);
-    let (full, _) = write_then_read(input, DISPLAYPORT_2, budget, keeps_old);
-    let (cut, _) = write_then_read(input, DISPLAYPORT_2, budgets.vcp, keeps_old);
+    let (full, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budget, keeps_old);
+    let (cut, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budgets.vcp, keeps_old);
 
-    assert_eq!(budget, budgets.vcp + INPUT_SETTLE_WINDOW);
+    assert_eq!(budget, budgets.vcp + window);
     assert_eq!(full.result, Ok(()));
-    assert_eq!(slept(&full), INPUT_SETTLE_WINDOW);
-    assert!(slept(&cut) < INPUT_SETTLE_WINDOW, "{:?}", cut.sleeps);
+    assert_eq!(slept(&full), window);
+    assert!(slept(&cut) < window, "{:?}", cut.sleeps);
     for other in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE, VcpCode(0xE1)] {
         assert_eq!(
             write_budget(&budgets, &policies, other),
@@ -1223,7 +1283,7 @@ fn a_panic_or_a_refusal_while_settling_ends_the_input_write_with_ok() {
 
         assert_eq!(run.result, Ok(()), "{ending:?}");
         assert_eq!(calls.len(), 1 + 2, "{ending:?}");
-        assert_eq!(run.sleeps, [INPUT_SETTLE_STEP; 2], "{ending:?}");
+        assert_eq!(run.sleeps, [default_step(); 2], "{ending:?}");
     }
 }
 
@@ -1235,7 +1295,7 @@ fn an_input_read_back_is_compared_by_its_low_byte() {
 
     assert_eq!(run.result, Ok(()));
     assert_eq!(calls.len(), 1 + 1);
-    assert_eq!(run.sleeps, [INPUT_SETTLE_STEP]);
+    assert_eq!(run.sleeps, [default_step()]);
 }
 
 /// A write the monitor did not take is reported as any failed write, with no

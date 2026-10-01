@@ -19,14 +19,17 @@ const VCP_BACKOFF: Duration = Duration::from_millis(200);
 /// fails, so attempts 50 ms apart all failed (D-2026-09-26-cli-2).
 const CAPABILITIES_BACKOFF: Duration = Duration::from_millis(500);
 /// Pause between two reads of the input source while the monitor settles.
+/// Private with [`INPUT_SETTLE_WINDOW`]: only `RetryPolicies::default` names
+/// them, so the worker and the client can only read the policy they were
+/// given (D-2026-09-30-input-switch-autostart-17).
 // WHY 250 ms: a read is one DDC/CI transaction of 50-100 ms; polling slower
 // than the monitor switches would keep the popup waiting for nothing.
-pub(crate) const INPUT_SETTLE_STEP: Duration = Duration::from_millis(250);
+const INPUT_SETTLE_STEP: Duration = Duration::from_millis(250);
 /// How long a write of the input source waits for the monitor to show it.
 // WHY 3 s: a monitor that switches to an input with no signal scans it and
 // goes back on its own within a couple of seconds; the wait has to outlast
 // that to report what the monitor kept (D-2026-09-30-input-switch-autostart-3).
-pub(crate) const INPUT_SETTLE_WINDOW: Duration = Duration::from_secs(3);
+const INPUT_SETTLE_WINDOW: Duration = Duration::from_secs(3);
 
 /// Time as the worker sees it; virtual in tests, so retries are checked
 /// without sleeping.
