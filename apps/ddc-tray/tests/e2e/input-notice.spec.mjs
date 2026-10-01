@@ -5,7 +5,9 @@
 // says the monitor may have switched away. A read-back equal to the request
 // shows nothing. The demo's writes never reach a monitor; a test-only
 // bridge.js keeps the reading of the codes in `window.__ddcKeep`, as
-// confirm.spec.mjs does.
+// confirm.spec.mjs does. Each toast's whole text is also checked against
+// the sentence written out in the test, so a template that swaps the value
+// kept and the value asked fails (D-2026-10-01-input-switch-autostart-3).
 
 import { readFileSync } from 'node:fs';
 import { translator } from '../../src/i18n/index.js';
@@ -74,6 +76,9 @@ test.describe('in English', () => {
     await expectToast(page, en('notice.inputKept', KEPT_AND_ASKED));
     await expectToastNaming(page, ['DisplayPort-1', 'HDMI-1']);
     await expect(page.locator('#toast-text')).toContainText('may have no signal');
+    await expect(page.locator('#toast-text')).toHaveText(
+      'The monitor is still on DisplayPort-1, not HDMI-1. HDMI-1 may have no signal; the monitor goes back to an input that has one.',
+    );
     expect(await writes(page)).toEqual([HDMI_1_WRITE]);
     await expectAccessible(page);
   });
@@ -87,6 +92,9 @@ test('the toast names the kept and the asked input (pt-BR)', async ({ page }) =>
   await expectToast(page, t('notice.inputKept', KEPT_AND_ASKED));
   await expectToastNaming(page, ['DisplayPort-1', 'HDMI-1']);
   await expect(page.locator('#toast-text')).toContainText('pode estar sem sinal');
+  await expect(page.locator('#toast-text')).toHaveText(
+    'O monitor continua em DisplayPort-1, não em HDMI-1. HDMI-1 pode estar sem sinal; o monitor volta para uma entrada que tenha.',
+  );
   await expect(inputChip(page, 'DisplayPort-1')).toBeChecked();
   expect(await writes(page)).toEqual([HDMI_1_WRITE]);
   await expectAccessible(page);
@@ -113,6 +121,9 @@ test('a failed read after an input write says the monitor may have switched away
 
   await expectToast(page, t('notice.inputUnread'));
   await expectToastNaming(page, ['troca de entrada', 'pode ter comutado']);
+  await expect(page.locator('#toast-text')).toHaveText(
+    'O monitor não respondeu depois da troca de entrada. Ele pode ter comutado para uma entrada que este computador não alcança.',
+  );
   await expect(inputChip(page, 'DisplayPort-1')).toBeChecked();
   await expect(inputChip(page, 'HDMI-1')).not.toBeChecked();
   expect(await writes(page)).toEqual([]);
@@ -135,6 +146,7 @@ test('a setting other than the input that the monitor did not apply shows the ge
     }),
   );
   await expectToastNaming(page, ['Brilho', '75%', '76%']);
+  await expect(page.locator('#toast-text')).toHaveText('Brilho: o monitor manteve 75% em vez de 76%.');
   await expect(page.locator('#toast-text')).not.toContainText('sinal');
   expect(await writes(page)).toEqual([
     { monitorId: MONITORS.rtk, code: BRIGHTNESS, value: 76, confirmed: false },

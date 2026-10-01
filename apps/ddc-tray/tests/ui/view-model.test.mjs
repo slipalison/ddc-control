@@ -256,6 +256,17 @@ const INPUT_CODE = 0x60;
 const DISPLAYPORT_1 = 0x0f;
 const DISPLAYPORT_2 = 0x10;
 
+// The notices for DisplayPort-1 kept instead of DisplayPort-2, and for 75%
+// kept instead of 80%, written out in full rather than drawn from the
+// templates under test: a template that swaps the value kept and the value
+// asked fails on them (D-2026-10-01-input-switch-autostart-3).
+const INPUT_KEPT_EN =
+  'The monitor is still on DisplayPort-1, not DisplayPort-2. DisplayPort-2 may have no signal; the monitor goes back to an input that has one.';
+const INPUT_KEPT_PT =
+  'O monitor continua em DisplayPort-1, não em DisplayPort-2. DisplayPort-2 pode estar sem sinal; o monitor volta para uma entrada que tenha.';
+const KEPT_EN = 'Brightness: the monitor kept 75% instead of 80%.';
+const KEPT_PT = 'Brilho: o monitor manteve 75% em vez de 80%.';
+
 test('a read-back that differs from the request gives a notice naming both values', () => {
   const slider = readBackNotice(brightness(75, 100), { asked: 80, readBack: { current: 75, max: 100 } }, en);
   const input = readBackNotice(
@@ -267,6 +278,13 @@ test('a read-back that differs from the request gives a notice naming both value
   assert.equal(slider, 'Brightness: the monitor kept 75% instead of 80%.');
   assert.match(input, /DisplayPort-1/);
   assert.match(input, /DisplayPort-2/);
+  assert.equal(input, INPUT_KEPT_PT);
+  assert.equal(
+    readBackNotice(inputControl, { asked: DISPLAYPORT_2, readBack: { current: DISPLAYPORT_1, max: 0x12 } }, en),
+    INPUT_KEPT_EN,
+  );
+  assert.equal(slider, KEPT_EN);
+  assert.equal(readBackNotice(brightness(75, 100), { asked: 80, readBack: { current: 75, max: 100 } }, pt), KEPT_PT);
 });
 
 test('the input notice says the asked input may have no signal', () => {
@@ -277,6 +295,10 @@ test('the input notice says the asked input may have no signal', () => {
   assert.match(readBackNotice(inputControl, change, pt), /DisplayPort-2 pode estar sem sinal/);
   assert.doesNotMatch(generic, /signal/);
   assert.doesNotMatch(readBackNotice(brightness(75, 100), { asked: 80, readBack: { current: 75, max: 100 } }, pt), /sinal/);
+  assert.equal(readBackNotice(inputControl, change, en), INPUT_KEPT_EN);
+  assert.equal(readBackNotice(inputControl, change, pt), INPUT_KEPT_PT);
+  assert.equal(generic, KEPT_EN);
+  assert.equal(readBackNotice(brightness(75, 100), { asked: 80, readBack: { current: 75, max: 100 } }, pt), KEPT_PT);
 });
 
 test('a read-back equal to the request gives no notice', () => {
@@ -293,6 +315,16 @@ test('a failed read after an input write says the monitor may have switched away
 
     assert.match(writeFailureText(error, INPUT_CODE, en), /may have switched/, kind);
     assert.match(writeFailureText(error, INPUT_CODE, pt), /pode ter comutado/, kind);
+    assert.equal(
+      writeFailureText(error, INPUT_CODE, en),
+      'The monitor did not answer after the input change. It may have switched to an input this computer cannot reach.',
+      kind,
+    );
+    assert.equal(
+      writeFailureText(error, INPUT_CODE, pt),
+      'O monitor não respondeu depois da troca de entrada. Ele pode ter comutado para uma entrada que este computador não alcança.',
+      kind,
+    );
   }
   const refused = { kind: 'invalid_value', message: 'value 2 is not an allowed value for feature 0x60' };
   assert.equal(writeFailureText(refused, INPUT_CODE, en), errorText(refused, en));
