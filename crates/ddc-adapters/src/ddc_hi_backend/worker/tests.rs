@@ -1214,9 +1214,13 @@ fn input_write_budget_covers_the_settle_window() {
 /// failed switch. Nor is it given more than the injected window: a write the
 /// monitor never ends times out once the VCP budget and that window are
 /// spent, not after the default 3 s window. A longer budget still answers the
-/// first write `Ok`, so only the second one catches it. The settling runs on
-/// the system clock here, shrunk by the injected policies
-/// (D-2026-09-30-input-switch-autostart-14; D-2026-10-01-input-switch-autostart-1).
+/// first write `Ok`, so only the second one catches it. And a write of any
+/// other code keeps the plain VCP budget: a brightness write the monitor never
+/// ends times out once that budget is spent, before the settle window would
+/// add to it (D-2026-09-30-input-switch-autostart-3: other codes unchanged).
+/// The settling runs on the system clock here, shrunk by the injected
+/// policies (D-2026-09-30-input-switch-autostart-14;
+/// D-2026-10-01-input-switch-autostart-1, -2).
 #[test]
 fn input_write_through_the_client_outlives_the_vcp_budget() {
     let settle = no_backoff().input_settle;
@@ -1230,6 +1234,9 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
     let stuck = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Block(gate.clone()))]);
     let stuck_client = spawn(&stuck, budgets(vcp));
     stuck_client.enumerate().unwrap();
+    let stuck_other = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Block(gate.clone()))]);
+    let stuck_other_client = spawn(&stuck_other, budgets(vcp));
+    stuck_other_client.enumerate().unwrap();
 
     let started = Instant::now();
     let result = client.write_vcp(&id("a"), VcpCode::INPUT_SOURCE, DISPLAYPORT_2);
@@ -1237,6 +1244,9 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
     let started = Instant::now();
     let never_ends = stuck_client.write_vcp(&id("a"), VcpCode::INPUT_SOURCE, DISPLAYPORT_2);
     let gave_up = started.elapsed();
+    let started = Instant::now();
+    let other_never_ends = stuck_other_client.write_vcp(&id("a"), VcpCode::BRIGHTNESS, 40);
+    let other_gave_up = started.elapsed();
     gate.open();
 
     let calls = source.calls();
@@ -1251,6 +1261,13 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
     assert!(
         gave_up < budget + Duration::from_secs(1),
         "{gave_up:?} >= {budget:?} + 1 s"
+    );
+    assert_eq!(other_never_ends, Err(DdcError::Timeout));
+    assert!(other_gave_up >= vcp, "{other_gave_up:?} < {vcp:?}");
+    assert!(
+        other_gave_up < budget,
+        "{other_gave_up:?} >= {vcp:?} + {:?}",
+        settle.window
     );
 }
 
