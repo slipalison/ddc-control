@@ -219,6 +219,35 @@ Depois do auto-reset 1/3, esta é a 6ª iteração absoluta. HEAD do código: `6
 - `input-notice.spec.mjs` `92f99e00…`;
 - `view-model.test.mjs` `7c650133…`, que entra agora no Verify da linha 3.
 
+## Rodada 2, iteração 2 — sexta rodada do critic (D-2026-10-01-4)
+7ª iteração absoluta. HEAD do código: `75fca0b`. O orquestrador escreveu esta seção a partir do relatório do doer.
+
+**O que mudou.**
+- Linhas 8 e 10: só os Verify, emendados em `1a8c59d`. O orquestrador provou as duas por mutação: um `TODO` no `crates/ddc-adapters/Cargo.toml` deixa o Verify 10 sem `OK`.
+- Linha 1: `75fca0b` test, só em `worker/tests.rs`. Na 1ª parte de (f) entra o limite de cima DETERMINÍSTICO `reads <= ceil(janela / passo)`, que dá 20 com 100 ms / 5 ms.
+
+**Por que o limite vale.** Em `settle_input` não há leitura inicial: cada leitura vem depois de um `sleep(min(left, step))`, e o `sleep` da std nunca volta antes do pedido. Logo a leitura j só acontece se `(j−1)·passo < janela`, e o `.min(deadline)` só reduz esse número.
+
+O limite tem margem ZERO. Medido no HEAD, deu 18 a 20 leituras, com 20 em 7 de 10 rodadas. Uma 21ª leitura só viria de o relógio do `sleep` discordar do `Instant`. No Linux os dois são `CLOCK_MONOTONIC`. No Windows há uma possibilidade teórica: o timer trunca em 100 ns um último `sleep` parcial exato. Se o `rust-windows` mostrar `21 reads`, a causa é essa premissa (ligada à W-11), não o worker.
+
+**Mutações** (todo `cargo` em `bwrap`, com os 16 `/dev/i2c-*` cobertos e observados; zero eventos fora do controle):
+- M1m, piso `MIN_SETTLE_WINDOW` de 1 s: 10/10 FAILED, com `32 reads of the input, more than the 20 that fit a 100ms window in 5ms steps` ou `Err(Timeout)`.
+- M1f, piso no `Default`: 10/10 FAILED, com 31–32 leituras ou `Err(Timeout)`.
+- As duas passam no fmt e no clippy. Foram revertidas byte a byte.
+
+**Estabilidade do (f) no HEAD.**
+- Em repouso: 50/50 verdes, 0,32 s.
+- Sob 24 laços de CPU: 20/20 verdes, de 0,32 a 0,36 s.
+
+**Gates.**
+- `cargo fmt --all --check`, `clippy -D warnings` e o cross-check Linux saem exit 0.
+- `cargo test --workspace --locked`: 413 passed, 0 failed, 9 ignored.
+- `cargo llvm-cov`: linhas 85,25%.
+
+**Verify.** Os 10 deram `OK`. A linha 1 falhou só pelo SHA-256 antigo e passou com o hash novo. A linha 9 passou de primeira.
+
+**Harness recongelado (orquestrador):** `worker/tests.rs` `124ba97c…`.
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
