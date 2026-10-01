@@ -2,43 +2,57 @@
 
 **Verdict:** APPROVED_PENDING_MANUAL
 
-> Iteração 5 do loop. Branch `phase/input-switch-autostart`, HEAD `46d06c4`, base `origin/main` = merge-base `134b665`. O conteúdo foi produzido pelo reviewer e gravado pelo orquestrador, porque o harness nega escrita de `.md` ao subagente.
+> Rodada 2, iteração 1 do loop (6ª iteração absoluta, depois do auto-reset 1/3).
+> - Branch `phase/input-switch-autostart`, HEAD `846dbc1`, base `origin/main` = merge-base `134b665`.
+> - O conteúdo foi produzido pelo reviewer e gravado pelo orquestrador, porque o harness nega escrita de `.md` ao subagente.
 >
 > **Extração dos Verify.** Os `Verify:` foram extraídos por programa, com a regex `^\s*\*\*Verify:\*\*\s*`([^`]+)`` sobre o CONTEXT.md e o PROJECT.md: 10 do CONTEXT e 3 do PROJECT (as 2 linhas Manual não têm comando).
-> - Prefixos sha256 dos comandos: ctx1 `c8a6801796b6`, ctx2 `81b3ba163edc`, ctx3 `175d15c5dc40`, ctx4 `4c5c7c2b8b53`, ctx5 `da4ccacf136b`, ctx6 `e41e73076d3f`, ctx7 `a1e6cea1a756`, ctx8 `7071e4216c66`, ctx9 `ae65d59b93ea`, ctx10 `3ce6ae8234d5`, prj1 `8c60d6ffe7ad`, prj3 `b9c553f9a577`.
-> - As linhas 2, 3, 5, 7, 9 e 10 batem byte a byte com a extração da rodada anterior. As linhas 1, 4, 6 e 8 diferem, como esperado: são as emendadas em `9d20392`/`46d06c4`.
+> - Prefixos sha256 dos comandos: ctx1 `cc94c90671ee`, ctx2 `81b3ba163edc`, ctx3 `8f648d4f4fe0`, ctx4 `05ff88d61fb8`, ctx5 `da4ccacf136b`, ctx6 `e41e73076d3f`, ctx7 `a1e6cea1a756`, ctx8 `b89b1c611b3b`, ctx9 `ae65d59b93ea`, ctx10 `3ce6ae8234d5`, prj1 `8c60d6ffe7ad`, prj3 `b9c553f9a577`.
+> - As linhas 2, 5, 6, 7, 9 e 10 batem byte a byte com a extração do CONTEXT de `a91d193`.
+> - As linhas 1, 3, 4 e 8 diferem, como esperado: são as emendadas em `f9e869e`/`846dbc1` (D-2026-10-01-input-switch-autostart-3).
 >
 > **Ambiente de execução:**
 > - `env -i` com `bash --noprofile --norc`;
 > - `LC_ALL=C.UTF-8`, `HOME` e `PATH=~/.cargo/bin:/usr/local/bin:/usr/bin:/bin`;
 > - `DISPLAY=:0`, `WAYLAND_DISPLAY=wayland-0`, `XDG_RUNTIME_DIR=/run/user/1000` e `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus` do ambiente.
 >
-> Os 10 do CONTEXT e os Verify de `cargo test` e de TODO do PROJECT rodaram LITERALMENTE. A linha 4 rodou com `npm ci` e o Playwright inteiro. A cobertura reusa o Gate 3.
+> Os 10 do CONTEXT e os Verify de `cargo test` e de TODO do PROJECT rodaram LITERALMENTE:
+> - a linha 4 rodou com `npm ci` e o Playwright inteiro;
+> - a linha 9 rodou 3 vezes;
+> - a cobertura reusa o Gate 3.
 >
-> **Herança da iteração 4, só por diff.** `git diff d18829d HEAD -- . ':!.jdi'` lista 6 arquivos: `input-notice.spec.mjs`, `retry.rs`, `retry/tests.rs` (novo), `ddc_hi_backend/tests.rs`, `worker.rs` e `worker/tests.rs`. Para eles nada foi herdado. Herdados, porque os arquivos não mudaram desde `d18829d`:
+> **Herança da iteração 5, só por diff.** `git diff a91d193 HEAD -- . ':!.jdi'` lista 4 arquivos: `input-notice.spec.mjs`, `view-model.test.mjs`, `crates/ddc-adapters/Cargo.toml` e `worker/tests.rs`. Para eles nada foi herdado, nem o tempo do (f) nem as sondas da linha 10, que foram refeitas. Herdados, porque os arquivos não mudaram desde `a91d193`:
 > - W-2: clippy `-D warnings` do `notification_area.rs` para `x86_64-pc-windows-gnu`;
 > - as mutações A, R, B1 e B2 da linha 9 (`status_item.rs`, `lib.rs` e `scripts/` sem diff);
-> - os 6 casos vermelhos e os 2 verdes plantados na linha 10, cujo Verify não mudou. Duas sondas novas foram refeitas no spec alterado.
+> - a M6 da linha 6 e a sonda de 1 byte da linha 2 (arquivos e Verify sem diff).
 >
 > Fora isso, todos os gates e todos os Verify rodaram de novo.
 >
-> **Estado da máquina.** O `ddc-tray` do usuário (PID 24429) ficou rodando e intacto do começo ao fim. A listagem do `~/.config/autostart` real tem os mesmos sha256 antes e depois: `ls -A` `bf0a7045a8fb…` e `ls -la` `f69da4fd3ea5…`. No fim não sobrou nenhum `dbus-run-session`, watcher, servidor na 1420, tempdir `/tmp/smoke-*` ou laço de CPU. A cópia `/var/tmp/rv5` foi apagada.
+> **Estado da máquina.**
+> - O `ddc-tray` do usuário (PID 24429) ficou rodando e intacto do começo ao fim.
+> - A listagem do `~/.config/autostart` real tem os mesmos sha256 antes e depois: `ls -A` `bf0a7045a8fb…` e `ls -la` `f69da4fd3ea5…`.
+> - No fim não sobrou nenhum `dbus-run-session`, watcher, servidor HTTP do Playwright, tempdir `/tmp/smoke-*` ou laço de CPU.
+> - As cópias `/var/tmp/rv6` e `/var/tmp/rv6b` foram apagadas.
 >
-> **Monitor real.** Nada escreveu em monitor real, e `#[ignore]`, `--ignored` e `DDC_HW_TESTS` não foram usados. As mutações da linha 8 plantaram só corpos vazios (`fn planted() {}`) e nunca foram compiladas: o Verify 8 não compila nada. Nenhuma mutação criou teste que fale com o backend real.
+> **Monitor real.**
+> - Nada escreveu em monitor real, e `#[ignore]`, `--ignored` e `DDC_HW_TESTS` não foram usados.
+> - As mutações mexeram só em templates i18n, em constantes, no cálculo da janela de `settle_input` sobre `FakeDisplays`, no `Cargo.toml` ou plantaram corpos vazios (`fn planted() {}`).
+> - Nenhuma mutação criou teste que fale com o backend real.
+> - Todo `cargo` das mutações rodou em `bwrap`, com os 16 `/dev/i2c-*` cobertos e observados (ver 5.7).
 >
-> **Mudança de ambiente desde a iteração 4.** `/dev/i2c-1..5` e `/dev/i2c-9..15` agora têm ACL `user:slipalison:rw-` (criada às 07:31 de hoje). Na iteração 4 eram `root 0600` sem ACL. A barreira ambiental não existe mais, então a prova por inotify em sandbox rodou ANTES das execuções nativas (ver 5.7).
+> **Ambiente.** `/dev/i2c-1..5` e `/dev/i2c-9..15` seguem com ACL `user:slipalison:rw-`. A prova por inotify em `bwrap` rodou ANTES de qualquer execução nativa da suíte.
 
 ## Gates
 | Gate | Status | Details |
 |---|---|---|
 | Build | PASS | `cargo build --workspace --locked` sai 0, e `cargo check -p ddc-core -p ddc-adapters -p ddc-cli --locked --target x86_64-unknown-linux-gnu` também. Única nota: o aviso future-incompat de `nom v3.2.1`, que já estava na base. |
-| Tests | PASS | 413 passed, 0 failed, 9 ignored (hardware, não rodados). Igual à iteração 4; a phase anterior tinha 386. A lib `ddc-adapters` dá `76 passed`. |
-| Coverage | PASS | `TOTAL 5573 832 85.07% 647 109 83.15% 3626 535 85.25% 0 0`: coluna Lines = **85.25%** (3626 linhas, 535 perdidas), `COV_EXIT=0`, limiar 80%, `main.rs`/`build.rs` excluídos. A iteração 4 tinha 3642 linhas; as −16 são o código só de teste que saiu de `retry.rs`/`worker.rs`. Arquivos da phase: `worker.rs` 96.88%, `retry.rs` 96.08%, `autostart.rs` 96.00%, `menu.rs` 98.94%, `i18n.rs` 100%. `main.rs` sem diff na phase. UI (`npm run test:unit`): 165 pass, `all files` 88.48%. |
+| Tests | PASS | 413 passed, 0 failed, 9 ignored (hardware, não rodados), igual no `bwrap` e no nativo. Igual à iteração 5; a phase anterior tinha 386. A lib `ddc-adapters` dá `76 passed`. A saída não tem mais o bloco `Doc-tests ddc_adapters`: só `ddc_cli`, `ddc_core` e `ddc_tray`. |
+| Coverage | PASS | `TOTAL 5573 832 85.07% 647 109 83.15% 3626 535 85.25% 0 0`: coluna Lines = **85.25%** (3626 linhas, 535 perdidas), `COV_EXIT=0`, limiar 80%, `main.rs`/`build.rs` excluídos. Rodou dentro do `bwrap`, com o observador ativo. Arquivos da phase: `worker.rs` 96.88%, `retry.rs` 96.08%, `autostart.rs` 96.00%, `menu.rs` 98.94%, `i18n.rs` 100%. `main.rs` sem diff na phase. UI (`npm run test:unit`): 165 pass, `all files` 88.48%. |
 | Lint | PASS | `cargo fmt --all --check` sai 0. `cargo clippy --workspace --all-targets --locked -- -D warnings` sai 0 no repositório e também A FRIO, na cópia descartável com `target/` próprio. O grep de `#[allow(` fora de testes não tem saída. |
-| Hexagonal/Safety/Hygiene | PASS (com notas) | 5.1 a 5.11, ver abaixo. O 5.7 traz a leitura de cada teste novo ou alterado e a prova por inotify em `bwrap`: zero aberturas de `/dev/i2c-*`, com controle positivo. |
-| Consistency | PASS (com warnings) | D-3, D-4, D-12, D-14, D-17(a), D-19, D-2026-10-01-1 e -2 conformes no código. 5 commits desde `d18829d`, com tipo, escopo e tamanho corretos. W-15 e W-17 fechados; W-8 persiste. |
-| UI Validation | PASS | `has_frontend: true`. Suíte Playwright do app: 152 passed, 6 skipped (só `screenshots.spec.mjs:24/34/47` em `light`/`dark`, `test.skip` condicionado a `SCREENSHOTS=1`, arquivo fora do diff), 0 failed, 0 flaky. |
-| DoD | PASS_PENDING_MANUAL | 13/13 auto PASS (10 CONTEXT + 3 PROJECT), 2 manuais herdados pendentes. Resíduos: W-18 (linha 8, sintático, o Gate 4 pega) e W-19 (linhas 3/4, papéis dos nomes, objetivo). |
+| Hexagonal/Safety/Hygiene | PASS (com notas) | 5.1 a 5.11, ver abaixo. O 5.7 traz a leitura de cada teste alterado e a prova por inotify em `bwrap`: zero aberturas de `/dev/i2c-*` na suíte, na cobertura e nas mutações, com controle positivo. |
+| Consistency | PASS (com warnings) | D-2026-10-01-3 (a), (b) e (c) conformes no código, assim como D-3, D-4, D-12, D-14, D-17(a), D-19 e D-2026-10-01-1/-2. 5 commits desde `a91d193`, com tipo, escopo e tamanho corretos. W-8 fechado. A W-20 é regressão de força de teste introduzida em `952dac1`, não violação de D-XX no código. |
+| UI Validation | PASS | `has_frontend: true`. Suíte Playwright do app: 152 passed, 6 skipped, 0 failed, 0 flaky. Os 6 skipped são só `screenshots.spec.mjs:24/34/47` em `light`/`dark` (`test.skip` condicionado a `SCREENSHOTS=1`, arquivo sem diff). `input-notice.spec.mjs` tem 10 `✓`. |
+| DoD | PASS_PENDING_MANUAL | 13/13 auto PASS (10 CONTEXT + 3 PROJECT), 2 manuais herdados pendentes. Resíduos: **W-20** (linha 1, objetivo provável: piso no `Default` passa em 15 de 20 rodadas) e W-21 (linha 8, não objetivo: `#[test]` gerado por macro). |
 
 ### Gate 5 em detalhe
 - **5.1** `ddc-core [dependencies]` = só `thiserror`. Sem saída.
@@ -51,165 +65,218 @@
   - `tray.rs:380` (cfg na 207);
   - `status_item.rs` 304/320 (cfg na 233);
   - `worker.rs:141` (comentário);
-  - `stop_signals.rs` 105/108 (cfg na 82) e `kwin_placement.rs` 246/256/260/267 (cfg na 195), ambos sem diff.
+  - `stop_signals.rs` 105/108 (cfg na 82) e `kwin_placement.rs` 246/256/260/267 (cfg na 195).
 
   Nenhum hit em `ddc-core`. Os lints `unwrap_used`/`expect_used`/`panic` = `warn` seguem no workspace, e `clippy.toml` só libera em testes.
 - **5.7 (segurança de escrita no monitor, delegada pela linha 8).**
   - Greps do gate:
     - `Dangerous` existe no core (`error.rs:33`, `capabilities/tests.rs`);
     - não há `Confirm::Yes` fora de fronteira humana ou teste;
-    - `DdcHiMonitorBackend` em `crates/*/tests` e `apps` só aparece em `crates/ddc-adapters/tests/real_monitor.rs` e no composition root (`lib.rs:29`, `lib.rs:79`). `real_monitor.rs` tem 7 testes, todos `#[ignore = "…DDC_HW_TESTS=1"]`, e 0 bytes de diff contra a base.
-  - Varredura extra em `src/`, que o 5.7c não cobre: `DdcHiDisplays`/`DdcHiMonitorBackend`/`ddc_hi::Display::enumerate` só aparecem nos 3 arquivos de produção, em `hardware.rs` (sem diff), em `lib.rs` do adapter (re-export), em `ddc-cli/src/main.rs` e `ddc-tray/src/lib.rs` (composition roots) e em `ddc_hi_backend/tests.rs`.
-  - **Leitura dos testes novos ou alterados nesta iteração:**
-    - **`worker/tests.rs`, 3ª parte de (f)** (`tests.rs:1237-1271`): `FakeDisplays::with([FakeDisplay::new("a", Behaviour::Block(gate.clone()))])` e `spawn(&stuck_other, budgets(vcp))`. O `spawn` de `tests.rs:358-359` é `WorkerClient::spawn(source.clone(), budgets, no_backoff())` sobre `FakeDisplays`. O arquivo não cita `DdcHiDisplays` nem `DdcHiMonitorBackend` (só `DdcHiBudgets`).
-    - **`ddc_hi_backend/tests.rs`, teste (h)** (`tests.rs:61`): agora lê o CAMPO `backend.client.policies` e o `Debug`. `WorkerClient::spawn` só cria o canal e a thread (`worker.rs:438-456`), e `Worker::new` só inicializa campos (`worker.rs:218-226`). `run` espera jobs (`worker.rs:210-214`), e o `Debug` imprime só os `budgets` (`worker.rs:515-521`). Nenhum job é enviado, então `DdcHiDisplays::enumerate` (`hardware.rs:20-29`) nunca roda.
-    - **`retry/tests.rs`.** Nenhum `#[test]`, só o helper `without_backoff()` (`retry/tests.rs:12`).
-    - **`input-notice.spec.mjs`.** Só asserções novas (`expectToastNaming`, `spec:57`), sobre o bridge demo em memória (sem `window.__TAURI__`).
-    - **Demais testes Rust e JS.** Sem diff desde a iteração 4 (leitura daquela iteração), e cobertos pela prova abaixo.
-  - **Prova comportamental, ANTES das execuções nativas.** O reviewer pôs 16 arquivos comuns sobre `/dev/i2c-0..15` dentro de `bwrap --dev-bind / /`, com um observador inotify (`IN_OPEN|IN_ACCESS|IN_MODIFY`, Python + ctypes) nesses arquivos.
-    - Controle positivo: `cat /dev/i2c-3` no mesmo sandbox gerou 1 evento (`mask=0x20`).
-    - Ali rodou `cargo test --workspace --locked`: `SUITE_EXIT=0`, 413 passed, 0 failed, 9 ignored e ZERO eventos.
-  - Sem barreira ambiental: ver a nota de ambiente nos Warnings.
+    - `DdcHiMonitorBackend` em `crates/*/tests` e `apps` só aparece em `crates/ddc-adapters/tests/real_monitor.rs` e no composition root (`lib.rs:29`, `lib.rs:79`).
+    - `real_monitor.rs` tem 7 testes, todos `#[ignore = "…DDC_HW_TESTS=1"]`, e 0 bytes de diff contra a base.
+  - **Leitura dos testes alterados nesta iteração:**
+    - **`worker/tests.rs` (`952dac1`).**
+      - `custom_settle_policies()` (`tests.rs:1017-1030`, passo 500 ms e janela 4 s, `assert!(custom.window > defaults.input_settle.window)` na 1025) e `keeps_old_input_through()` (`tests.rs:1092`) só montam valores.
+      - (b) roda por `write_then_read_with` (`tests.rs:1046-1059`): `FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)])` e `Worker` em relógio virtual (`on_bus_with`).
+      - (e) cria também um `WorkerClient::spawn(source, budgets, policies)` sobre `FakeDisplays` (`tests.rs:1211-1212`) e só chama `write_budget_of`, que é puro (`worker.rs:464-465`).
+      - O arquivo cita `DdcHi` só em `DdcHiBudgets`; não há `DdcHiDisplays` nem `DdcHiMonitorBackend`.
+    - **`view-model.test.mjs`** (`6daa9cb`). Testes `node --test` puros, com os tradutores reais (`translator('en')`/`translator('pt-BR')`, linhas 31-32).
+    - **`input-notice.spec.mjs`** (`6daa9cb`). Só entraram asserções `toHaveText` com frases literais (linhas 79, 95, 124, 149), sobre o bridge demo em memória. O `webServer` é `python3 -m http.server --directory src`, sem `window.__TAURI__`.
+    - **`crates/ddc-adapters/Cargo.toml`** (`66b2665`). Só `[lib] doctest = false`.
+    - **Demais testes Rust e JS.** Sem diff desde `a91d193`, e cobertos pela prova abaixo.
+  - **Prova comportamental, ANTES das execuções nativas.** O reviewer pôs 16 arquivos comuns sobre `/dev/i2c-0..15` dentro de `bwrap --dev-bind / /`. Ali dentro, `stat` mostra os 16 como "arquivo comum vazio". Um observador inotify (`IN_OPEN|IN_ACCESS|IN_MODIFY`, Python + ctypes) ficou ligado nesses arquivos da prova até o fim das mutações.
+    - Controle positivo: `cat /dev/i2c-3` no sandbox gerou 1 evento (`mask=0x20`).
+    - `cargo test --workspace --locked` no sandbox: `SUITE_EXIT=0`, 413 passed, 0 failed, 9 ignored, ZERO eventos.
+    - `cargo llvm-cov` e cerca de 12 minutos de mutações, todos no sandbox: ZERO eventos.
+    - No log inteiro há 1 evento, o do controle.
   - Lacuna do próprio gate, que segue: o grep 5.7c não varre testes de unidade em `src/`. A leitura manual e o inotify a cobriram. Fora do escopo da phase.
 - **5.9** Nenhum `#[tauri::command]` não-async.
-- **5.10** `cargo audit` 0.22.2 (1278 advisories, 531 crates): só `yoke-derive 0.8.3` yanked, warning permitido que já estava no lock da base. `Cargo.lock` sem diff desde `d18829d`; as deps novas da phase seguem sem advisory.
+- **5.10** `cargo audit` 0.22.2 (1278 advisories, 531 crates): só `yoke-derive 0.8.3` yanked, warning permitido que já estava no lock da base. `Cargo.lock` sem diff desde `a91d193` (o `66b2665` não o muda). As deps novas da phase seguem sem advisory.
 - **5.11** Sem segredo. Sem `TODO`/`FIXME` sem issue em `*.rs`.
 
 ### Consistency em detalhe
-- **Commits desde a iteração 4** (`d18829d..HEAD`), 5 ao todo:
+- **Commits desde a iteração 5** (`a91d193..HEAD`), 5 ao todo:
   - código:
-    - `ecf5ef0` test: só `worker/tests.rs`;
-    - `4393927` test: só `input-notice.spec.mjs`;
-    - `ed8114b` refactor: `retry.rs`, `retry/tests.rs` (novo), `ddc_hi_backend/tests.rs` e `worker.rs`. Move código de teste e muda a visibilidade de um campo, sem mudar comportamento: as mesmas 413 passam;
-  - `.jdi/`: `9d20392` e `46d06c4`.
+    - `952dac1` test: só `worker/tests.rs`;
+    - `66b2665` build: só `crates/ddc-adapters/Cargo.toml`;
+    - `6daa9cb` test: `input-notice.spec.mjs` e `view-model.test.mjs`;
+  - `.jdi/`: `f9e869e` e `846dbc1`.
 
-  Escopo = slug, cabeçalhos com 63 a 71 caracteres, `.jdi/` nunca no mesmo commit que código (D-12), e os 5 trazem a linha `Claude-Session:`.
+  Escopo = slug, cabeçalhos com 64 a 71 caracteres, `.jdi/` nunca no mesmo commit que código (D-12), e os 5 trazem a linha `Claude-Session:`. O tipo `build` para `[lib] doctest = false` está correto.
 - **Zero byte de diff** contra a base, reconfirmado em:
   - `crates/ddc-core`, `crates/ddc-cli` e `.github/`;
   - `capabilities/`, `tauri.conf.json`, `src-tauri/src/main.rs` e `commands.rs`;
   - `scripts/smoke-sni.sh`;
   - `crates/ddc-adapters/tests/real_monitor.rs`, `tests/e2e/confirm.spec.mjs` e `tests/ui/toast-states.test.mjs`.
 
-  `apps/ddc-tray/src-tauri/src`, `apps/ddc-tray/src` e `apps/ddc-tray/scripts` não têm diff desde `d18829d`.
-- **D-3 ("outros códigos inalterados")** Conforme. `write_budget` (`worker.rs:188`) segue `budgets.vcp` para todo código que não é `0x60`. Agora isso está provado pela 3ª parte de (f): a mutação M1 fica VERMELHA.
-- **D-14 / D-17(a) / D-19** Conformes:
-  - `INPUT_SETTLE_STEP`/`INPUT_SETTLE_WINDOW` são privadas de `retry.rs` (`git grep` acha só `retry.rs:22,27,32,112,113`);
-  - `settle_input` lê só `self.policies.input_settle` (`worker.rs:312`);
-  - `write_budget` é privada; `write_budget_of` (`worker.rs:464`) é o único caminho e `write_vcp` a chama (`worker.rs:539`);
+  Não têm diff desde `a91d193`: `apps/ddc-tray/src-tauri/src`, `apps/ddc-tray/src`, `apps/ddc-tray/scripts` e `Cargo.lock`. Também não têm diff `worker.rs`, `retry.rs` e `ddc_hi_backend.rs`; código de produção não mudou nesta iteração.
+- **D-2026-10-01-3** Conforme no código:
+  - (a) a política custom de (b)/(e) é 500 ms/4 s, maior que o `Default` (`tests.rs:1025`). O conjunto das linhas não-comentário com `INPUT_SETTLE_*` é exatamente as 2 declarações `const` privadas e os 2 usos no `Default`, todos em `retry.rs`. **Mas a troca de 1 s por 4 s, em vez da soma das duas, abriu a W-20.**
+  - (b) `[lib] doctest = false` (`crates/ddc-adapters/Cargo.toml:11-12`). `cargo metadata` dá `["lib"] ddc_adapters doctest=false`. A regex nova dos 3 arquivos casa só `#[cfg(test)]` + `mod tests;` (`ddc_hi_backend.rs:136-137`, `worker.rs:552-553`, `retry.rs:179-180`).
+  - (c) frases literais inteiras no view-model (`view-model.test.mjs:263-268`, `assert.equal` em cada um dos 4 testes) e no spec (`toHaveText` nas linhas 79/95/124/149). `view-model.test.mjs` está congelado na linha 3.
+- **D-3 ("outros códigos inalterados")** Conforme. `write_budget` (`worker.rs:188`) segue `budgets.vcp` para todo código que não é `0x60`, e a 3ª parte de (f) segue no harness congelado.
+- **D-14 / D-17(a) / D-19** Conformes no código:
+  - `settle_input` lê só `self.policies.input_settle` (`worker.rs:313`);
+  - `write_budget_of` (`worker.rs:464`) é o único caminho, e `write_vcp` a chama (`worker.rs:539`);
   - `without_backoff()` mantém 5 ms/100 ms em `retry/tests.rs`, e (g) os fixa por literais.
-- **D-2026-10-01-2** Conforme:
-  - (a) (f) ganhou a 3ª parte (`tests.rs:1237-1271`);
-  - (b) `expectToastNaming` confere literais em `spec:75/88/115/137`;
-  - (c) linha 6 provada pelo stderr, sem código novo;
-  - (d) nos 3 arquivos de produção, a regex casa só `#[cfg(test)]` + `mod tests;` (`ddc_hi_backend.rs:136-137`, `worker.rs:552-553`, `retry.rs:179-180`). O acessor `policies()` saiu, e `WorkerClient::policies` passou a `pub(super)` (`worker.rs:432`), visível só dentro de `ddc_hi_backend`. `DdcHiDisplays` entrou nos tokens proibidos do Verify 8.
 
-  Trade-off aceito pela decisão: o campo fica legível também pelo código de produção de `ddc_hi_backend.rs`, mas hoje só o teste (h) o lê. Sem ação.
-- **D-2026-10-01-1(c)** A frase "o único código de teste … é o acessor" foi substituída pela D-2026-10-01-2(d) e pelo texto novo da linha 8. O estado atual bate com a decisão vigente, o que fecha a parte de texto da W-15.
+  O que falta é TESTE: nenhum teste determinístico confere que o worker respeita uma janela de política MENOR que a do `Default` (W-20).
+- **D-2026-10-01-2** Conforme e sem diff de código: `WorkerClient::policies` `pub(super)` (`worker.rs:432`), sem código de teste nos 3 arquivos de produção.
 - **D-4 / D-7** `ddc-core`, `MonitorBackend`, `MonitorControl` e CLI sem diff (linha 2).
-- **D-5 / D-6 / D-8 / D-9 / D-10 / D-11 / D-13 / D-15 / D-16 / D-18** Sem diff de código nos arquivos que os implementam desde a iteração 4. Conformidade reconfirmada pelas linhas 3 a 10, rodadas de novo. Sobre a D-5 ("nomeia mantida e pedida"), o código do HEAD está correto, mas nenhuma linha Auto fixa os papéis: ver W-19.
-- **PLAN x commits** Todos os arquivos do diff estão no PLAN (`retry/tests.rs` via `## Emendas`, iteração 5), e todas as tasks `completed` têm teste. O `## Files modified (all tasks)` segue sem `ddc_hi_backend/tests.rs`, `retry/tests.rs` e `support.mjs` (W-8).
-- **SUMMARY** O `## Files modified` lista exatamente os 32 arquivos do diff da phase (W-17 fechado).
+- **D-5** Agora fixado: os papéis de mantida e pedida são conferidos por frases literais nas linhas 3 e 4 (W-19 fechada).
+- **D-6 / D-8 / D-9 / D-10 / D-11 / D-13 / D-15 / D-16 / D-18** Sem diff de código desde a iteração 5. Conformidade reconfirmada pelas linhas 3 a 10, rodadas de novo.
+- **PLAN x commits** Todos os 33 arquivos do diff da phase estão no PLAN. Todas as tasks `completed` têm teste. **W-8 fechado:**
+  - `## Files modified (all tasks)` agora lista `crates/ddc-adapters/Cargo.toml`, `ddc_hi_backend/tests.rs`, `retry/tests.rs` e `support.mjs`;
+  - T-1 fala em "5 testes iniciais (7 depois das Emendas, mais o (h))";
+  - T-4 fala em "1 por teste, provado pela anotação `axe`".
 
-### Achados do critic da iteração 4, reavaliados
+  Resíduo cosmético: `## Test requirements` ainda diz "emendados por D-13, D-14, D-15, D-16 e D-17".
+- **SUMMARY** O `## Files modified` lista exatamente os 33 arquivos do diff da phase. As mutações relatadas pelo doer (MW `74 passed; 2 failed`; M4s `not ok 147/148` e 4 ✘; M4g 2 ✘) batem com as reproduzidas aqui (M1d, M4s, M4g).
+
+### Achados do critic da iteração 5, reavaliados
 | Achado | Estado | Prova nesta iteração |
 |---|---|---|
-| Linha 1, M1: `write_vcp` com `self.write_budget_of(VcpCode::INPUT_SOURCE)` (brilho preso esperaria `vcp + 3 s`) | FECHADO | M1 VERMELHA: só (f) FAILED em `worker/tests.rs:1267`, `75 passed; 1 failed`, Verify 1 sem `OK`. Harness congelado: M1 com o assert enfraquecido (`budget * 2`) dá `76 passed`, mas o Verify 1 sai sem `OK` pelo SHA-256 de `worker/tests.rs` |
-| Linha 4, M4: `notice.inputKept` sem `{kept}` (tautologia do template) | FECHADO | M4 VERMELHA: (en) e (pt-BR) ✘ nos 2 temas (4 falhas), `Expected substring: "DisplayPort-1"` contra `Received string: "The monitor is still on, not HDMI-1. …"`. Verify 4 sem `OK`. **Resíduo novo: W-19** |
-| Linha 6, M6: `let _ = autostart::toggle(&**entry);` em `flip_autostart` (erro engolido) | FECHADO | Com M6, `a_refused_flip_leaves_the_entry_as_it_was` segue verde (lib `152 passed`), mas a linha `ddc-tray: could not change the start-with-system entry: read-only home` some do stderr, e o Verify 6 sai sem `OK`. No HEAD ela sai 2 vezes, uma por direção do laço, via `flip_autostart` -> `toggle_or_report` -> `crate::report` (`lib.rs:241-243`) |
-| Linha 8 (W-15): código de teste dentro de `cfg(test)` que já existia em `retry.rs`; `#[test]` solto | FECHADO | `retry.rs` não tem mais código de teste, e o acessor saiu de `worker.rs`. M8x (`#[test] fn planted() {}` solto em `ddc_hi_backend.rs`), M8y (`#[cfg_attr(test, derive(Clone))]` em `WorkerClient`) e M8t (`// DdcHiDisplays …` em `hardware/tests.rs`) ficam VERMELHAS. **Resíduo novo: W-18** |
+| Linha 1, M1k: `INPUT_SETTLE_WINDOW` `pub(super)` + `use` em `worker.rs` + `settle.window.min(INPUT_SETTLE_WINDOW)` | FECHADO | M1k VERMELHA: (b) em `tests.rs:1154` e (e) em `tests.rs:1220`, `74 passed; 2 failed`, e o conjunto das constantes não bate. M1p (só `pub(super) const`, sem uso) dá `76 passed`, mas o Verify 1 sai sem `OK` pelo conjunto. **Resíduo novo: W-20** |
+| Linha 3 (W-19): papéis trocados nos templates passavam | FECHADO | M4s, M4g e M4ge VERMELHAS (`not ok 147`/`148`). M4u (texto do "pode ter comutado") VERMELHA (`not ok 150`). M3f (comentário no `view-model.test.mjs`): `165 pass`, mas Verify 3 sem `OK` pelo SHA-256 |
+| Linha 4 (W-19): idem, ponta a ponta | FECHADO | M4s 4 ✘ (`Expected: "The monitor is still on DisplayPort-1, not HDMI-1. …"` contra `Received: "The monitor is still on HDMI-1, not DisplayPort-1. …"`, e o mesmo em pt-BR). M4g 2 ✘ e M4u 2 ✘. M4f (comentário no spec): Verify 4 sem `OK` pelo SHA-256 |
+| Linha 8, M8d: doctest em arquivo de produção rodava na suíte; e `#[cfg(all(` multilinha gerado pelo rustfmt | FECHADO | `doctest=false` efetivo (`cargo metadata`). Nenhum bloco `Doc-tests ddc_adapters` no `cargo test -p ddc-adapters` nem no `--workspace` do HEAD. M8n (sem `[lib] doctest = false`) e M8t (`doctest = true`) VERMELHAS. M8a (`#[cfg(all(test, …))]` formatado pelo rustfmt em várias linhas, `fmt` 0) e M8c (`#[cfg(doctest)]`) VERMELHAS. **Resíduo novo: W-21** |
 
 ### Mutações reproduzidas pelo reviewer
-Todas rodaram num repositório git descartável, `/var/tmp/rv5/repo`, já apagado, com `target/` próprio, montado assim:
+**Montagem.** Todas rodaram num repositório git descartável, `/var/tmp/rv6/repo`, já apagado, com `CARGO_TARGET_DIR=/var/tmp/rv6/target` próprio:
 - commit 1 = `git archive 134b665`;
 - commit 2 = `git archive HEAD`;
 - `origin/main` -> commit 1;
-- `diff --stat` idêntico ao do repositório real.
+- `diff --stat` idêntico ao do repositório real (33 arquivos, `2637 insertions(+), 87 deletions(-)`).
 
-As mutações foram aplicadas por substituição exata, com 1 ocorrência conferida, e revertidas com `git checkout -- .` e `git status` limpo. Baselines da cópia: linha 1 `OK` (4,9 s), linha 4 `OK` (18,6 s), linha 6 `OK` (41,6 s, com compilação), linha 8 `OK` (0,2 s).
+**Execução.**
+- Mutações aplicadas por substituição exata, com 1 ocorrência conferida, e revertidas com `git checkout -- .` e `git status` limpo.
+- Todo `cargo` (Verify 1, Verify 8, lib, fmt, clippy) rodou em `bwrap` com os 16 `/dev/i2c-*` cobertos e observados.
+- Os Verify 3 e 4, que não usam `cargo`, rodaram fora do sandbox.
+- Baselines da cópia, todas `OK`: linha 1 (4,9 s, a frio), linha 8 (1,6 s), linha 3 (0,39 s), linha 4 (23,6 s, com `npm ci`).
+- Na cópia, `fmt` e clippy `-D warnings` a frio saem 0.
 
 | Linha | Mutação | Resultado |
 |---|---|---|
-| 1 | M1 `write_vcp`: `self.write_budget_of(code)` -> `self.write_budget_of(VcpCode::INPUT_SOURCE)` | VERMELHA: só (f) FAILED (`tests.rs:1267`). Verify sem `OK` |
-| 1 | M1 + assert da 3ª parte enfraquecido para `other_gave_up < budget * 2` | Lib `76 passed; 0 failed`, mas `sha256sum: worker/tests.rs: FALHOU`. Verify sem `OK` |
-| 4 | M4 `still on {kept}, not {asked}` -> `still on, not {asked}`, e o mesmo em pt-BR | VERMELHA: 4 ✘. Verify sem `OK` |
-| 4 | **M4s (sonda)** 1ª frase com papéis trocados, `still on {asked}, not {kept}` / `continua em {asked}, não em {kept}` | **VERDE: Verify 3 `OK` e Verify 4 `OK`. Sobrevive. Ver W-19** |
-| 4 | **M4g (sonda)** genérico pt-BR `manteve {asked} em vez de {kept}` | **VERDE: Verify 3 `OK` e Verify 4 `OK`. Sobrevive. Ver W-19.** Em `en`, a linha 3 pega por igualdade literal |
-| 6 | M6 `autostart::toggle_or_report(&**entry, report);` -> `let _ = autostart::toggle(&**entry);` | VERMELHA: teste verde, linha do stderr ausente. Verify sem `OK` |
-| 8 | M8x `#[test]` + `fn planted() {}` em `ddc_hi_backend.rs` | VERMELHA (sem `OK`) |
-| 8 | M8y `#[cfg_attr(test, derive(Clone))]` em `WorkerClient` (`worker.rs`) | VERMELHA (sem `OK`) |
-| 8 | M8t `// DdcHiDisplays is the real source` em `hardware/tests.rs` | VERMELHA (sem `OK`) |
-| 8 | **M8z (sonda)** `#[ test ]` com espaços + `fn planted() {}` em `ddc_hi_backend.rs` | **VERDE (`OK`)**, mas `cargo fmt --all --check` sai 1. Ver W-18 |
-| 8 | **M8w (sonda)** `#[cfg(` / `test` / `)]` em 3 linhas + `fn planted() {}` em `retry.rs` | **VERDE (`OK`)**, mas `cargo fmt --all --check` sai 1. Ver W-18 |
-| 2 | 1 byte (`\n`) em `crates/ddc-core/src/lib.rs` | VERMELHA (sem `OK`) |
-| 10 | `// TODO later` no fim de `input-notice.spec.mjs` | VERMELHA (sem `OK`) |
-| 10 | `// TODO(#12) later` no mesmo lugar | `OK`, como deveria |
+| 1 | M1d `settle_input`: `settle.window` -> `settle.window.min(RetryPolicies::default().input_settle.window)` (trava no `Default` sem nomear a constante) | VERMELHA: (b) `tests.rs:1154` e (e) `tests.rs:1220`, `74 passed; 2 failed`. Verify sem `OK` |
+| 1 | M1k (critic): `pub(super) const INPUT_SETTLE_WINDOW` + `use` em `worker.rs` + `.min(INPUT_SETTLE_WINDOW)` | VERMELHA: mesmas 2 falhas, mais o conjunto das constantes. Verify sem `OK` |
+| 1 | M1p: só `pub(super) const INPUT_SETTLE_WINDOW` | Lib `76 passed`, Verify sem `OK` pelo conjunto das constantes |
+| 1 | M1t: M1d + `worker/tests.rs` de `a91d193` (janela custom de 1 s) | Lib `76 passed`, `sha256sum: WARNING: 1 computed checksum did NOT match`. Verify sem `OK` |
+| 1 | **M1f (sonda)**: `let window = settle.window.max(RetryPolicies::default().input_settle.window);`, formatada pelo rustfmt (piso no `Default`) | **`fmt` 0, clippy `-D warnings` 0, lib `76 passed` em 3/3, (b) e (e) verdes. Verify 1 `OK` em 15 de 20 rodadas.** Só o (f) a pega, por corrida (`Err(Timeout)` em `tests.rs:1270`; (f) isolado verde em 7/10). Contra os testes de `a91d193`: VERMELHA em 3/3, em (b) e (e). Ver W-20 |
+| 1 | **M1h (sonda)**: `settle.window` -> `Duration::from_secs(4)`, o valor exato da janela custom | Lib `76 passed`, Verify `OK`; (f) falha em 3/15 pela mesma corrida. Sobreajustada (copia o número do teste). Ver W-20 |
+| 1 | Correção proposta para a W-20, só na cópia: limite de cima de leituras na 1ª parte de (f) | HEAD 10/10 verde. M1f 10/10 VERMELHA (`32 reads`). M1h 10/10 VERMELHA |
+| 3 | M4s `still on {kept}, not {asked}` -> `still on {asked}, not {kept}`, e o mesmo em pt-BR | VERMELHA: `not ok 147`, `not ok 148`. Verify sem `OK` |
+| 3 | M4g genérico pt-BR `manteve {asked} em vez de {kept}` | VERMELHA: 147 e 148. Verify sem `OK` |
+| 3 | M4ge genérico en `kept {asked} instead of {kept}` | VERMELHA: 147 e 148. Verify sem `OK` |
+| 3 | M4u pt-BR `que este computador não alcança` -> `que este PC não alcança` | VERMELHA: `not ok 150`. Verify sem `OK` |
+| 3 | M3f `// weakened` no fim de `view-model.test.mjs` | `165 pass`, mas SHA-256 `FAILED`. Verify sem `OK` |
+| 4 | M4s (acima) | VERMELHA: 4 ✘ (`(en)`/`(pt-BR)` × `light`/`dark`), `Expected`/`Received` literais. Verify sem `OK` |
+| 4 | M4g (acima) | VERMELHA: 2 ✘ (`Expected: "Brilho: o monitor manteve 75% em vez de 76%."` contra `Received: "… 76% em vez de 75%."`). Verify sem `OK` |
+| 4 | M4u (acima) | VERMELHA: 2 ✘ na leitura que falha. Verify sem `OK` |
+| 4 | M4f `// weakened` no fim de `input-notice.spec.mjs` | SHA-256 `FAILED`. Verify sem `OK` |
+| 8 | M8n: remove `[lib]` + `doctest = false` | VERMELHA (sem `OK`) |
+| 8 | M8t: `doctest = true` | VERMELHA (sem `OK`) |
+| 8 | M8a: `#[cfg(all(test, target_os = "linux", target_pointer_width = "64", target_endian = "little", feature = "ddc-hi"))]` + `fn planted() {}`, depois de `cargo fmt` (multilinha, `fmt` 0) | VERMELHA (sem `OK`) |
+| 8 | M8s: `#[ test ]` + `fn planted() {}` | VERMELHA (sem `OK`) |
+| 8 | M8c: `#[cfg(doctest)]` + `fn planted() {}` | VERMELHA (sem `OK`) |
+| 8 | **M8m (sonda)**: `macro_rules! planted { ($m:meta) => { #[$m] fn planted() {} }; }` + `planted!(test);` em `ddc_hi_backend.rs` | **VERDE (`OK`). `fmt` 0, clippy 0, e `ddc_hi_backend::planted ... ok` roda na suíte (`77 passed`).** Ver W-21 |
+| 8 | M8l (sonda): `#[` / `test` / `]` em 3 linhas + `fn planted() {}` | VERDE (`OK`), mas `cargo fmt --all --check` sai 1 (Gate 4) |
+| 10 | `// TODO later` e `  // fixme: x` no fim de `view-model.test.mjs` e de `input-notice.spec.mjs` (cópia `/var/tmp/rv6b`, já apagada) | VERMELHAS (sem `OK`) nos 2 arquivos |
+| 10 | `// TODO(#12) later` nos mesmos lugares | `OK`, como deveria |
 
-No HEAD, a busca por atributos com espaço depois de `#[` ou por `cfg(` em fim de linha em `crates`/`apps` não tem saída.
+**Tempo de (f).** `worker/tests.rs` mudou, então foi medido de novo:
+- em repouso: 0,32 s em 10/10;
+- com 24 laços de CPU (cada um sob `timeout 75`, conferidos encerrados): entre 0,32 e 0,33 s em 10/10, todas passando.
 
-**Tempo de (f).** 0,32 s em 10/10 em repouso. Com 24 laços de CPU (cada um sob `timeout 75`), ficou entre 0,32 e 0,33 s em 20/20, todas passando. A folga até o limite de 0,5 s do Verify é de 0,18 s; era 0,23 s antes da 3ª parte. A 3ª parte mede cerca de 60 ms contra o teto de 160 ms. Os laços foram conferidos encerrados.
+A folga até o limite de 0,5 s do Verify é de 0,17 s.
 
-**Linha 9:** 3/3 execuções literais `OK` (5,70 / 5,60 / 5,61 s), mais 1 execução direta dos dois scripts com saída 0. A instabilidade W-16 não apareceu.
+**Linha 9:** 3/3 execuções literais `OK` (5,64 / 6,09 / 6,04 s), mais 1 execução direta dos dois scripts com saída 0. A instabilidade W-16 não apareceu.
 
 ## Blockers
 - nenhum.
 
 ## Warnings
-Reavaliação dos da iteração 4:
+Reavaliação dos da iteração 5:
 - **W-2 (Windows não rodado): PERSISTE.** `tray/notification_area.rs` não tem diff desde a iteração 1. Fica herdada a evidência: clippy `-D warnings` para `x86_64-pc-windows-gnu`, com stubs, sai 0. O comportamento só o job `rust-windows` do CI e a validação humana provam. A linha 5 não o afirma (D-15), e o `## Deferred to PR review` o registra.
 - **W-3 (hardware, deferido ao PR): PERSISTE.** H1 e H2 seguem NÃO provadas, porque provar exigiria escrever `0x60` no RTK real, o que é vedado.
 - **W-4 (worker único, baixo): PERSISTE.** Um write de `0x60` não confirmado segura o worker por até 3 s. Código do assentamento inalterado.
-- **W-5 (limites do `auto-launch 0.5.0`): PERSISTE.** O arquivo se chama `DDC Control.desktop`, com espaço. O `Exec=` sai sem aspas e com espaço final (ver a linha 7: `Exec=…/autostart_entry-c0e56ec32fbab8ff `). `create_dir` não é recursivo, e `$XDG_CONFIG_HOME` é ignorado. O README documenta.
+- **W-5 (limites do `auto-launch 0.5.0`): PERSISTE.**
+  - O arquivo se chama `DDC Control.desktop`, com espaço.
+  - O `Exec=` sai sem aspas e com espaço final (linha 7: `Exec=…/autostart_entry-c0e56ec32fbab8ff `).
+  - `create_dir` não é recursivo, e `$XDG_CONFIG_HOME` é ignorado.
+
+  O README documenta.
 - **W-6 (UX, observar no PR): PERSISTE.** O toast genérico aparece para qualquer diferença de read-back num slider.
 - **W-7 (estilo): PERSISTE.** `INPUT_CODE = 0x60` em `view-model.js` duplica `VcpCode::INPUT_SOURCE`, entre linguagens.
-- **W-8 (PLAN defasado, estilo): PERSISTE, menor.** `## Emendas` cobre a iteração 5, mas:
-  - `## Files modified (all tasks)` não lista `ddc_hi_backend/tests.rs`, `retry/tests.rs` e `apps/ddc-tray/tests/e2e/support.mjs`;
-  - T-1 fala em "5 testes";
-  - T-4 fala em "≥ 2 chamadas".
-- **W-9, W-10: TRATADOS** (iteração 3). **W-12, W-13: FECHADOS** (iteração 4).
-- **W-11 (teste (f) no relógio real): PERSISTE, não flakou.** A 3ª parte levou o teste de 0,26 para 0,32 s. Sob 24 laços de CPU, ficou entre 0,32 e 0,33 s em 20/20. A folga é de 0,18 s até os 0,5 s do Verify, e de cerca de 100 ms no teto da 3ª parte. Num runner Windows com timer grosso a folga é menor, e o `rust-windows` mostra primeiro.
+- **W-8 (PLAN defasado): FECHADO.** `## Files modified (all tasks)`, T-1 e T-4 foram atualizados. Resta 1 linha cosmética em `## Test requirements` ("emendados por D-13 … D-17").
+- **W-11 (teste (f) no relógio real): PERSISTE, não flakou.** 0,32 s em repouso (10/10) e 0,32–0,33 s sob 24 laços de CPU (10/10); folga de 0,17 s até os 0,5 s do Verify. Num runner Windows com timer grosso a folga é menor, e o `rust-windows` mostra primeiro.
 - **W-14 (tipo de commit `1ed653b`): PERSISTE, só histórico.** Some no squash-merge.
-- **W-15: FECHADO.** `retry.rs` e `worker.rs` não têm mais código de teste embutido. M8x, M8y e M8t ficam vermelhas, e o texto da linha 8 agora é verdadeiro no HEAD. O resíduo sintático virou a W-18.
 - **W-16 (linha 9, instabilidade ambiental): PERSISTE como risco, não reproduzida.** 3/3 literais + 1 direta OK. Se uma nova execução falhar com `the popup was hidden within 1.5 s of 'ddc-tray: popup shown'`, rodar de novo: é perda de foco no KWin real, já presente na base.
-- **W-17: FECHADO.** O `## Files modified` do SUMMARY lista os 32 arquivos do diff da phase.
+- **W-18 (linha 8, sintático): FECHADO.** `#[ test ]` (M8s) e o `#[cfg(all(` multilinha, inclusive o que o rustfmt gera (M8a), ficam vermelhos. Resta só a M8l (`#[`/`test`/`]` em 3 linhas), que o `fmt --check` (Gate 4) rejeita.
+- **W-19 (linhas 3 e 4, papéis): FECHADO.** M4s, M4g, M4ge e M4u ficam vermelhas nas duas linhas, e os harnesses estão congelados por SHA-256 (M3f e M4f ficam vermelhas).
+- **W-9, W-10: TRATADOS** (iteração 3). **W-12, W-13: FECHADOS** (iteração 4). **W-15, W-17: FECHADOS** (iteração 5; W-17 reconfirmado com 33 arquivos).
 
-Novos na iteração 5:
-- **W-18 (linha 8, resíduo sintático, baixo).** A regex de atributos de teste do Verify 8 (`#\[[[:alnum:]_:]*test\b` e `cfg(...)` na mesma linha) não vê duas formas válidas em Rust:
-  - `#[ test ]`, com espaço depois de `#[` (M8z);
-  - um `#[cfg(` quebrado em várias linhas (M8w).
+Novos nesta iteração:
+- **W-20 (linha 1, lacuna objetiva provável, regressão do `952dac1`; D-14, D-17(a), D-2026-10-01-3(a)).**
 
-  Nas duas sondas o Verify 8 dá `OK`, mas `cargo fmt --all --check` sai 1, então o Gate 4 (fmt é gate do reviewer, CONTEXT § DoD) as rejeita. No HEAD não há nenhuma das duas formas. Opcional: normalizar espaços antes da regex, ou rodar `rustfmt --check` nos 3 arquivos dentro do próprio Verify.
-- **W-19 (linhas 3 e 4, lacuna objetiva, baixo para o usuário, provável achado do critic; D-5).** As linhas exigem "os dois nomes" por literais, mas nenhuma fixa QUAL é o mantido e qual é o pedido. As duas sondas abaixo deixam os Verify 3 e 4 `OK`:
-  - **M4s** troca os papéis na 1ª frase do aviso de input, em `en.js:58` e `pt-BR.js:58`. O toast passaria a dizer "The monitor is still on HDMI-1, not DisplayPort-1", ou seja, que o monitor está na entrada em que NÃO está.
-  - **M4g** troca os papéis no aviso genérico pt-BR (`pt-BR.js:56`, "manteve 76% em vez de 75%").
+  O que a linha afirma: "só a política manda", e que (b) pega "um worker que lesse a janela de outro lugar que não a política".
 
-  Por que passam:
-  - `expectToast` compara com o MESMO template sob teste;
-  - `expectToastNaming` usa `toContainText` por nome, sem ordem;
-  - na linha 3, só `en` do genérico tem igualdade literal (`'Brightness: the monitor kept 75% instead of 80%.'`), e o input só fixa `DisplayPort-2 may have no signal` / `pode estar sem sinal`.
-
-  O HEAD está correto: `still on {kept}, not {asked}` e `continua em {kept}, não em {asked}`. Fechar exige asserção da frase literal com papéis. Por exemplo, no spec `toContainText('still on DisplayPort-1, not HDMI-1')`, `toContainText('continua em DisplayPort-1, não em HDMI-1')` e `toContainText('manteve 75% em vez de 76%')`, e na linha 3 o equivalente em pt-BR. Como o spec está congelado por SHA-256 na linha 4, isso pede emenda do DoD com nova D-XX.
-- **Nota (ambiente, sem ação no código).** `/dev/i2c-1..5` e `/dev/i2c-9..15` passaram a ter ACL `user:slipalison:rw-` (07:31 de hoje); na iteração 4 eram `root 0600` sem ACL. Um teste futuro que alcance `DdcHiDisplays` falaria com o RTK real nesta máquina. Recomendação para as próximas rodadas (reviewer, critic, `/jdi-ship`): manter a leitura do 5.7 e rodar a prova por inotify em `bwrap` ANTES de qualquer execução nativa da suíte.
-- **Nota (sem ação).** `.jdi/DECISIONS.md` é uma visão gerada, ignorada (`.gitignore:31`), e está defasada: não contém as D-2026-10-01-*. As fontes `D-2026-10-01-input-switch-autostart-1.md` e `-2.md` estão em `.jdi/decisions/`. `npx -y jdi-cli render` regenera a visão.
+  O que mudou: o `952dac1` TROCOU a janela custom de (b)/(e), de 1 s (menor que o `Default`) para 4 s (maior), em vez de acrescentar a segunda. Desde então, nenhum teste determinístico confere que o worker respeita uma janela de política MENOR que a do `Default`.
+  - **M1f**, 1 linha de produção já formatada pelo rustfmt: um piso no `Default` em `settle_input` (`worker.rs:313-314`).
+    ```rust
+    let window = settle
+        .window
+        .max(RetryPolicies::default().input_settle.window);
+    let end = (self.clock.now() + window).min(deadline);
+    ```
+    - `fmt` 0, clippy `-D warnings` 0 no workspace, lib `76 passed` em 3/3; (b) e (e) passam.
+    - Só o (f) a pega, e por corrida: com janela de 100 ms na política, o worker vai até o `deadline` do cliente (160 ms) e às vezes responde depois do `recv_timeout` (`Err(Timeout)` em `tests.rs:1270`). O (f) só exige `Ok` e `waited >= janela`, sem limite de cima.
+    - **Verify 1 `OK` em 15 de 20 rodadas.**
+    - Contra o `worker/tests.rs` de `a91d193` (janela de 1 s), a mesma mutação fica VERMELHA em 3/3, em (b) e (e).
+  - **M1h**, sobreajustada: 4 s fixos no worker, o número exato da janela custom. Lib `76 passed`, Verify 1 `OK`; (f) falha em 3/15 pela mesma corrida. Sozinha não é objetiva, porque copia o número do teste, mas mostra a mesma causa.
+  - Efeito em produção: nenhum, porque o `Default` é 3 s. O que se perde é a garantia, afirmada pela linha, de que só a política manda.
+  - **Correção testada na cópia.** Na 1ª parte de (f), um limite de cima no número de leituras. É determinístico, porque `sleep` nunca volta antes do pedido, então são no máximo `ceil(janela/passo)` leituras:
+    ```rust
+    let most = settle.window.as_nanos().div_ceil(settle.step.as_nanos());
+    assert!(calls.len() - 1 <= usize::try_from(most).unwrap(), "{} reads", calls.len() - 1);
+    ```
+    Resultado: HEAD 10/10 verde, M1f 10/10 VERMELHA (`32 reads`), M1h 10/10 VERMELHA. Alternativa: rodar (b) também com a janela de 1 s, além da de 4 s.
+  - Como `worker/tests.rs` está congelado por SHA-256 na linha 1, isso pede emenda do DoD com nova D-XX.
+- **W-21 (linha 8, resíduo não objetivo, baixo).** Um `#[test]` gerado por macro escapa da regex dos 3 arquivos:
+  ```rust
+  macro_rules! planted {
+      ($m:meta) => {
+          #[$m]
+          fn planted() {}
+      };
+  }
+  planted!(test);
+  ```
+  - Em `ddc_hi_backend.rs` (M8m): `fmt` 0, clippy 0, e `ddc_hi_backend::planted ... ok` roda na suíte (`77 passed`). O Verify 8 dá `OK`.
+  - Exige metaprogramação deliberada para esconder o atributo. Nenhuma forma natural passa: M8a, M8s e M8c ficam vermelhas, e a M8l o `fmt` rejeita.
+  - Fechamento barato e comportamental, se o loop quiser: exigir pelo `cargo test -p ddc-adapters --locked --lib -- --list` que todo teste sob `ddc_hi_backend`, `ddc_hi_backend::worker` e `ddc_hi_backend::retry` esteja num submódulo `::tests::`.
+  - Hoje os módulos de teste da lib são `caching::tests`, `ddc_hi_backend::tests`, `ddc_hi_backend::hardware::tests`, `ddc_hi_backend::identity::tests`, `ddc_hi_backend::worker::tests` e `in_memory::tests`.
+- **Nota (ambiente, sem ação no código).** `/dev/i2c-1..5` e `/dev/i2c-9..15` seguem com ACL `user:slipalison:rw-`. Um teste futuro que alcance `DdcHiDisplays` falaria com o RTK real nesta máquina. Manter, nas próximas rodadas (reviewer, critic, `/jdi-ship`), a leitura do 5.7 e a prova por inotify em `bwrap` ANTES de qualquer execução nativa da suíte.
+- **Nota (sem ação).** `.jdi/DECISIONS.md` é uma visão gerada e ignorada (`.gitignore:31`), e está defasada: não contém nenhuma D-2026-10-01-*. As fontes estão em `.jdi/decisions/`, e `npx -y jdi-cli render` regenera a visão.
 
 ## DoD Checklist (gate 8)
 
 | # | Criterion | Source | Type | Status | Evidence |
 |---|---|---|---|---|---|
-| 1 | Assentamento no adapter: 7 testes nomeados (conjunto exato `input_write_*`/`writes_to_other_codes_*`), cada um sozinho, não ignorado, < 0,5 s; (b)/(e) com política CUSTOM; (e) via `write_budget_of`; (f) pelo `WorkerClient` real com limite de baixo e de cima para `0x60` e 3ª parte para outro código; (g) fixa `Default` e `without_backoff()`; (h) fiação; 3 arquivos de teste congelados por SHA-256 | CONTEXT | Auto | PASS | `OK`, exit 0, 1,38 s. O conjunto listado são os 7 nomes, cada um com `1 passed; 0 failed` em 0,00 s, exceto (f), com 0,32 s (10/10 em repouso; 20/20 entre 0,32 e 0,33 s sob 24 laços de CPU). (h) está listado e passa. `worker/tests.rs` `fadb5aaa…`, `ddc_hi_backend/tests.rs` `ec2d2980…` e `retry/tests.rs` `12ac10db…` batem. Mutações: M1 VERMELHA ((f), `tests.rs:1267`); M1 com o teste enfraquecido dá 76 verdes e Verify sem `OK` pelo SHA-256. |
-| 2 | `ddc-core` intacto (0 byte desde a base), só `thiserror`, sem `sleep` | CONTEXT | Auto | PASS | `OK`, exit 0, 0,11 s. Dep normal direta = `thiserror`; `git diff --quiet` contra o merge-base sai 0; sem `sleep`. Sonda: 1 byte em `ddc-core/src/lib.rs` deixa o Verify sem `OK`. |
-| 3 | View-model puro + 4 testes nomeados; `tests/ui` inteira verde | CONTEXT | Auto | PASS | `OK`, exit 0, 0,25 s. `# tests 165 / # pass 165 / # fail 0` (`npm run test:unit`, 88.48%). **Resíduo (W-19): M4s/M4g (papéis trocados) passam.** |
-| 4 | Aviso visível de ponta a ponta: `input-notice.spec.mjs` com 5 testes que importam `test` de `support.mjs`; nomes conferidos por LITERAIS; anotação `axe` em exatamente 5 × 2 aprovados; 2 estados de pseudo-locale × 2 temas; suíte inteira verde; spec e `support.mjs` congelados por SHA-256 | CONTEXT | Auto | PASS | `OK`, exit 0, 19,3 s, com `npm ci --ignore-scripts` incluído. Releitura (Gate 7): `152 passed`, `6 skipped` (só `screenshots.spec.mjs`), 0 failed, 0 flaky; 10 `✓` em `input-notice.spec.mjs` e 4 `✓` nos 2 estados de pseudo-locale. Conjunto `axe` = as 10 entradas (`a = e`, pelo `OK`). SHA-256 `bdb21385…`/`ee930894…` batem. M4 (critic) VERMELHA: 4 ✘. **Resíduo (W-19): os papéis dos nomes não são fixados.** |
-| 5 | Menu nativo: rótulo en/pt-BR, item nas 2 plataformas com marca = estado do SO, `from_id`, fiação LINUX (ksni) e testes de `tray`; fiação Windows NÃO afirmada | CONTEXT | Auto | PASS | `OK`, exit 0, 1,90 s. Os 6 nomes existem em `--list` e passam; `menu:: i18n::` fecha com `0 ignored`. `src-tauri/src` sem diff desde `d18829d`. Fiação Windows em `## Deferred to PR review` (W-2). |
-| 6 | Alternar e registro com fake em memória (4 `autostart::tests::*`); chamador de PRODUÇÃO (`tray::flip_autostart`) imprime a linha do `crate::report` no stderr; `run()` provado pelo smoke da linha 9 | CONTEXT | Auto | PASS | `OK`, exit 0, 1,42 s. Os 4 testes listados passam. `a_refused_flip_leaves_the_entry_as_it_was --exact --nocapture` passa e imprime 2 vezes `ddc-tray: could not change the start-with-system entry: read-only home`. M6 (critic) VERMELHA: o teste segue verde, a linha some e o Verify sai sem `OK`. Que `run()` registra o plugin é provado pela parte B da linha 9 (mutação R herdada; `lib.rs` sem diff). |
+| 1 | Assentamento no adapter: 7 testes nomeados (conjunto exato `input_write_*`/`writes_to_other_codes_*`), cada um sozinho, não ignorado, < 0,5 s; (b)/(e) com política CUSTOM de janela MAIOR que a do `Default`; (e) via `write_budget_of`; (f) pelo `WorkerClient` real em 3 partes; (g) fixa `Default` e `without_backoff()`; (h) fiação; o CONJUNTO das linhas que citam `INPUT_SETTLE_*` = 2 `const` privadas + 2 usos no `Default`, em `retry.rs`; 3 arquivos de teste congelados por SHA-256 | CONTEXT | Auto | PASS | `OK`, exit 0, 1,41 s. O conjunto listado são os 7 nomes, cada um com `1 passed; 0 failed` em 0,00 s, exceto (f), com 0,32 s (10/10 em repouso; 10/10 entre 0,32 e 0,33 s sob 24 laços de CPU). (h) listado e passa. `git grep` das constantes = as 4 linhas esperadas (mais 1 comentário `///`, excluído). `worker/tests.rs` `a91c4582…`, `ddc_hi_backend/tests.rs` `ec2d2980…` e `retry/tests.rs` `12ac10db…` batem. Mutações: M1d e M1k VERMELHAS ((b) `tests.rs:1154`, (e) `tests.rs:1220`). M1p pega pelo conjunto, e M1t pelo SHA-256. **Resíduo (W-20): M1f, piso no `Default`, dá Verify `OK` em 15 de 20 rodadas.** |
+| 2 | `ddc-core` intacto (0 byte desde a base), só `thiserror`, sem `sleep` | CONTEXT | Auto | PASS | `OK`, exit 0, 0,11 s. Dep normal direta = `thiserror`; `git diff --quiet` contra o merge-base sai 0; sem `sleep`. Sonda de 1 byte herdada (Verify e `ddc-core` sem diff). |
+| 3 | View-model puro + 4 testes nomeados, texto inteiro conferido por igualdade com frases LITERAIS (papéis de mantida e pedida) em `en`/`pt-BR`, para o aviso de input e o genérico; `tests/ui` inteira verde; `view-model.test.mjs` congelado por SHA-256 | CONTEXT | Auto | PASS | `OK`, exit 0, 0,25 s. `# tests 165 / # pass 165 / # fail 0` (`npm run test:unit`, 88.48%). SHA-256 `7c650133…` bate. M4s, M4g e M4ge VERMELHAS (`not ok 147/148`), M4u VERMELHA (`not ok 150`); M3f VERMELHA pelo SHA-256. W-19 fechada. |
+| 4 | Aviso visível de ponta a ponta: `input-notice.spec.mjs` com 5 testes que importam `test` de `support.mjs`; nomes por LITERAIS e texto inteiro de cada toast (input en/pt-BR, genérico, leitura que falha) contra a frase literal com papéis; anotação `axe` em exatamente 5 × 2 aprovados; 2 estados de pseudo-locale × 2 temas; suíte inteira verde; spec e `support.mjs` congelados por SHA-256 | CONTEXT | Auto | PASS | `OK`, exit 0, 22,8 s, com `npm ci --ignore-scripts` incluído. Releitura (Gate 7): `152 passed`, `6 skipped` (só `screenshots.spec.mjs`), 0 failed, 0 flaky. São 10 `✓` em `input-notice.spec.mjs`, e o `OK` confere também os 4 `✓` dos 2 estados de pseudo-locale e o conjunto `axe` = as 10 entradas. SHA-256 `92f99e00…`/`ee930894…` batem. M4s (4 ✘), M4g (2 ✘) e M4u (2 ✘) VERMELHAS com `Expected`/`Received` literais; M4f VERMELHA pelo SHA-256. W-19 fechada. |
+| 5 | Menu nativo: rótulo en/pt-BR, item nas 2 plataformas com marca = estado do SO, `from_id`, fiação LINUX (ksni) e testes de `tray`; fiação Windows NÃO afirmada | CONTEXT | Auto | PASS | `OK`, exit 0, 1,89 s. Os 6 nomes existem em `--list` e passam; `menu:: i18n::` fecha com `0 ignored`. `src-tauri/src` sem diff desde `a91d193`. Fiação Windows em `## Deferred to PR review` (W-2). |
+| 6 | Alternar e registro com fake em memória (4 `autostart::tests::*`); o chamador de PRODUÇÃO (`tray::flip_autostart`) imprime a linha do `crate::report` no stderr; `run()` provado pelo smoke da linha 9 | CONTEXT | Auto | PASS | `OK`, exit 0, 1,40 s. Os 4 testes listados passam. `a_refused_flip_leaves_the_entry_as_it_was --exact --nocapture` passa e imprime 2 vezes `ddc-tray: could not change the start-with-system entry: read-only home`. M6 herdada (Verify, `tray.rs`, `autostart.rs` e `lib.rs` sem diff). |
 | 7 | Entrada real no Linux com HOME em tempdir (processo filho), conjunto exato pai + filho, `Exec=` impresso, `~/.config/autostart` real idêntico | CONTEXT | Auto | PASS | `OK`, exit 0, 0,50 s. Conjunto = pai + filho; `Exec=/home/slipalison/repos/ddc-control/target/debug/deps/autostart_entry-c0e56ec32fbab8ff ` impresso; listagem real idêntica (`bf0a7045a8fb…`). |
-| 8 | Segurança de hardware e superfície: `DDC_HW_TESTS`/`/dev/i2c`/`DdcHiDisplays` em não-`.md` de `apps`/`crates` só nos 3 arquivos de produção; `DdcHiMonitorBackend` só neles e em `ddc_hi_backend/tests.rs`; nos 3, cada atributo de teste = `#[cfg(test)]` + `mod tests;`; capabilities idênticas; plugin no lock e ligado ao tray | CONTEXT | Auto | PASS | `OK`, exit 0, 0,20 s. Nos 3 arquivos, só `#[cfg(test)]`/`mod tests;` (`ddc_hi_backend.rs:136`, `worker.rs:552`, `retry.rs:179`). `capabilities/` só tem `default.json`, com permissões iguais às da base e sem `autostart`; `cargo tree -i tauri-plugin-autostart` resolve. M8x, M8y e M8t VERMELHAS. **Resíduo (W-18): `#[ test ]` e `#[cfg(` multilinha passam aqui, mas o `fmt --check` (Gate 4) os rejeita.** O "nenhum teste fala com monitor real", delegado ao 5.7, foi conferido por leitura e por inotify (zero aberturas). |
-| 9 | Release sobe na bandeja e o autostart funciona de ponta a ponta, em sessão D-Bus PRIVADA, com `--fake`; `smoke-sni.sh` sem diff; partes A e B, monitor simulado exigido nas duas, marca segue o SO; `~/.config/autostart` real idêntico | CONTEXT | Auto | PASS | `OK`, exit 0, **3/3 execuções literais** (5,70 / 5,60 / 5,61 s). Parte A: `smoke-sni-private: private session bus, stand-in StatusNotifierWatcher`, `smoke-sni: the app serves the simulated monitor` e `smoke-sni: OK — PID 840566 registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked`. Parte B: banner `… sandboxed HOME`, `the app serves the simulated monitor`, checkmark desmarcado; o 1º clique grava `…/DDC Control.desktop` com `Exec=/home/slipalison/repos/ddc-control/target/release/ddc-tray` e marca; o 2º remove e desmarca; `the item followed an entry created and removed behind the app's back`; `smoke-autostart: OK — …`. `smoke-sni.sh` com 0 bytes de diff. PID 24429 intacto, nada sobrando. W-16 não apareceu. |
-| 10 | Sem `TODO`/`FIXME` sem issue nos não-Rust da phase; `en.js`/`pt-BR.js` só em comentário e sem `/*` | CONTEXT | Auto | PASS | `OK`, exit 0, 0,01 s. Sondas no spec alterado: `// TODO later` VERMELHO e `// TODO(#12) later` `OK`. Os 6 casos vermelhos e os 2 verdes da iteração 4 ficam herdados, porque o Verify não mudou. |
-| 11 | `cargo test --workspace` exit 0 | PROJECT | Auto | PASS | Verify literal -> `OK`, exit 0, 1,09 s. Soma: 413 passed, 0 failed, 9 ignored. |
+| 8 | Segurança de hardware e superfície: `DDC_HW_TESTS`/`/dev/i2c`/`DdcHiDisplays` em não-`.md` de `apps`/`crates` só nos 3 arquivos de produção; `DdcHiMonitorBackend` só neles e em `ddc_hi_backend/tests.rs`; nos 3, toda linha com `cfg` e todo atributo com `test` = só `#[cfg(test)]` + `mod tests;`; `doctest = false` efetivo e sem bloco `Doc-tests ddc_adapters`; capabilities idênticas; plugin no lock e ligado ao tray | CONTEXT | Auto | PASS | `OK`, exit 0, 0,83 s. Nos 3 arquivos, só `#[cfg(test)]`/`mod tests;` (`ddc_hi_backend.rs:136`, `worker.rs:552`, `retry.rs:179`). `cargo metadata`: `["lib"] ddc_adapters doctest=false`. `cargo test -p ddc-adapters` sem `Doc-tests ddc_adapters`, e no `--workspace` também (só `ddc_cli`/`ddc_core`/`ddc_tray`). `capabilities/` só tem `default.json`, sem diff contra a base e sem `autostart`. `tauri-plugin-autostart v2.6.0` -> `ddc-tray`. M8n, M8t, M8a (formatada, `fmt` 0), M8s e M8c VERMELHAS. **Resíduo (W-21, não objetivo): `#[test]` gerado por macro dá `OK`. A M8l o Gate 4 rejeita.** O "nenhum teste fala com monitor real", delegado ao 5.7, foi conferido por leitura e por inotify (zero aberturas). |
+| 9 | Release sobe na bandeja e o autostart funciona de ponta a ponta, em sessão D-Bus PRIVADA, com `--fake`; `smoke-sni.sh` sem diff; partes A e B, monitor simulado exigido nas duas, marca segue o SO; `~/.config/autostart` real idêntico | CONTEXT | Auto | PASS | `OK`, exit 0, **3/3 execuções literais** (5,64 / 6,09 / 6,04 s). Parte A: `smoke-sni-private: private session bus, stand-in StatusNotifierWatcher`, `smoke-sni: the app serves the simulated monitor` e `smoke-sni: OK — PID 1426467 registered its tray item, was alive 2 s later, showed its popup on Activate and kept it shown and never panicked`. Parte B: banner `… sandboxed HOME`, `the app serves the simulated monitor`, checkmark desmarcado; o 1º clique grava `…/DDC Control.desktop` com `Exec=/home/slipalison/repos/ddc-control/target/release/ddc-tray` e marca; o 2º remove e desmarca; `the item followed an entry created and removed behind the app's back`; `smoke-autostart: OK — …`. `smoke-sni.sh` com 0 bytes de diff. PID 24429 intacto, nada sobrando. Mutações A/R/B1/B2 herdadas (arquivos sem diff). W-16 não apareceu. |
+| 10 | Sem `TODO`/`FIXME` sem issue nos não-Rust da phase; `en.js`/`pt-BR.js` só em comentário e sem `/*` | CONTEXT | Auto | PASS | `OK`, exit 0, 0,01 s. Sondas refeitas nos 2 arquivos alterados (`view-model.test.mjs`, `input-notice.spec.mjs`): `// TODO later` e `  // fixme: x` VERMELHOS, `// TODO(#12) later` `OK`. |
+| 11 | `cargo test --workspace` exit 0 | PROJECT | Auto | PASS | Verify literal -> `OK`, exit 0, 1,05 s. Soma: 413 passed, 0 failed, 9 ignored. |
 | 12 | Cobertura >= 80% das linhas | PROJECT | Auto | PASS | Gate 3: coluna Lines do TOTAL = 85.25% (`3626 535 85.25%`), `COV_EXIT=0`. |
 | 13 | Sem `TODO`/`FIXME` sem issue (`*.rs`, `src/ crates/ apps/`) | PROJECT | Auto | PASS | Verify literal do PROJECT -> `OK`, exit 0, 0,01 s. |
-| 14 | CHANGELOG.md atualizado por release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` (linha 8) tem `### Added` ("Start with system" no menu da bandeja, Linux e Windows) e `### Fixed` (linha 18); o último release é `## [0.1.0] - 2026-09-28` (linha 31); nenhum heading de release novo nesta phase; sem diff desde `d18829d`. |
-| 15 | README descreve o comportamento atual | PROJECT | Manual | MANUAL_REQUIRED | suggested: o menu lista **Start with system** (linhas 330 e 334); o parágrafo "Input switch" (linha 412) descreve o assentamento; os smokes em `scripts/` são citados (linha 387); a limitação do `Exec=` com espaço está em "Known limitations of the tray app" (linha 399); sem diff desde `d18829d`; falta a leitura humana no diff do PR. |
+| 14 | CHANGELOG.md atualizado por release | PROJECT | Manual | MANUAL_REQUIRED | suggested: `## [Unreleased]` (linha 8) tem `### Added` (linha 10, "Start with system" no menu da bandeja, Linux e Windows) e `### Fixed` (linha 18). O último release é `## [0.1.0] - 2026-09-28` (linha 31). Nenhum heading de release novo nesta phase; sem diff desde `a91d193`. |
+| 15 | README descreve o comportamento atual | PROJECT | Manual | MANUAL_REQUIRED | suggested: o menu lista **Start with system** (linhas 330, 333 e 334); o parágrafo "Input switch" (linha 412) descreve o assentamento (250 ms, até 3 s); os smokes em `scripts/` são citados (linha 387); a limitação do `Exec=` com espaço está em "Known limitations of the tray app" (linhas 392/399). Sem diff desde `a91d193`; falta a leitura humana no diff do PR. |
 
 **Totals:** 15 items | Auto: 13 (13 PASS, 0 FAIL) | Manual: 2 pending
 
@@ -217,21 +284,22 @@ Novos na iteração 5:
 Rodar `/jdi-confirm-dod input-switch-autostart` para confirmar as 2 linhas Manual herdadas (CHANGELOG/README). Sem isso, `/jdi-ship` recusa a phase.
 
 ## Recommendation
-Sem blockers. Depois de confirmar as 2 linhas Manual, a phase pode seguir para `/jdi-ship`.
+Sem blockers pelos gates. Todos os 13 Verify automáticos dão `OK` no HEAD, e os achados do critic da iteração 5 estão fechados:
+- linha 1: M1k, com o conjunto das constantes e o SHA-256 também pegando M1p e M1t;
+- linhas 3 e 4: M4s, M4g, M4ge e M4u, com os harnesses congelados;
+- linha 8: doctest e `cfg(all(` multilinha.
 
-- **Achados do critic da iteração 4: todos fechados.** As mutações que os expunham foram reproduzidas aqui de forma independente e ficam vermelhas:
-  - linha 1: M1, e o congelamento por SHA-256 pega o harness enfraquecido;
-  - linha 4: M4;
-  - linha 6: M6;
-  - linha 8: M8x, M8y e M8t.
-- **Candidato forte a achado da próxima rodada do critic: W-19** (linhas 3 e 4, objetivo). Com os papéis de mantida e pedida trocados no template, o toast diz o contrário do que o monitor fez, e os Verify 3 e 4 dão `OK` (M4s, M4g). Se o loop for seguir com critic, fechar antes:
-  - uma asserção da frase literal com papéis no spec, para `en`, `pt-BR` e o genérico;
-  - e/ou em `view-model.test.mjs`.
+**Antes de seguir para o critic, fechar a W-20** (linha 1, objetiva provável). Um piso no `Default` em `settle_input`, de 1 linha, passa no `fmt`, no clippy e em todos os testes determinísticos, e dá Verify 1 `OK` em 15 de 20 rodadas. É regressão do `952dac1`, que trocou a janela custom de 1 s pela de 4 s em vez de manter as duas. Se o loop seguir com critic sem essa correção, o reviewer espera BLOCKED pela linha 1. Correção mínima, já testada na cópia:
+- um limite de cima de leituras na 1ª parte de (f) (`calls.len() - 1 <= ceil(janela/passo)`): HEAD 10/10 verde, M1f e M1h 10/10 vermelhas;
+- e/ou (b) rodado também com uma janela menor que a do `Default`;
+- ou as duas coisas.
 
-  Isso pede emenda do DoD (novo SHA-256 do spec) e nova D-XX.
-- **W-18 é opcional.** O Gate 4 já cobre, por `fmt --check`.
+Como `worker/tests.rs` está congelado, isso pede emenda do DoD (novo SHA-256) e nova D-XX.
+
+Outros pontos:
+- **W-21 é opcional:** exige metaprogramação deliberada. Se for fechar, a checagem pela `--list` (testes só em submódulos `::tests::`) é comportamental e pega qualquer forma.
 - **W-16:** se uma nova execução da linha 9 falhar com `the popup was hidden within 1.5 s`, rodar de novo.
-- **Ambiente:** com a ACL nova em `/dev/i2c-*`, rodar a prova por inotify em `bwrap` antes de qualquer execução nativa da suíte, nas próximas rodadas.
+- **Ambiente:** com a ACL em `/dev/i2c-*`, manter a prova por inotify em `bwrap` antes de qualquer execução nativa da suíte, nas próximas rodadas.
 - **No PR:**
   - registrar o que foi observado no RTK real (W-3);
   - conferir o job `rust-windows` verde (W-2, e W-11 se o teste (f) flakar);
@@ -240,25 +308,14 @@ Sem blockers. Depois de confirmar as 2 linhas Manual, a phase pode seguir para `
 
 ## DoD Critic (enhanced)
 
-Critic forçado pelo `/jdi-issue` (sub-agente somente leitura, iteração 5; todo `cargo` em `bwrap` com os 16 `/dev/i2c-*` cobertos e observados por inotify, zero eventos). Linhas 2, 5, 6, 7, 9, 10, 11, 12 e 13: `hollow=false`. Linhas ocas:
+Critic forçado pelo `/jdi-issue` (sub-agente somente leitura; rodada 2, iteração 1; todo `cargo` em `bwrap` com os 16 `/dev/i2c-*` cobertos e observados por inotify: zero eventos fora do controle). Linhas 2, 3, 4, 5, 6, 7, 9, 11, 12 e 13: `hollow=false`. Linhas ocas:
 
-- DoD row «1 — assentamento no adapter» (objective). O texto afirma: "as constantes do passo e da janela são PRIVADAS de `retry.rs` e só alimentam o `Default`: `worker.rs` não as nomeia, então só a política manda". O Verify não confere nada disso. Mutação M1k, 3 linhas de produção:
-  - `retry.rs:32` passa a `pub(super) const INPUT_SETTLE_WINDOW`;
-  - `worker.rs` importa a constante;
-  - `worker.rs:314` passa a `(self.clock.now() + settle.window.min(INPUT_SETTLE_WINDOW)).min(deadline)`.
+- DoD row «1 — assentamento no adapter» (objective). W-20 confirmada e ampliada:
+  - M1f, o piso no `Default` em `settle_input`, dá Verify 1 `OK` em 16 de 20 rodadas;
+  - M1m, um piso "defensivo" com outro nome (`const MIN_SETTLE_WINDOW: Duration = Duration::from_secs(1);` + `settle.window.max(MIN_SETTLE_WINDOW)` em `worker.rs`), passa em fmt e clippy, dá lib `76 passed` e Verify 1 `OK` em 16 de 20 rodadas. O conjunto das linhas `INPUT_SETTLE_*` não a vê.
 
-  Resultado: Verify 1 `OK`, lib `76 passed`, fmt e clippy `-D warnings` saem 0. A mutação quebra a letra (a constante deixa de ser privada e `worker.rs` a nomeia) e o efeito: uma política com janela maior que 3 s seria cortada em silêncio. Sem efeito em produção, porque o `Default` é 3 s e nenhum teste usa janela maior que 1 s. É estrutural.
-- DoD row «3 — view-model puro» (hollow, NÃO objetiva). W-19 reproduzida:
-  - M4s inverte os papéis no template do input (`still on {asked}, not {kept}` / `continua em {asked}, não em {kept}`);
-  - M4g inverte os papéis no genérico pt-BR (`manteve {asked} em vez de {kept}`).
-
-  Com as duas, o Verify 3 dá `OK`. A letra da linha exige só que os dois nomes apareçam. O papel vem da D-5 e do sentido para o usuário: o toast diria que o monitor está na entrada em que NÃO está.
-- DoD row «4 — aviso visível de ponta a ponta» (hollow, NÃO objetiva). M4s e M4g dão Verify 4 `OK`, com o Playwright completo. `expectToast` compara com o mesmo template, e `expectToastNaming` faz `toContainText` por nome, sem ordem. Mesma avaliação da linha 3.
-- DoD row «8 — segurança de hardware e superfície» (objective). DOCTEST: o rustdoc roda os exemplos ```` ``` ```` de comentários `///` como testes, inclusive em itens privados, e o `ddc-adapters` não tem `doctest = false`. Mutação M8d: um exemplo de 5 linhas na doc de `impl Default for DdcHiBudgets` (`ddc_hi_backend.rs:53`). Resultado:
-  - Verify 8 `OK`;
-  - fmt e clippy saem 0;
-  - `cargo test -p ddc-adapters --doc` roda `ddc_hi_backend::DdcHiBudgets::default (line 56) ... ok`.
-
-  Há, portanto, código de teste executado por `cargo test --workspace` num arquivo excluído da varredura de tokens, contra a frase "NÃO têm código de teste embutido". A mesma classe vale para `#[cfg(doctest)]`, porque `\btest\b` não casa `doctest`. W-18 confirmada: `#[ test ]` e `#[cfg(` multilinha dão `OK` e o fmt os rejeita. Mas o próprio rustfmt GERA um `#[cfg(all(` multilinha estável quando o predicado passa de 100 colunas, e com ele o Verify 8 dá `OK` e o fmt sai 0. Fica não objetivo (predicado artificial; um helper sem uso cai no `dead_code`).
+  As duas quebram "só a política manda" e a frase de (b). Causa: (b) e (e) só usam janela MAIOR que o `Default`, e a 1ª parte de (f) não tem limite de cima. Correção testada: limite de leituras na 1ª parte de (f) (`calls.len()-1 <= ceil(janela/passo)`); com ele, o HEAD dá 10/10 ok e a M1m 10/10 FAILED. Uma segunda janela de 1 s em (b) NÃO pegaria a M1m.
+- DoD row «8 — segurança de hardware e superfície» (hollow, NÃO objetiva). W-21 confirmada. Além do `planted!(test)` do reviewer, há uma variante mais forte: um macro de tabela com `#[test]` literal definido em `lib.rs` (fora dos 3 arquivos) e chamado sem `cfg` em `worker.rs`. Ele roda `ddc_hi_backend::worker::the_input_source_is_vcp_0x60 ... ok`, com fmt 0, clippy 0 e Verify 8 `OK`. Exige uma chamada de teste sem `cfg` em escopo de produção, o que nenhuma convenção produz. Fechamento: uma checagem ANCORADA pela `--list`, em que todo teste sob `ddc_hi_backend::` case com `^ddc_hi_backend::((worker|retry|hardware|identity)::)?tests::`.
+- DoD row «10 — TODO/FIXME nos arquivos não-Rust» (objective). Achado novo. A phase passou a tocar `crates/ddc-adapters/Cargo.toml` (`66b2665`), mas o pathspec do Verify 10 não inclui esse arquivo. Mutação, commitada num repositório descartável: `# TODO: turn doctests back on once ...` acima de `doctest = false`. Com ela, o Verify 10 e o Verify 13 dão `OK`. Controle: a mesma linha em `apps/ddc-tray/src-tauri/Cargo.toml` deixa o Verify 10 com exit 1. Correção: incluir o manifesto ou derivar a lista do diff da phase.
 
 **Verdict:** BLOCKED
