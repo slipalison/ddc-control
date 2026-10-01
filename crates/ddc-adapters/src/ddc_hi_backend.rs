@@ -133,20 +133,5 @@ const _: () = {
     assert_send_sync::<DdcHiMonitorBackend>();
 };
 
-/// The backends the app and the CLI build: `new`, with and without
-/// `with_budgets`. Building one only starts the worker thread, which touches
-/// no monitor before its first call.
-#[cfg(test)]
-fn production_backends() -> Vec<DdcHiMonitorBackend> {
-    let budgets = DdcHiBudgets {
-        vcp: Duration::from_millis(500),
-        ..DdcHiBudgets::default()
-    };
-    vec![
-        DdcHiMonitorBackend::new().unwrap(),
-        DdcHiMonitorBackend::new().unwrap().with_budgets(budgets),
-    ]
-}
-
 #[cfg(test)]
 mod tests;

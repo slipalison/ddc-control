@@ -36,13 +36,27 @@ fn backend_starts_and_stops_without_touching_a_monitor() {
     assert!(format!("{backend:?}").contains("500ms"));
 }
 
+/// The backends the app and the CLI build: `new`, with and without
+/// `with_budgets`. Building one only starts the worker thread, which touches
+/// no monitor before its first call.
+fn production_backends() -> Vec<DdcHiMonitorBackend> {
+    let budgets = DdcHiBudgets {
+        vcp: Duration::from_millis(500),
+        ..DdcHiBudgets::default()
+    };
+    vec![
+        DdcHiMonitorBackend::new().unwrap(),
+        DdcHiMonitorBackend::new().unwrap().with_budgets(budgets),
+    ]
+}
+
 /// The retry policies are no parameter of the public constructors, so the
 /// wiring is the only place the settling of an input switch can be lost: a
 /// client given a zero settle window answers `Ok` right after the write, and
 /// every test of the worker stays green (D-2026-09-30-input-switch-autostart-19).
 #[test]
 fn the_real_backend_hands_the_default_retry_policies_to_its_client() {
-    for backend in super::production_backends() {
+    for backend in production_backends() {
         assert_eq!(
             *backend.client.policies(),
             RetryPolicies::default(),
