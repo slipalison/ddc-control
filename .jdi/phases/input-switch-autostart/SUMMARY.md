@@ -1,6 +1,6 @@
 # Phase 9: Input switch fix and autostart — Summary  (slug: input-switch-autostart)
 
-**Status:** complete (iteração 1 do loop: T-1..T-8; iterações 2 a 5: correção dos achados do critic)
+**Status:** complete (iteração 1 do loop: T-1..T-8; iterações 2 a 5 e rodada 2: correção dos achados do critic)
 **Tasks:** 8/8 complete, 0 blocked
 
 Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a escrita de `SUMMARY.md` por um subagente. As saídas brutas do doer ficaram em `/tmp/t/` (`t1-red.txt`, `t2-red.txt`, `t4-red.txt`, `smoke-evidence.txt`, `cov.txt`).
@@ -179,6 +179,46 @@ HEAD do código: `ed8114b`. Os rows 1, 4 e 8 ganharam código novo e cada um fic
 - `input-notice.spec.mjs` `bdb21385…`;
 - `support.mjs` `ee930894…`.
 
+## Rodada 2, iteração 1 — quinta rodada do critic (D-2026-10-01-3)
+Depois do auto-reset 1/3, esta é a 6ª iteração absoluta. HEAD do código: `6daa9cb`. O orquestrador escreveu esta seção a partir do relatório do doer.
+
+**Commits.** Nenhum commit mistura `.jdi/`, e o código de produção (`worker.rs`, `retry.rs`, `ddc_hi_backend.rs`, `src/i18n/*`) não tem diff.
+- `952dac1` test (linha 1): `custom_settle_policies()` passa a passo 500 ms e janela 4 s, MAIOR que o `Default`, com `assert!(custom.window > defaults.input_settle.window)`. O helper `keeps_old_input_through(settle)` roteiriza um `Holds` por passo. (b) passa a exigir também `calls.len() - 1 == scripted`.
+- `66b2665` build (linha 8): `[lib] doctest = false` no `ddc-adapters`, que tinha 0 doctests. O `Cargo.lock` não muda.
+- `6daa9cb` test (linhas 3 e 4): os 4 testes nomeados do view-model conferem por `assert.equal` as frases LITERAIS inteiras (aviso de input e genérico, em `en` e `pt-BR`, e o "pode ter comutado"). O spec confere com `toHaveText('<frase literal>')` os 4 toasts.
+
+**Mutações** (todo `cargo` em `bwrap`, com os 16 `/dev/i2c-*` cobertos; todas revertidas).
+- MW, janela travada no `Default` (`settle.window.min(Duration::from_secs(3))`): VERMELHA, `74 passed; 2 failed`.
+  - (b): `left: 6 / right: 8`.
+  - (e): `left: 3s / right: 4s`.
+- M1k-a, só `pub(super) const` + `use` em `worker.rs`: os testes ficam verdes, mas o Verify 1 fica VERMELHO pelo conjunto das constantes. M1k-b, a mutação do critic: VERMELHA pelos testes e pelo conjunto.
+- Linha 8, VERMELHO no Verify 8 em cada caso:
+  - sem `doctest = false`;
+  - `#[cfg(all(` multilinha gerado pelo `cargo fmt` (o fmt sai 0);
+  - `#[ test ]`;
+  - `#[cfg(doctest)]`.
+- Sonda do rustdoc: com `doctest = false`, um exemplo plantado NÃO roda em `cargo test -p ddc-adapters` nem em `--workspace` (nenhuma linha `Doc-tests ddc_adapters`), mas RODA num `cargo test --doc` explícito. A linha 8 foi ajustada para dizer exatamente isso e passou a conferir a ausência do bloco `Doc-tests ddc_adapters` na execução.
+- M4s, papéis trocados no aviso de input: VERMELHA.
+  - Unit: `not ok 147`/`148`.
+  - Spec: 4 ✘, `Expected: "The monitor is still on DisplayPort-1, not HDMI-1. …"` contra `Received: "The monitor is still on HDMI-1, not DisplayPort-1. …"`.
+- M4g, papéis trocados no genérico pt-BR: VERMELHA.
+  - Unit: 2 falhas.
+  - Spec: 2 ✘, `Expected: "Brilho: o monitor manteve 75% em vez de 76%."` contra `Received: "… 76% em vez de 75%."`.
+
+**Gates (HEAD `6daa9cb`).**
+- `cargo fmt --all --check`, `clippy --workspace --all-targets --locked -- -D warnings` e o cross-check Linux saem exit 0.
+- `cargo test --workspace --locked`: 413 passed, 0 failed, 9 ignored. Sai o bloco vazio `Doc-tests ddc_adapters`.
+- `npm run test:unit`: 165 pass.
+- `cargo llvm-cov`: linhas 85,25%, exit 0.
+- Playwright: 152 passed, 6 skipped.
+
+**Verify.** Os 10 deram `OK`. As linhas 1 e 4 só falharam pelos SHA-256 antigos, e sem essa parte deram `OK`. A linha 9 passou de primeira.
+
+**Harness recongelado (orquestrador):**
+- `worker/tests.rs` `a91c4582…`;
+- `input-notice.spec.mjs` `92f99e00…`;
+- `view-model.test.mjs` `7c650133…`, que entra agora no Verify da linha 3.
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
@@ -191,7 +231,7 @@ HEAD do código: `ed8114b`. Os rows 1, 4 e 8 ganharam código novo e cada um fic
 - `apps/ddc-tray/tests/e2e/{input-notice,pseudo-locale}.spec.mjs`, `apps/ddc-tray/tests/e2e/support.mjs`
 - `apps/ddc-tray/scripts/{smoke-sni-private.sh,fake-sni-watcher.py,private-bus.sh,smoke-autostart-private.sh,sni-dbusmenu.py}`
 - `crates/ddc-adapters/src/ddc_hi_backend/retry.rs`
-- `apps/ddc-tray/src-tauri/Cargo.toml`, `Cargo.lock`, `apps/ddc-tray/src-tauri/src/{autostart,lib,menu,i18n,tray}.rs`, `apps/ddc-tray/src-tauri/src/tray/{status_item,notification_area}.rs`, `apps/ddc-tray/src-tauri/tests/autostart_entry.rs`
+- `crates/ddc-adapters/Cargo.toml`, `apps/ddc-tray/src-tauri/Cargo.toml`, `Cargo.lock`, `apps/ddc-tray/src-tauri/src/{autostart,lib,menu,i18n,tray}.rs`, `apps/ddc-tray/src-tauri/src/tray/{status_item,notification_area}.rs`, `apps/ddc-tray/src-tauri/tests/autostart_entry.rs`
 - `README.md`, `CHANGELOG.md`, `docs/hardware-validation.md`
 
 ## Tests
