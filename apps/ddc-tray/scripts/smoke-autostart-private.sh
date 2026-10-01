@@ -19,10 +19,20 @@
 # the autostart plugin) or "could not change", and the listing of the REAL
 # ~/.config/autostart is the same before and after.
 #
+# The item's mark comes from the OS each time the menu opens (AboutToShow),
+# not from a cache the app keeps. After the second click the script proves
+# it: it creates the .desktop entry BY HAND in the sandboxed HOME, reads the
+# menu again and requires MARKED, removes the file by hand, reads again and
+# requires UNMARKED. An app that did not answer AboutToShow by reading the OS
+# again would keep the stale mark and fail here.
+#
 # The app runs with HOME in a temporary directory (with its .config, which
 # the autostart crate does not create), XDG_CONFIG_HOME, APPIMAGE and the
 # language variables unset (the menu is in English), and DDC_TRAY_FAKE=1: the
-# simulated monitor, so no real one is touched. The private bus, the
+# simulated monitor, so no real one is touched. That is not taken on faith:
+# right after the item registers the script requires the app's own line that
+# it serves the simulated monitor (the one smoke-sni.sh --fake requires) and
+# fails, before any click, when it is not there. The private bus, the
 # stand-in watcher and the re-execution under dbus-run-session are
 # private-bus.sh's, shared with smoke-sni-private.sh. The app and the watcher
 # are always stopped on the way out, and the temporary HOME removed. The
@@ -37,6 +47,9 @@ readonly LABEL='Start with system'
 readonly REGISTER_TIMEOUT_S=15
 readonly ENTRY_TIMEOUT_S=5
 readonly STOP_TIMEOUT_S=5
+# What the app says on stderr when DDC_TRAY_FAKE=1 makes it serve the
+# simulated monitor; the same line smoke-sni.sh expects with --fake.
+readonly SIMULATED_LINE='ddc-tray: DDC_TRAY_FAKE=1, serving the simulated RTK monitor; no real monitor is touched'
 readonly FORBIDDEN_STDERR=(
     'panicked'
     'could not read the start-with-system entry'
@@ -53,6 +66,7 @@ stderr_log=""
 sandbox=""
 service=""
 item_path=""
+entry_name=""
 
 on_fail() {
     if [[ -n $stderr_log && -s $stderr_log ]]; then
@@ -185,6 +199,14 @@ check_desktop_entry() {
     say "$file has Exec=$expected"
 }
 
+# Fails unless the app said it serves the simulated monitor. Run before the
+# first click, so a run without DDC_TRAY_FAKE=1 stops before it does anything.
+require_simulated_monitor() {
+    grep -Fxq -- "$SIMULATED_LINE" "$stderr_log" ||
+        fail "the app did not say it serves the simulated monitor ('$SIMULATED_LINE')"
+    say "the app serves the simulated monitor"
+}
+
 check_stderr() {
     local forbidden
     for forbidden in "${FORBIDDEN_STDERR[@]}"; do
@@ -202,6 +224,7 @@ check_the_toggle() {
 
     click_item
     wait_until "$ENTRY_TIMEOUT_S" "exactly one .desktop entry after the first click" exactly_one_desktop_entry
+    entry_name=$(entries)
     check_desktop_entry "$bin"
     wait_until "$ENTRY_TIMEOUT_S" "the item marked after the first click" menu_is 1
     say "the first click wrote the entry and the item is marked"
@@ -210,6 +233,24 @@ check_the_toggle() {
     wait_until "$ENTRY_TIMEOUT_S" "the entry removed after the second click" no_entry
     wait_until "$ENTRY_TIMEOUT_S" "the item unmarked after the second click" menu_is 0
     say "the second click removed the entry and the item is unmarked"
+}
+
+# The entry as the first click wrote it, but made by hand: the app never
+# saw it, so only reading the OS when the menu opens can mark the item.
+write_entry_by_hand() {
+    local bin=$1
+    printf '[Desktop Entry]\nType=Application\nName=by hand\nExec=%s\n' \
+        "$(readlink -f "$bin")" >"$sandbox/.config/autostart/$entry_name"
+}
+
+check_the_item_follows_the_os() {
+    local bin=$1
+    [[ -n $entry_name ]] || fail "no entry name from the first click"
+    write_entry_by_hand "$bin"
+    wait_until "$ENTRY_TIMEOUT_S" "the item marked for an entry created by hand" menu_is 1
+    rm -f "$sandbox/.config/autostart/$entry_name"
+    wait_until "$ENTRY_TIMEOUT_S" "the item unmarked after the entry was removed by hand" menu_is 0
+    say "the item followed an entry created and removed behind the app's back"
 }
 
 # Outside: checks the arguments, then runs this script again inside a fresh
@@ -233,7 +274,9 @@ inside() {
     echo "$BANNER"
     start_app "$bin"
     find_item
+    require_simulated_monitor
     check_the_toggle "$bin"
+    check_the_item_follows_the_os "$bin"
 
     kill -0 "$app_pid" 2>/dev/null || exited_early "before the end of the smoke"
     stop_app
