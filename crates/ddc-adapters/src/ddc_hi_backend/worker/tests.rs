@@ -1211,8 +1211,12 @@ fn input_write_budget_covers_the_settle_window() {
 /// Through the real client, a write of the input source is not cut short by
 /// the plain VCP budget: the monitor that keeps the old input for the whole
 /// settle window still gets `Ok`, not the `Timeout` the popup would show as a
-/// failed switch. The settling runs on the system clock here, shrunk by the
-/// injected policies (D-2026-09-30-input-switch-autostart-14).
+/// failed switch. Nor is it given more than the injected window: a write the
+/// monitor never ends times out once the VCP budget and that window are
+/// spent, not after the default 3 s window. A longer budget still answers the
+/// first write `Ok`, so only the second one catches it. The settling runs on
+/// the system clock here, shrunk by the injected policies
+/// (D-2026-09-30-input-switch-autostart-14; D-2026-10-01-input-switch-autostart-1).
 #[test]
 fn input_write_through_the_client_outlives_the_vcp_budget() {
     let settle = no_backoff().input_settle;
@@ -1222,17 +1226,32 @@ fn input_write_through_the_client_outlives_the_vcp_budget() {
     source.script_reads([Scripted::Holds(DISPLAYPORT_1); 100]);
     let client = spawn(&source, budgets(vcp));
     client.enumerate().unwrap();
+    let gate = Gate::default();
+    let stuck = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Block(gate.clone()))]);
+    let stuck_client = spawn(&stuck, budgets(vcp));
+    stuck_client.enumerate().unwrap();
 
     let started = Instant::now();
     let result = client.write_vcp(&id("a"), VcpCode::INPUT_SOURCE, DISPLAYPORT_2);
     let waited = started.elapsed();
+    let started = Instant::now();
+    let never_ends = stuck_client.write_vcp(&id("a"), VcpCode::INPUT_SOURCE, DISPLAYPORT_2);
+    let gave_up = started.elapsed();
+    gate.open();
 
     let calls = source.calls();
+    let budget = vcp + settle.window;
     assert_eq!(result, Ok(()));
     assert!(waited >= settle.window, "{waited:?} < {:?}", settle.window);
     assert_eq!(calls[0], written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2));
     assert!(calls.len() > 2, "{calls:?}");
     assert!(calls[1..].iter().all(|call| *call == input_read()));
+    assert_eq!(never_ends, Err(DdcError::Timeout));
+    assert!(gave_up >= budget, "{gave_up:?} < {budget:?}");
+    assert!(
+        gave_up < budget + Duration::from_secs(1),
+        "{gave_up:?} >= {budget:?} + 1 s"
+    );
 }
 
 /// D-2026-09-30-input-switch-autostart-3: the defaults that protect the user
