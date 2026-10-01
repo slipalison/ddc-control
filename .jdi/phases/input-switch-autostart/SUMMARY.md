@@ -1,6 +1,6 @@
 # Phase 9: Input switch fix and autostart — Summary  (slug: input-switch-autostart)
 
-**Status:** complete (iteração 1 do loop: T-1..T-8; iterações 2 a 4: correção dos achados do critic)
+**Status:** complete (iteração 1 do loop: T-1..T-8; iterações 2 a 5: correção dos achados do critic)
 **Tasks:** 8/8 complete, 0 blocked
 
 Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a escrita de `SUMMARY.md` por um subagente. As saídas brutas do doer ficaram em `/tmp/t/` (`t1-red.txt`, `t2-red.txt`, `t4-red.txt`, `smoke-evidence.txt`, `cov.txt`).
@@ -143,6 +143,42 @@ Retomada pelo `/jdi-issue` em 2026-10-01 ("continue o desenvolvimento"). Base `1
 Nenhum teste, script ou mutação escreveu em monitor real, e não foram usados `--ignored` nem `DDC_HW_TESTS`. O `ddc-tray` do usuário seguiu rodando e o `~/.config/autostart` real ficou com o mesmo sha256.
 Ressalvas: o limite de baixo de (f) depende de `recv_timeout` nunca expirar antes do prazo, o que a std garante; a folga de tempo é 0,26 s contra o limite de 0,5 s. Os 3 últimos commits saíram sem a linha `Claude-Session:` da atribuição, que chegou depois.
 
+## Iteração 5 — quarta rodada do critic (D-2026-10-01-2)
+HEAD do código: `ed8114b`. Os rows 1, 4 e 8 ganharam código novo e cada um fica vermelho sob a sua mutação. O row 6 não pedia código: o Verify novo prova pelo stderr que o chamador de produção relata a falha, e o orquestrador conferiu que a mutação M6 o deixa sem `OK`. O orquestrador escreveu esta seção a partir do relatório do doer.
+
+**Commits.** Nenhum commit mistura `.jdi/`.
+- `ecf5ef0` test (row 1 (f)): o teste ganha uma 3ª parte. Um `WorkerClient` real, com as mesmas `budgets(vcp)` e `no_backoff()`, escreve BRIGHTNESS num display `Behaviour::Block(gate)`. O resultado tem de ser `Err(DdcError::Timeout)` com `elapsed >= vcp` e `elapsed < vcp + janela`. Leva `finished in 0.32s` (4/4).
+- `4393927` test (row 4): o helper `expectToastNaming` confere por literais o texto de `#toast-text`, sem largar a igualdade com o template:
+  - `(en)`/`(pt-BR)`: `DisplayPort-1` e `HDMI-1`;
+  - aviso genérico: `Brilho`, `75%` e `76%`;
+  - leitura que falha: `troca de entrada` e `pode ter comutado`.
+- `ed8114b` refactor (row 8):
+  - `without_backoff()` sai de `retry.rs` e vai para o novo `ddc_hi_backend/retry/tests.rs`, com os mesmos literais;
+  - o acessor `#[cfg(test)] policies()` sai de `worker.rs`, e o campo `WorkerClient::policies` passa a `pub(super)`;
+  - o teste (h) lê `backend.client.policies`;
+  - nos 3 arquivos de produção, a regex do row 8 casa só `#[cfg(test)]` + `mod tests;`.
+
+**Mutações (todas revertidas byte a byte).**
+- M1 (`write_vcp` com `self.write_budget_of(VcpCode::INPUT_SOURCE)`): VERMELHA. Saída: `panicked at .../worker/tests.rs:1267:5: 160.083193ms >= 60ms + 100ms`, `FAILED. 0 passed; 1 failed`.
+- M4 (`notice.inputKept` sem `{kept}` nas duas traduções): o Verify 4 sai sem `OK`, e o spec dá `4 failed, 6 passed`, com `(en)`/`(pt-BR)` vermelhos nos dois temas: `Expected substring: "DisplayPort-1"` contra `Received string: "The monitor is still on, not HDMI-1. ..."`.
+- M8a (`#[test] fn x() {}` solto em `ddc_hi_backend.rs`), M8b (`#[cfg(test)] impl RetryPolicies { fn x() }` em `retry.rs`) e M8c (`if cfg!(test) {}` em `write_budget_of`): o Verify 8 sai sem `OK` nas três.
+- M8d (fiação com `window: Duration::ZERO` em `DdcHiMonitorBackend::new()`): o teste (h) fica VERMELHO (`left: ... window: 0ns` contra `right: ... window: 3s`), e o Verify 1 sai sem `OK`.
+
+**Gates (HEAD `ed8114b`).**
+- `cargo fmt --all --check`, `clippy --workspace --all-targets --locked -- -D warnings` e o cross-check Linux saem exit 0.
+- `cargo test --workspace --locked`: 413 passed, 0 failed, 9 ignored.
+- `npm run test:unit`: 165 pass.
+- `cargo llvm-cov ... --summary-only`: exit 0, linhas 85,25% (3626 linhas, 535 sem cobertura).
+- Os 10 Verify rodaram literalmente e todos saíram `OK`; o row 9 passou de primeira.
+- Nada escreveu em monitor real, o `ddc-tray` do usuário seguiu rodando e o `~/.config/autostart` real ficou idêntico.
+
+**Harness congelado (orquestrador).** Os rows 1 e 4 passam a conferir o SHA-256 destes arquivos:
+- `worker/tests.rs` `fadb5aaa…`;
+- `ddc_hi_backend/tests.rs` `ec2d2980…`;
+- `retry/tests.rs` `12ac10db…`;
+- `input-notice.spec.mjs` `bdb21385…`;
+- `support.mjs` `ee930894…`.
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
@@ -150,9 +186,9 @@ Ressalvas: o limite de baixo de (f) depende de `recv_timeout` nunca expirar ante
 - Decisões do doer, dentro do escopo: comparação do input pelo byte baixo (como `withReadBack`; `0x0111` lido de um pedido `0x11` assenta); 4 testes extras em `worker/tests.rs` (prazo do chamador; pânico ou recusa durante o assentamento; byte baixo; `a_failed_input_write_is_not_followed_by_reads`); o toast dos avisos herda "Tentar de novo"; o `announce.readBack` curto segue sendo a última fala ao leitor de tela; o "128 testes" do README saiu na iteração 2 (`3451169`).
 
 ## Files modified
-- `crates/ddc-adapters/src/ddc_hi_backend/worker.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs`
+- `crates/ddc-adapters/src/ddc_hi_backend.rs`, `crates/ddc-adapters/src/ddc_hi_backend/tests.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs`, `crates/ddc-adapters/src/ddc_hi_backend/retry/tests.rs`
 - `apps/ddc-tray/src/{app.js,view-model.js}`, `apps/ddc-tray/src/i18n/{en,pt-BR}.js`, `apps/ddc-tray/tests/ui/view-model.test.mjs`
-- `apps/ddc-tray/tests/e2e/{input-notice,pseudo-locale}.spec.mjs`
+- `apps/ddc-tray/tests/e2e/{input-notice,pseudo-locale}.spec.mjs`, `apps/ddc-tray/tests/e2e/support.mjs`
 - `apps/ddc-tray/scripts/{smoke-sni-private.sh,fake-sni-watcher.py,private-bus.sh,smoke-autostart-private.sh,sni-dbusmenu.py}`
 - `crates/ddc-adapters/src/ddc_hi_backend/retry.rs`
 - `apps/ddc-tray/src-tauri/Cargo.toml`, `Cargo.lock`, `apps/ddc-tray/src-tauri/src/{autostart,lib,menu,i18n,tray}.rs`, `apps/ddc-tray/src-tauri/src/tray/{status_item,notification_area}.rs`, `apps/ddc-tray/src-tauri/tests/autostart_entry.rs`
@@ -160,4 +196,4 @@ Ressalvas: o limite de baixo de (f) depende de `recv_timeout` nunca expirar ante
 
 ## Tests
 - Total: 413 passed (workspace), 0 failed, 9 ignored; Playwright 152 passed; UI `node --test` 165 passed.
-- Coverage: 85,31% (Rust, `cargo llvm-cov` real), 88,48% (UI).
+- Coverage: 85,25% (Rust, `cargo llvm-cov` real), 88,48% (UI).
