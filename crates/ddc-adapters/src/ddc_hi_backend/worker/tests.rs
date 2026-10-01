@@ -1178,11 +1178,12 @@ fn writes_to_other_codes_do_not_settle() {
     }
 }
 
-/// The budget the client waits under is the one the settling is tested
-/// under: the whole window of the policy it was given fits in it, which the
-/// plain VCP budget would cut short. A client that budgeted by any other
-/// window than the policy's fails here, as the policies are not the default
-/// ones (D-2026-09-30-input-switch-autostart-17).
+/// The budget a client waits under is the one the settling is tested under:
+/// the whole window of the policy the client was given fits in it, which the
+/// plain VCP budget would cut short. Asked of a client whose policy and
+/// budgets are not the default ones, so a client that budgeted by any other
+/// window (the default one, say) or ignored the policy fails here, with no
+/// sleeping (D-2026-09-30-input-switch-autostart-19).
 #[test]
 fn input_write_budget_covers_the_settle_window() {
     let budgets = budgets(Duration::from_millis(400));
@@ -1191,8 +1192,10 @@ fn input_write_budget_covers_the_settle_window() {
     let keeps_old = [Scripted::Holds(DISPLAYPORT_1); 20];
     let input = VcpCode::INPUT_SOURCE;
     assert!(budgets.vcp < window);
+    let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
+    let client = WorkerClient::spawn(source, budgets, policies).unwrap();
 
-    let budget = write_budget(&budgets, &policies, input);
+    let budget = client.write_budget_of(input);
     let (full, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budget, keeps_old);
     let (cut, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budgets.vcp, keeps_old);
 
@@ -1201,11 +1204,7 @@ fn input_write_budget_covers_the_settle_window() {
     assert_eq!(slept(&full), window);
     assert!(slept(&cut) < window, "{:?}", cut.sleeps);
     for other in [VcpCode::BRIGHTNESS, VcpCode::POWER_MODE, VcpCode(0xE1)] {
-        assert_eq!(
-            write_budget(&budgets, &policies, other),
-            budgets.vcp,
-            "{other}"
-        );
+        assert_eq!(client.write_budget_of(other), budgets.vcp, "{other}");
     }
 }
 

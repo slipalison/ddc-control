@@ -185,11 +185,7 @@ impl From<DdcError> for TransactError {
 
 /// How long a caller waits for a write of `code`. A write of the input source
 /// waits out the settle window of `policies` on top of the VCP budget.
-pub(crate) fn write_budget(
-    budgets: &DdcHiBudgets,
-    policies: &RetryPolicies,
-    code: VcpCode,
-) -> Duration {
+fn write_budget(budgets: &DdcHiBudgets, policies: &RetryPolicies, code: VcpCode) -> Duration {
     if code == VcpCode::INPUT_SOURCE {
         budgets.vcp + policies.input_settle.window
     } else {
@@ -461,6 +457,12 @@ impl<S: DisplaySource> WorkerClient<S> {
         Self { budgets, ..self }
     }
 
+    /// How long this client waits for a write of `code`: the budgets and the
+    /// settle window it was started with, never the defaults.
+    fn write_budget_of(&self, code: VcpCode) -> Duration {
+        write_budget(&self.budgets, &self.policies, code)
+    }
+
     /// The retry policies this client was started with.
     #[cfg(test)]
     pub(crate) fn policies(&self) -> &RetryPolicies {
@@ -538,7 +540,7 @@ impl<S: DisplaySource> MonitorBackend for WorkerClient<S> {
     }
 
     fn write_vcp(&self, id: &MonitorId, code: VcpCode, value: u16) -> Result<(), DdcError> {
-        let budget = write_budget(&self.budgets, &self.policies, code);
+        let budget = self.write_budget_of(code);
         self.transact(id, budget, move |worker, id, deadline| {
             worker.write_vcp(id, code, value, deadline)
         })
