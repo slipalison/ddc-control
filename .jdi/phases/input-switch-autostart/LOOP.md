@@ -1,7 +1,7 @@
 ---
 phase_slug: input-switch-autostart
 phase_position: 9
-iter: 3
+iter: 4
 total_resets: 1
 status: running
 max_iter_per_round: 5
@@ -20,3 +20,4 @@ created_at: 2026-09-30T19:37:20-03:00
 - iter 1: BLOCKED, hash=9c25d34a87c7, commit=846dbc1, ts=2026-10-01T10:32:35-03:00
 - iter 2: BLOCKED, hash=e1b92a66b4fa, commit=a2d0d3c, ts=2026-10-01T11:24:42-03:00
 - iter 3: BLOCKED, hash=3b2f3bb1bb71, commit=714d2df, ts=2026-10-01T12:30:12-03:00
+- iter 4: BLOCKED, hash=4cf197243182, commit=8626fa6, ts=2026-10-01T13:49:26-03:00
