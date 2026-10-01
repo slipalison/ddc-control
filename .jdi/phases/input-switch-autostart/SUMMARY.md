@@ -248,6 +248,44 @@ O limite tem margem ZERO. Medido no HEAD, deu 18 a 20 leituras, com 20 em 7 de 1
 
 **Harness recongelado (orquestrador):** `worker/tests.rs` `124ba97c…`.
 
+## Rodada 2, iteração 3 — sétima rodada do critic (D-2026-10-01-5)
+8ª iteração absoluta. HEAD do código: `e34e4fc`. O orquestrador escreveu esta seção a partir do relatório do doer.
+
+**Commit.** `e34e4fc` (test) muda só `worker/tests.rs`, com +138 −72. `worker.rs` e `retry.rs` não mudam, e os nomes dos 7 testes também não.
+- O helper `custom_settle_table()` monta 8 políticas, todas diferentes do `Default`: 5 ms/100 ms, 500 ms/4 s, 500 ms/4,25 s, 300 ms/1 s, 2 s/10 s, 10 min/20 min, 7 s/7 s e 12 h/1 dia.
+- Os helpers `settle_reads` e `settle_sleeps` calculam as leituras e os sleeps esperados.
+- (b) roda em relógio VIRTUAL. Para cada política exige `Ok`, um único write, leituras `== ceil(janela/passo)`, sleeps exatos e `Σ == janela`. O orçamento próprio é `janela + 10 s`, para não depender do cliente.
+- (e) cria um `WorkerClient` sobre `FakeDisplays` para cada política. Exige `write_budget_of(0x60) == vcp + janela` e `vcp` para os outros códigos, e mantém `full`/`cut`. `budgets.vcp` passa a 70 ms.
+- (f) passa a aceitar até `ceil(janela/passo) + 1` leituras.
+
+**Mutações** (3/3 determinísticas; todas passam no fmt e no clippy; revertidas byte a byte):
+
+| mutação | quem pega |
+|---|---|
+| M1g (piso de 50 ms no passo) | (b): `5ms, 100ms: reads 2 != 20` |
+| M1g16 (`step.max(window/16)`) | (b): `reads 16 != 20` |
+| M1gw (piso de 1 s na janela + M1g) | (b) pelo vetor de sleeps (`[50ms; 20]` contra `[5ms; 20]`) e (e) (`170ms != 100ms`) |
+| M1c (teto de 5 s na janela, no worker e no cliente) | (b) (`2s, 10s: reads 3 != 5`) e (e) (`5.07s != 10.07s`) |
+| M1s (`step.min(1 s)`) | (b) (`reads 10 != 5`) |
+| M1s4 (`step.min(window/4)`) | (b) (`[250ms; 4]` contra `[300ms ×3, 100ms]`) |
+| M1d (`sleep(step)`) | (b) (`[500ms; 9]` contra `[500ms ×8, 250ms]`) e (e) (`4.5s != 4.25s`) |
+| M1bf150 (piso de 150 ms no orçamento do cliente) | (e) (`220ms != 170ms`) |
+| M1m (piso `MIN_SETTLE_WINDOW`) | (b), (e) e (f) |
+| M1f (piso no `Default`) | (b), (e) e (f) |
+
+**Estabilidade.** O (f) isolado passou 30/30, em 0,32 s. Os outros 6 testes levam 0,00 s.
+
+**Gates.**
+- `cargo fmt --all --check`, clippy `-D warnings` e o cross-check Linux saem 0.
+- `cargo test --workspace --locked`: 413 passed, 0 failed, 9 ignored.
+- `cargo llvm-cov`: linhas 85,25%.
+
+**Verify.** As linhas 2 a 10 deram `OK`, e a linha 9 passou de primeira. A linha 1 falhou só pelo SHA-256 antigo e deu `OK` com o hash recongelado.
+
+**Hardware.** Todo `cargo` rodou em `bwrap`, com os `/dev/i2c-*` cobertos e observados por inotify, e não houve eventos fora do controle positivo. O controle do doer abriu e fechou `/dev/i2c-1` uma vez, sem transação. Não houve `--ignored` nem `DDC_HW_TESTS`, e o `~/.config/autostart` real não mudou.
+
+**Harness recongelado (orquestrador).** `worker/tests.rs` passa a `b1509c2a…`.
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.

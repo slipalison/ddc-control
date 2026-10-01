@@ -135,6 +135,7 @@ As iterações 2 e 3 do loop corrigiram achados do DoD Critic, não tasks do pla
 - Iteração 5 (D-2026-10-01-input-switch-autostart-2): T-1 move `without_backoff()` para `ddc_hi_backend/retry/tests.rs` (novo, em `files_modified`), tira o acessor de teste de `worker.rs` (`WorkerClient::policies` vira `pub(super)`) e (f) ganha a 3ª parte (outro código no orçamento simples); T-4 confere o toast por literais; os rows 1 e 4 congelam os arquivos de teste por SHA-256.
 - Rodada 2, iteração 1 (D-2026-10-01-input-switch-autostart-3): T-1 usa uma política custom com janela maior que o `Default` e `crates/ddc-adapters/Cargo.toml` entra em `files_modified` (`[lib] doctest = false`); T-2 e T-4 conferem as frases literais inteiras; `tests/ui/view-model.test.mjs` passa a ser congelado na linha 3.
 - Rodada 2, iteração 2 (D-2026-10-01-input-switch-autostart-4): T-1 ganha o limite de leituras `ceil(janela / passo)` em (f); os Verify das linhas 8 (`--list` ancorado) e 10 (arquivos não-Rust do diff) mudam sem código.
+- Rodada 2, iteração 3 (D-2026-10-01-input-switch-autostart-5): T-1 prova o assentamento exato sobre uma tabela de 8 políticas extremas em relógio virtual ((b) e (e)); (f) tolera uma leitura; a linha 8 recusa `#[path]` nos 3 arquivos de produção.
 
 ## Files modified (all tasks)
 - `crates/ddc-adapters/Cargo.toml`, `crates/ddc-adapters/src/ddc_hi_backend.rs`, `crates/ddc-adapters/src/ddc_hi_backend/{worker,retry,tests}.rs`, `crates/ddc-adapters/src/ddc_hi_backend/{worker,retry}/tests.rs`
