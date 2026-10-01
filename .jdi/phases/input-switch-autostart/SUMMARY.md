@@ -1,6 +1,6 @@
 # Phase 9: Input switch fix and autostart — Summary  (slug: input-switch-autostart)
 
-**Status:** complete (iteração 1 do loop: T-1..T-8; iteração 2: correção dos 5 achados do critic)
+**Status:** complete (iteração 1 do loop: T-1..T-8; iterações 2 e 3: correção dos achados do critic)
 **Tasks:** 8/8 complete, 0 blocked
 
 Escrito pelo orquestrador a partir do relatório do doer: o harness recusou a escrita de `SUMMARY.md` por um subagente. As saídas brutas do doer ficaram em `/tmp/t/` (`t1-red.txt`, `t2-red.txt`, `t4-red.txt`, `smoke-evidence.txt`, `cov.txt`).
@@ -86,11 +86,41 @@ Seis execuções seguidas saíram 0, sem tempdir sobrando. Saídas ≠ 0: binár
 
 **Verify do DoD (iteração 2), bash `--noprofile --norc`, `LC_ALL=C.UTF-8`:** linhas 1 a 10 `OK` (linha 9 ~5 s com release compilado; linha 4 21 s). Gates: fmt e clippy `-D warnings` limpos; cross-check Linux verde; `cargo test --workspace --locked` 412 passed, 0 failed, 9 ignored; `cargo llvm-cov` TOTAL linhas 85,30% (3640 linhas, 535 perdidas). Nenhum teste/script escreveu em monitor real; `~/.config/autostart` real com o mesmo hash antes e depois.
 
+## Iteração 3 — segunda rodada do critic (D-17)
+Commits só de código: `1ed653b` `test(input-switch-autostart): settle tests read only the policy` (linha 1) e `9bed052` `test(input-switch-autostart): smoke proves fake and OS-fed mark` (linha 9). A linha 10 não precisou de commit.
+
+**Linha 1 (D-17a).** `INPUT_SETTLE_STEP`/`INPUT_SETTLE_WINDOW` perderam o `pub(crate)` e só o `Default` de `RetryPolicies` as usa; `worker.rs` nunca as importou (só lê `policies.input_settle`; sem diff) e `worker/tests.rs` deixou de importá-las. (b) e (e) rodam com uma política CUSTOM (passo 100 ms, janela 1 s, ambos ≠ `Default`; `custom_settle_policies()` afirma isso): (b) afirma `settle.step * reads == settle.window`, tempo virtual == janela custom e todos os sleeps == passo custom; (e) afirma `budgets.vcp + janela custom` para `0x60` e `budgets.vcp` para o resto, com `budgets(400 ms)` para que `vcp < janela` no braço "cortado". (g) segue fixando o `Default` por literais (250 ms / 3 s). Os 7 nomes não mudaram.
+Mutações provisórias em `worker.rs` (scripts em `/tmp/it3/mut.sh`), cada uma 5x, determinísticas, revertidas byte a byte (`cmp`, `sha256sum -c`, `git diff` limpo):
+
+| Mutação | Resultado (5/5) |
+|---|---|
+| M1: `budgets.vcp + Duration::from_secs(3)` em `write_budget` | `input_write_budget_covers_the_settle_window FAILED` (`tests.rs:1199`: `left: 3.4s`, `right: 1.4s`); os outros 6 passam |
+| M2: `Duration::from_secs(3)` no lugar de `settle.window` em `settle_input` | (b) FAILED (`left: 2s`, `right: 1s`) e (e) FAILED (`left: 1.4s`, `right: 1s`) em 5/5; (f) falhou junto em 2 das 5 (`Err(Timeout)` contra `Ok(())`), então só (b) e (e) contam |
+| M3: `left.min(Duration::from_millis(250))` no lugar de `left.min(settle.step)` | (b) FAILED (`left: 400ms`, `right: 1s`) e (f) FAILED (`tests.rs:1235`) em 5/5 |
+
+**Linha 9 (D-17b e c).** `smoke-autostart-private.sh`: `require_simulated_monitor` roda logo depois de `find_item` e antes de qualquer clique, exige a `SIMULATED_LINE` (a de `smoke-sni.sh`) no stderr e imprime `smoke-autostart: the app serves the simulated monitor`; `check_the_item_follows_the_os`, depois do 2º clique, cria o `.desktop` à mão no `HOME` de tempdir (com o nome que o 1º clique gravou, `DDC Control.desktop`), relê o menu (`AboutToShow` + `GetLayout`) e exige MARCADO, remove o arquivo e exige DESMARCADO, e imprime `smoke-autostart: the item followed an entry created and removed behind the app's back` antes do OK. `smoke-sni-private.sh` já passa `--fake` e a linha 9 do DoD casa `smoke-sni: the app serves the simulated monitor`. Saída real (release recém-compilado):
+```
+smoke-autostart-private: private session bus, stand-in StatusNotifierWatcher, sandboxed HOME
+smoke-autostart: the app serves the simulated monitor
+smoke-autostart: 'Start with system' is an unmarked checkmark and the autostart directory is empty
+smoke-autostart: the first click wrote the entry and the item is marked
+smoke-autostart: the second click removed the entry and the item is unmarked
+smoke-autostart: the item followed an entry created and removed behind the app's back
+smoke-autostart: OK — the Start with system item wrote the desktop entry on click and removed it on the next one
+```
+- Mutação A (apagar `fn menu_about_to_show(&mut self) {}` de `tray/status_item.rs`, rebuild release): o smoke novo falha 3/3 — `smoke-autostart-private: FAIL: the item marked for an entry created by hand did not happen within 5 s` (exit 1); o `smoke-sni-private.sh` com o mesmo binário segue `OK`. Revertido byte a byte, release recompilado.
+- Mutação B (tirar `DDC_TRAY_FAKE=1` do app, em cópias em `/tmp/it3/mutB/`, DENTRO de `bwrap` com os 16 `/dev/i2c-*` sobrepostos por `/dev/null`, conferido no namespace e fora dele — nenhum monitor real alcançável): o script ANTIGO saía 0 com `OK` (o buraco era real); o NOVO sai 1 3/3, antes de qualquer clique: `FAIL: the app did not say it serves the simulated monitor ('ddc-tray: DDC_TRAY_FAKE=1, serving the simulated RTK monitor; no real monitor is touched')`. `smoke-sni-private.sh` sem `--fake` (no mesmo isolamento) sai 0, mas a linha `smoke-sni: the app serves the simulated monitor` some e o regex da linha 9 não casa.
+
+**Linha 10 (D-17d).** `OK` (0,0 s); o comando literal em repositórios descartáveis acerta 11 de 11 casos (vermelho: ` * TODO: x` em `/** */`, `FIXME` interno de `<!-- -->`, `# fixme`, `/* Todo */`, `// TODO:`, comentário em `src/i18n`, `TODO(#1)` seguido de `TODO` sem issue; OK: `TODO(#12)` em JSDoc, `# TODO #7`, "Todos os ajustes" em `src/i18n`, arquivo limpo).
+
+**Verify do DoD (iteração 3), bash `--noprofile --norc`, `LC_ALL=C.UTF-8`, ambiente gráfico mantido:** linhas 1 a 10 `OK` (1: 1,9 s; 4: 22,2 s; 9: 5,8 s) e a linha do PROJECT.md (TODO em `*.rs`) `OK`. Gates por commit: fmt, clippy `-D warnings`, `cargo test --workspace --locked` (412 passed, 0 failed, 9 ignored) e cross-check Linux, todos exit 0. `cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 80 --ignore-filename-regex "(main|build)\.rs$"`: `COV_EXIT=0`, `TOTAL ... 3640 535 85.30%` (Lines 85,30%). A suíte não escreveu em monitor real; o `ddc-tray` do usuário (PID 4884) seguiu rodando e o `~/.config/autostart` real ficou idêntico.
+Ressalvas: o teste (f) segue no relógio do sistema (W-11) — a detecção determinística de M2 vem de (b) e (e), em relógio virtual; a mutação B só rodou com `/dev/i2c-*` mascarado; o app com o backend real poderia enumerar monitores antes do clique (por isso o isolamento).
+
 ## Ressalvas
 - Código só-Windows (`tray/notification_area.rs`) não compilou aqui (`cargo check --target x86_64-pc-windows-{gnu,msvc}` para em `tauri-winres`: falta `windres`/`llvm-rc`); assinaturas conferidas no `tauri-2.12.0` e no `tray-icon-0.25.1`. Só o `windows-latest` do CI prova.
 - `auto-launch 0.5.0`: o `Exec=` sai sem aspas (caminho com espaço quebra a entrada no Linux — documentado em "Known limitations" do README); o `enable` usa `create_dir` não recursivo (exige `~/.config`; o teste o cria); o arquivo se chama `package_info().name`.
 - H1 e H2 seguem NÃO provadas (exigiriam escrever o input no RTK real); README, CHANGELOG e as notas dizem "pode".
-- Decisões do doer, dentro do escopo: comparação do input pelo byte baixo (como `withReadBack`; `0x0111` lido de um pedido `0x11` assenta); 4 testes extras em `worker/tests.rs` (prazo do chamador; pânico ou recusa durante o assentamento; byte baixo; `a_failed_input_write_is_not_followed_by_reads`); o toast dos avisos herda "Tentar de novo"; o `announce.readBack` curto segue sendo a última fala ao leitor de tela; o README ainda diz "128 testes" do tray no Windows (não recontado).
+- Decisões do doer, dentro do escopo: comparação do input pelo byte baixo (como `withReadBack`; `0x0111` lido de um pedido `0x11` assenta); 4 testes extras em `worker/tests.rs` (prazo do chamador; pânico ou recusa durante o assentamento; byte baixo; `a_failed_input_write_is_not_followed_by_reads`); o toast dos avisos herda "Tentar de novo"; o `announce.readBack` curto segue sendo a última fala ao leitor de tela; o "128 testes" do README saiu na iteração 2 (`3451169`).
 
 ## Files modified
 - `crates/ddc-adapters/src/ddc_hi_backend/worker.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs`

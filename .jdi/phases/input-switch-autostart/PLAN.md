@@ -122,22 +122,29 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Status:** completed
 
 ## Execution
-- Total tasks: 8 · Waves: 3 · Estimated parallel speedup: ~2,3x (o doer pode rodar T-1..T-7 em sequência)
+- Total tasks: 8 (+ trabalho de correção do loop, sem task nova: ver Emendas) · Waves: 3 · Estimated parallel speedup: ~2,3x (o doer pode rodar T-1..T-7 em sequência)
 - DoD → task: linhas 1–2 → T-1; 3 → T-2 (T-4 mantém verde); 4 → T-4; 5 e 9 → T-5; 6 → T-3; 7 → T-6; 8 → T-1, T-3, T-6.
 - Deferred to PR review (hardware, logout/login, Windows Inicialização, redação) não vira task.
+
+## Emendas (trabalho de correção do loop, sem task nova)
+As iterações 2 e 3 do loop corrigiram achados do DoD Critic, não tasks do plano; seus commits têm o escopo da phase e estão no SUMMARY. O que mudou em relação às tasks acima:
+- T-1: o passo e a janela do assentamento moram em `RetryPolicies.input_settle` (`retry.rs` entrou em `files_modified`; as constantes são privadas de `retry.rs`); a linha 1 do DoD tem 7 testes, não 5 (D-14, D-17).
+- T-8 e D-15: além dos 2 scripts de T-8, `apps/ddc-tray/scripts/private-bus.sh` (lib para `source`), `smoke-autostart-private.sh` e `sni-dbusmenu.py` entram em `files_modified`; `smoke-sni-private.sh` passou a usar `private-bus.sh` com saída idêntica (D-18).
+- DoD: 10 linhas Auto no CONTEXT (a 10ª é D-16, TODO/FIXME em arquivos não-Rust).
 
 ## Files modified (all tasks)
 - `crates/ddc-adapters/src/ddc_hi_backend.rs`, `crates/ddc-adapters/src/ddc_hi_backend/{worker,retry}.rs`, `crates/ddc-adapters/src/ddc_hi_backend/worker/tests.rs`
 - `apps/ddc-tray/src/{app.js,view-model.js}`, `apps/ddc-tray/src/i18n/{en,pt-BR}.js`, `apps/ddc-tray/tests/ui/view-model.test.mjs`
 - `apps/ddc-tray/tests/e2e/{input-notice,pseudo-locale,confirm}.spec.mjs`
 - `apps/ddc-tray/src-tauri/Cargo.toml`, `Cargo.lock`, `apps/ddc-tray/src-tauri/src/{autostart,lib,menu,i18n,tray}.rs`, `apps/ddc-tray/src-tauri/src/tray/{status_item,notification_area}.rs`, `apps/ddc-tray/src-tauri/tests/autostart_entry.rs`
+- `apps/ddc-tray/scripts/{smoke-sni-private.sh,fake-sni-watcher.py,private-bus.sh,smoke-autostart-private.sh,sni-dbusmenu.py}`, `crates/ddc-adapters/src/ddc_hi_backend/retry.rs` (correções do loop)
 - `README.md`, `CHANGELOG.md`, `docs/hardware-validation.md`
 
 ## Test requirements
 - Rust: `cargo fmt --all --check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo test --workspace --locked`; cross-check Linux em T-1.
 - UI: `cd apps/ddc-tray && npm run test:unit` e `npx playwright test` (light + dark).
 - Minimum coverage: 80% linhas (`cargo llvm-cov --workspace --locked --fail-under-lines 80`) + piso de UI do pipeline.
-- Os 9 `Verify:` do DoD do CONTEXT.md, executados pelo reviewer.
+- Os 10 `Verify:` do DoD do CONTEXT.md (emendados por D-13, D-14, D-15, D-16 e D-17), executados pelo reviewer.
 
 ## Risks
 - O plugin exige `AppHandle`: os testes (T-3, T-6) precisam do runtime de teste do Tauri (`tauri` feature `test` em dev-dep), o que amplia o tempo de build de teste. A Tauri CLI lê toda entrada `tauri` do `Cargo.toml` (D-2026-09-28-release-packaging-4): conferir que a dev-dep não muda features nem dependências dos pacotes deb/rpm.
