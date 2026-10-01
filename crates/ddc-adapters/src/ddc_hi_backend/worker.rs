@@ -461,6 +461,12 @@ impl<S: DisplaySource> WorkerClient<S> {
         Self { budgets, ..self }
     }
 
+    /// The retry policies this client was started with.
+    #[cfg(test)]
+    pub(crate) fn policies(&self) -> &RetryPolicies {
+        &self.policies
+    }
+
     /// Queues `op` and waits at most `budget` for its answer; the worker
     /// gets the matching deadline.
     fn call<T: Send + 'static, E: From<DdcError> + Send + 'static>(

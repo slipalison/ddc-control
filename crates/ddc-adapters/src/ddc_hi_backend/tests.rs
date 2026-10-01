@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use super::retry::RetryPolicies;
 use super::{DdcHiBudgets, DdcHiMonitorBackend};
 
 #[test]
@@ -33,4 +34,19 @@ fn backend_starts_and_stops_without_touching_a_monitor() {
     let backend = DdcHiMonitorBackend::new().unwrap().with_budgets(budgets);
 
     assert!(format!("{backend:?}").contains("500ms"));
+}
+
+/// The retry policies are no parameter of the public constructors, so the
+/// wiring is the only place the settling of an input switch can be lost: a
+/// client given a zero settle window answers `Ok` right after the write, and
+/// every test of the worker stays green (D-2026-09-30-input-switch-autostart-19).
+#[test]
+fn the_real_backend_hands_the_default_retry_policies_to_its_client() {
+    for backend in super::production_backends() {
+        assert_eq!(
+            *backend.client.policies(),
+            RetryPolicies::default(),
+            "{backend:?}"
+        );
+    }
 }
