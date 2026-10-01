@@ -1008,17 +1008,21 @@ fn default_step() -> Duration {
     RetryPolicies::default().input_settle.step
 }
 
-/// Input settling that is not the default one: 100 ms steps inside a 1 s
-/// window. A worker or a client that took the step or the window from
-/// anywhere but the policy it was given gets these wrong.
+/// Input settling that is not the default one: 500 ms steps inside a 4 s
+/// window, longer than the default one. A worker or a client that took the
+/// step or the window from anywhere but the policy it was given gets these
+/// wrong, and so does a worker that cut the window to the default one. The
+/// settling runs in virtual time, so the longer window costs no real time
+/// (D-2026-10-01-input-switch-autostart-3).
 fn custom_settle_policies() -> RetryPolicies {
     let defaults = RetryPolicies::default();
     let custom = InputSettle {
-        step: Duration::from_millis(100),
-        window: Duration::from_secs(1),
+        step: Duration::from_millis(500),
+        window: Duration::from_secs(4),
     };
     assert_ne!(custom.step, defaults.input_settle.step);
     assert_ne!(custom.window, defaults.input_settle.window);
+    assert!(custom.window > defaults.input_settle.window);
     RetryPolicies {
         input_settle: custom,
         ..defaults
@@ -1082,6 +1086,14 @@ fn slept(run: &Run<()>) -> Duration {
     run.sleeps.iter().sum()
 }
 
+/// A monitor that shows the old input at every read of the settling of
+/// `settle`: one scripted read per step of the whole window, so no read
+/// inside the window falls through to the display's own answer.
+fn keeps_old_input_through(settle: InputSettle) -> Vec<Scripted> {
+    let polls = settle.window.as_nanos().div_ceil(settle.step.as_nanos());
+    vec![Scripted::Holds(DISPLAYPORT_1); usize::try_from(polls).unwrap()]
+}
+
 /// After the write the monitor needs time to show the new input: the
 /// worker reads the input until it reads the value asked, and stops at the
 /// first read that does (D-2026-09-30-input-switch-autostart-3).
@@ -1124,18 +1136,22 @@ fn input_write_returns_ok_after_the_settle_window_when_the_monitor_keeps_the_old
     let settle = policies.input_settle;
     let budget = write_budget(&DdcHiBudgets::default(), &policies, VcpCode::INPUT_SOURCE);
 
+    let keeps_old = keeps_old_input_through(settle);
+    let scripted = keeps_old.len();
+
     let (run, calls) = write_then_read_with(
         policies,
         VcpCode::INPUT_SOURCE,
         DISPLAYPORT_2,
         budget,
-        [Scripted::Holds(DISPLAYPORT_1); 20],
+        keeps_old,
     );
 
     let reads = u32::try_from(calls.len() - 1).unwrap();
     assert_eq!(run.result, Ok(()));
     assert_eq!(calls[0], written(VcpCode::INPUT_SOURCE, DISPLAYPORT_2));
     assert!(calls[1..].iter().all(|call| *call == input_read()));
+    assert_eq!(calls.len() - 1, scripted);
     assert_eq!(settle.step * reads, settle.window);
     assert_eq!(slept(&run), settle.window);
     assert!(run.sleeps.iter().all(|sleep| *sleep == settle.step));
@@ -1189,14 +1205,14 @@ fn input_write_budget_covers_the_settle_window() {
     let budgets = budgets(Duration::from_millis(400));
     let policies = custom_settle_policies();
     let window = policies.input_settle.window;
-    let keeps_old = [Scripted::Holds(DISPLAYPORT_1); 20];
+    let keeps_old = keeps_old_input_through(policies.input_settle);
     let input = VcpCode::INPUT_SOURCE;
     assert!(budgets.vcp < window);
     let source = FakeDisplays::with([FakeDisplay::new("a", Behaviour::Answer)]);
     let client = WorkerClient::spawn(source, budgets, policies).unwrap();
 
     let budget = client.write_budget_of(input);
-    let (full, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budget, keeps_old);
+    let (full, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budget, keeps_old.clone());
     let (cut, _) = write_then_read_with(policies, input, DISPLAYPORT_2, budgets.vcp, keeps_old);
 
     assert_eq!(budget, budgets.vcp + window);
