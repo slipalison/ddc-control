@@ -32,7 +32,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** none
 - **Test:** `cargo test -p ddc-core --locked --lib -- app::usb_follow:: app::usb_learn:: domain::usb::` + DoD Verify linha 1
 - **Commit:** `feat(usb-switch-follow): pure USB follower and learning in the core`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 2 (parallel-eligible)
 
@@ -47,7 +47,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-1
 - **Test:** `cargo test -p ddc-adapters --locked --lib -- usb_sysfs::` + DoD Verify linha 2
 - **Commit:** `feat(usb-switch-follow): sysfs USB presence adapter`
-- **Status:** pending
+- **Status:** completed
 
 #### T-3: config persistida `follow_config`
 - **Specialist:** jdi-doer-ddc-control
@@ -61,7 +61,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-1
 - **Test:** `cargo test -p ddc-tray --locked --lib -- follow_config::` + DoD Verify linha 4
 - **Commit:** `feat(usb-switch-follow): persisted USB follow config`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 3
 
@@ -78,7 +78,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-1, T-2, T-3
 - **Test:** `cargo test -p ddc-tray --locked --lib -- follow::` + DoD Verify linha 3
 - **Commit:** `feat(usb-switch-follow): follow loop off the UI thread`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 4 (parallel-eligible)
 
@@ -98,7 +98,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-4
 - **Test:** `cargo test -p ddc-tray --locked --lib` + DoD Verify linha 5; `smoke-sni-private.sh` e `smoke-autostart-private.sh` seguem verdes, sem edição
 - **Commit:** `feat(usb-switch-follow): follow items in the Linux tray menu`
-- **Status:** pending
+- **Status:** completed
 
 #### T-6: popup "em outra entrada" (D-6)
 - **Specialist:** jdi-doer-ddc-control
@@ -110,7 +110,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** none (fica na wave 4 pela ordem do orquestrador; arquivos disjuntos de T-5)
 - **Test:** `cd apps/ddc-tray && npm run test:unit` + DoD Verify linha 6
 - **Commit:** `feat(usb-switch-follow): a silent monitor reads on another input`
-- **Status:** pending
+- **Status:** completed
 
 ### Wave 5 (parallel-eligible)
 
@@ -124,7 +124,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-5, T-6
 - **Test:** `cargo test -p ddc-tray --locked --lib -- docs::` + DoD Verify linhas 7 e 10
 - **Commit:** `docs(usb-switch-follow): set up the USB follow on both machines`
-- **Status:** pending
+- **Status:** completed
 
 #### T-8: smoke de ponta a ponta em barramento privado
 - **Specialist:** jdi-doer-ddc-control
@@ -137,7 +137,7 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - **Dependencies:** T-5
 - **Test:** DoD Verify linha 8 (`cargo build -p ddc-tray --release --locked -q && bash apps/ddc-tray/scripts/smoke-follow-private.sh target/release/ddc-tray`)
 - **Commit:** `test(usb-switch-follow): smoke the USB follow on a private bus`
-- **Status:** pending
+- **Status:** completed
 
 ## Execution
 - Total tasks: 8 · Waves: 5 · Estimated parallel speedup: 1,6x (o doer roda T-1..T-8 em sequência).
