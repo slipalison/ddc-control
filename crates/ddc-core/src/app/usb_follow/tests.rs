@@ -1,7 +1,12 @@
 use std::collections::BTreeSet;
+use std::time::Duration;
 
-use super::{DEBOUNCE_POLLS, Fire, Follow, Follower, FollowerState, learn};
+use super::{Fire, Follow, Follower, FollowerState, POLL_INTERVAL, learn};
 use crate::domain::UsbDeviceId;
+
+/// Reads in a row of absence after which the learned devices count as gone
+/// (D-2026-10-02-usb-switch-follow-3): written out, so the tests pin it.
+const LEAVE: u32 = 3;
 
 fn keyboard() -> UsbDeviceId {
     UsbDeviceId::new(0x046d, 0xc31c, Some("KB0001".to_owned()))
@@ -47,11 +52,13 @@ fn fires_once_when_all_learned_devices_left() {
     );
     assert_eq!(follower.state(), FollowerState::Armed);
 
-    assert_eq!(
-        fires(&mut follower, &[webcam()], DEBOUNCE_POLLS - 1, Follow::On),
-        0
-    );
+    assert_eq!(fires(&mut follower, &[webcam()], LEAVE - 1, Follow::On), 0);
     assert_eq!(follower.observe(&set(&[webcam()]), Follow::On), Some(Fire));
+    assert_eq!(
+        POLL_INTERVAL * LEAVE,
+        Duration::from_millis(1500),
+        "about 1.5 s of absence"
+    );
 
     assert_eq!(follower.state(), FollowerState::Spent);
     assert_eq!(fires(&mut follower, &[webcam()], 20, Follow::On), 0);
@@ -67,7 +74,7 @@ fn arrival_never_fires() {
         0
     );
 
-    assert_eq!(fires(&mut follower, &[], DEBOUNCE_POLLS, Follow::On), 1);
+    assert_eq!(fires(&mut follower, &[], LEAVE, Follow::On), 1);
     assert_eq!(fires(&mut follower, &[mouse()], 5, Follow::On), 0);
     assert_eq!(
         fires(&mut follower, &[keyboard(), mouse()], 5, Follow::On),
@@ -115,7 +122,7 @@ fn absence_shorter_than_debounce_does_not_fire() {
     );
 
     for _ in 0..5 {
-        assert_eq!(fires(&mut follower, &[], DEBOUNCE_POLLS - 1, Follow::On), 0);
+        assert_eq!(fires(&mut follower, &[], LEAVE - 1, Follow::On), 0);
         assert_eq!(fires(&mut follower, &[mouse()], 1, Follow::On), 0);
     }
     assert_eq!(follower.state(), FollowerState::Armed);
@@ -128,12 +135,12 @@ fn fires_again_only_after_a_device_returned() {
         fires(&mut follower, &[keyboard(), mouse()], 1, Follow::On),
         0
     );
-    assert_eq!(fires(&mut follower, &[], DEBOUNCE_POLLS, Follow::On), 1);
+    assert_eq!(fires(&mut follower, &[], LEAVE, Follow::On), 1);
     assert_eq!(fires(&mut follower, &[webcam()], 50, Follow::On), 0);
 
     assert_eq!(fires(&mut follower, &[mouse()], 1, Follow::On), 0);
     assert_eq!(follower.state(), FollowerState::Armed);
-    assert_eq!(fires(&mut follower, &[], DEBOUNCE_POLLS, Follow::On), 1);
+    assert_eq!(fires(&mut follower, &[], LEAVE, Follow::On), 1);
     assert_eq!(fires(&mut follower, &[], 50, Follow::On), 0);
 }
 
