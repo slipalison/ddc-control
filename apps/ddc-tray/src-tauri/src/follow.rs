@@ -1028,10 +1028,10 @@ mod learning_tests {
     use std::time::{Duration, Instant};
 
     use ddc_adapters::BackendCall;
-    use ddc_core::domain::{UsbPresenceError, VcpCode};
+    use ddc_core::domain::{UsbDeviceId, UsbPresenceError, VcpCode};
     use tempfile::TempDir;
 
-    use super::fake::{Inline, Recorder, ScriptedPresence, keyboard_and_mouse};
+    use super::fake::{HUB, Inline, MOUSE, Recorder, ScriptedPresence, keyboard_and_mouse};
     use super::tests::{DEBOUNCE, GONE, PLUGGED, Rig, SWITCH_TO_DP2, follow_to};
     use super::{
         Clock, Executor, FollowLoop, FollowState, Job, LOOP_THREAD, OwnThread, SWITCH_THREAD,
@@ -1091,6 +1091,39 @@ mod learning_tests {
     }
 
     #[test]
+    fn a_staggered_leave_while_learning_writes_nothing() {
+        let keyboard_only: BTreeSet<UsbDeviceId> = ["046d:c31c:KB0001".parse().unwrap()].into();
+        let config = FollowConfig {
+            devices: keyboard_only,
+            ..follow_to(rtk_id(), 0x10, true)
+        };
+        let mut rig = Rig::new(config, [rtk_monitor()]);
+        rig.run(&[(PLUGGED, 1)]);
+        rig.follow.request_learning(rtk_id());
+
+        // The keyboard leaves first: its absence lasts the debounce while the
+        // learning still watches the mouse go, so the follow would fire there.
+        rig.run(&[
+            (PLUGGED, 1),
+            (&[&HUB, &MOUSE], DEBOUNCE - 1),
+            (GONE, DEBOUNCE + 2),
+        ]);
+
+        assert_eq!(rig.writes(), []);
+        assert_eq!(rig.switch_lines(), Vec::<String>::new());
+        assert_eq!(rig.follow.config(), follow_to(rtk_id(), 0x10, false));
+        assert_eq!(
+            rig.output.lines(),
+            [
+                "ddc-tray: follow: learned devices present",
+                "ddc-tray: follow: learning started",
+                "ddc-tray: follow: learned devices absent",
+                "ddc-tray: follow: learned 2 USB devices",
+            ]
+        );
+    }
+
+    #[test]
     fn a_learning_where_nothing_left_expires_and_records_nothing() {
         let mut rig = Rig::new(FollowConfig::default(), [rtk_monitor()]);
         let before = fs::read(rig.store.path()).unwrap();
@@ -1123,7 +1156,7 @@ mod learning_tests {
         (follow_loop, output, home)
     }
 
-    fn unreadable() -> Result<BTreeSet<ddc_core::domain::UsbDeviceId>, UsbPresenceError> {
+    fn unreadable() -> Result<BTreeSet<UsbDeviceId>, UsbPresenceError> {
         Err(UsbPresenceError("Input/output error".to_owned()))
     }
 
