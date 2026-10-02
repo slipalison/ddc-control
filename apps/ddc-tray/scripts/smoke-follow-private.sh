@@ -9,12 +9,12 @@
 # proves that `run()` starts the loop and that the menu sets the follow up,
 # end to end. It reads and clicks the menu of the tray item over
 # com.canonical.dbusmenu (sni-dbusmenu.py, as a desktop's tray host does),
-# edits a fake sysfs tree of USB devices (a keyboard with a serial, a mouse
-# without one, and the switch: a hub), reads the settings file with python3,
-# and passes only when, in this order:
+# edits a fake sysfs tree of USB devices, reads the settings file with
+# python3, and passes only when, in this order:
 #   - "Follow USB switch" is an UNMARKED checkmark;
 #   - after a click on "Learn USB switch" the app says it started learning,
-#     the keyboard and the mouse are removed from the tree, and the settings
+#     the keyboard and the mouse are removed from the tree — with the
+#     switch's own hub, as a real switch takes it away —, and the settings
 #     file holds exactly their two ids — not the hub's —, the simulated
 #     monitor, no target input, and enabled false;
 #   - the devices come back, and a click on "DisplayPort 2" records input 16
@@ -27,6 +27,10 @@
 # and the app's stderr never says "panicked" nor that the follow could not
 # do something, and the listings of the REAL ~/.config/autostart and
 # ~/.config/ddc-control are the same before and after.
+#
+# The tree has a root hub, which stays, and the switch: a hub with the
+# keyboard (with a serial) and the mouse (without one) behind it. Removing
+# or giving back "the devices" moves the three together.
 #
 # Each removal and each return waits for the follow's own diagnostic edge
 # ("learned devices absent" / "present"): the loop's proof of life. A step
@@ -150,13 +154,16 @@ write_device() {
     done
 }
 
-# The switch: a hub, which stays whatever the button does.
-plug_switch() {
-    write_device 1-1 idVendor=05e3 idProduct=0610 bDeviceClass=09 serial=HUB0001
-    write_device 1-1:1.0 bInterfaceClass=09
+# The bus's root hub, which stays whatever the button does.
+plug_root_hub() {
+    write_device usb1 idVendor=1d6b idProduct=0002 bDeviceClass=09
+    write_device 1-0:1.0 bInterfaceClass=09
 }
 
+# The switch's own hub and, behind it, the keyboard and the mouse.
 plug_devices() {
+    write_device 1-1 idVendor=05e3 idProduct=0610 bDeviceClass=09 serial=HUB0001
+    write_device 1-1:1.0 bInterfaceClass=09
     write_device 1-1.1 idVendor=046d idProduct=c31c bDeviceClass=00 serial=SMOKEKB1
     write_device 1-1.1:1.0 bInterfaceClass=03
     write_device 1-1.2 idVendor=046d idProduct=c077 bDeviceClass=00
@@ -164,7 +171,8 @@ plug_devices() {
 }
 
 unplug_devices() {
-    rm -rf "$sandbox/usb/1-1.1" "$sandbox/usb/1-1.1:1.0" \
+    rm -rf "$sandbox/usb/1-1" "$sandbox/usb/1-1:1.0" \
+        "$sandbox/usb/1-1.1" "$sandbox/usb/1-1.1:1.0" \
         "$sandbox/usb/1-1.2" "$sandbox/usb/1-1.2:1.0"
 }
 
@@ -246,13 +254,13 @@ switches_after_silence() {
 
 # --- the app ---------------------------------------------------------------
 
-# A temporary HOME with its .config, and the fake tree with the switch, the
-# keyboard and the mouse plugged in.
+# A temporary HOME with its .config, and the fake tree with the root hub,
+# the switch, the keyboard and the mouse plugged in.
 make_sandbox() {
     sandbox=$(mktemp -d -t smoke-follow-home.XXXXXX)
     [[ $sandbox != "$HOME" && -d $sandbox ]] || fail "could not make a temporary HOME"
     mkdir -p "$sandbox/.config" "$sandbox/usb"
-    plug_switch
+    plug_root_hub
     plug_devices
 }
 
