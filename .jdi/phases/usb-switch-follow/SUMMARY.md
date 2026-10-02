@@ -111,3 +111,40 @@ Rodados com `env -i` + `bash --noprofile --norc`, `LC_ALL=C.UTF-8`, `HOME`, `PAT
 8. **`Stderr` (3 delegações de uma linha) não é exercitado** nem pelos testes unitários nem pelo smoke, que roda com `DDC_TRAY_DEBUG=1`.
 9. **Uso real.** Depois de uma troca bem-sucedida, o monitor deixa de responder a esta máquina, então a releitura do core falha e o stderr provavelmente terá `could not confirm the switch of …`. O guia explica isso; confirmação humana no teste PC + notebook (Deferred).
 10. **Hardware (D-12).** Todo `cargo test` rodou em bwrap com os 16 `/dev/i2c-*` cobertos; o smoke usou `DDC_TRAY_FAKE=1` em barramento privado; a mutação da linha 9 só rodou dentro do bwrap com tmpfs em `/sys`. Nada de `--ignored` nem `DDC_HW_TESTS`. O `ddc-tray` do usuário (PID 33102) continua rodando; a listagem de `~/.config/autostart` é idêntica e `~/.config/ddc-control` não existia antes nem depois.
+
+## Iteração 2 — critic e warnings da iteração 1 (D-13)
+Escrito pelo orquestrador a partir do relatório do doer. HEAD do código: `02fdd12`, 6 commits, nenhum com `.jdi/`.
+
+**Commits:**
+- `53a6084` test: linha 6 (D-13a). Teste e2e `a silent monitor reads on another input in the picker` (`fallback.spec.mjs`), que confere o literal `LG TV SSCR2 (em outra entrada)` na opção e no botão do seletor, sem `t(...)`.
+- `154824a` refactor: linha 3 (D-13b, W3). O `Stderr` real escreve num sink injetável (`io::stderr()` em produção). O novo teste `follow::stderr_tests::announce_prints_without_the_diagnostics_switch` trava o diagnóstico desligado e exige a linha exata no sink.
+- `aac028a` test: W1. `follow::learning_tests::a_staggered_leave_while_learning_writes_nothing`.
+- `2bcafb2` test: W2. `follow_config::rule_tests::a_save_that_cannot_write_its_temporary_file_keeps_the_old_bytes`.
+- `6965ef7` refactor: W4. `i18n::input_label` passa a vir de `value_name(VcpCode::INPUT_SOURCE, code)`, com hífen trocado por espaço.
+- `02fdd12` refactor: W6. `spawn_until` privado, e o teste "named thread" para e junta a thread. O `spawn` público só delega.
+
+**Mutações** (todas revertidas):
+
+| Mutação | Saída vermelha |
+|---|---|
+| `header.silent` pt-BR `(sem DDC/CI)` | e2e ✘ em light e dark (`Expected "LG TV SSCR2 (em outra entrada)"`) e unit `not ok 159` |
+| `app.js` sem marcar o mudo no seletor | e2e ✘ nos dois temas (`Received "LG TV SSCR2"`) |
+| `announce` só pelo `diagnose` | `stderr_tests` FAILED (`left: ""`), também com `DDC_TRAY_DEBUG=1` |
+| Sem a guarda do aprender | `a_staggered_leave…` FAILED (`[WriteVcp(RTK, 0x60, 0x10)]`) |
+| `save` direto no destino | `a_save_that_cannot_write…` FAILED |
+
+**Gates:**
+- fmt, clippy `-D warnings`, clippy Windows (com `windres` falso) e cross-check Linux saem 0.
+- `cargo test --workspace --locked`: 487 passed, 0 failed, 9 ignored.
+- `llvm-cov`: linhas 89,54%.
+- `test:unit` 166/166; Playwright 154 passed, 6 skipped.
+
+**Verify:**
+- As linhas 1–9 falham no literal só pelos ids antigos de `apps/ddc-tray/src-tauri` e `apps/ddc-tray/tests`. Dão `OK` com o congelamento trocado por `:;` e com os ids novos.
+- A linha 10 dá `OK`.
+- O orquestrador recongelou.
+
+**Ressalvas:**
+- `the_system_clock_waits_for_real` ainda dorme 5 ms.
+- `demo-data.js` e os ids de teste repetidos ficaram como estavam (resto do W4).
+- O `spawn` público, que só delega, não é exercido por teste (3 linhas).
