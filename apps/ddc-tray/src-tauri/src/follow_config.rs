@@ -658,4 +658,20 @@ mod rule_tests {
         fs::write(store.path().join(CONFIG_FILE), "").unwrap();
         assert!(blocked.save(&complete(true)).is_err());
     }
+
+    #[test]
+    fn a_save_that_cannot_write_its_temporary_file_keeps_the_old_bytes() {
+        let home = TempDir::new().unwrap();
+        let store = store_in(&home);
+        store.save(&complete(false)).unwrap();
+        let before = fs::read(store.path()).unwrap();
+        let dir = store.path().parent().unwrap();
+        let temporary = dir.join(format!(".{CONFIG_FILE}.{}.tmp", std::process::id()));
+        fs::create_dir(&temporary).unwrap();
+
+        assert!(store.save(&complete(true)).is_err());
+
+        assert_eq!(fs::read(store.path()).unwrap(), before);
+        assert_eq!(store.load(), LoadOutcome::Loaded(complete(false)));
+    }
 }
