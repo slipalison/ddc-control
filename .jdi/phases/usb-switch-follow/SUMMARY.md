@@ -148,3 +148,22 @@ Escrito pelo orquestrador a partir do relatório do doer. HEAD do código: `02fd
 - `the_system_clock_waits_for_real` ainda dorme 5 ms.
 - `demo-data.js` e os ids de teste repetidos ficaram como estavam (resto do W4).
 - O `spawn` público, que só delega, não é exercido por teste (3 linhas).
+
+## Iteração 3 — critic da iteração 2 (D-14)
+Escrito pelo orquestrador a partir do relatório do doer.
+
+**Linha 10 (D-14a).** Só o Verify mudou: o padrão `C` dos comentários de `en.js`/`pt-BR.js` passou a pegar `to-do`/`to do`. O orquestrador provou por mutação: com `// to-do: …` no `pt-BR.js` ou `// To do: …` no `en.js`, a linha sai com exit 1; restaurado, volta a `OK`.
+
+**Linha 3 (D-14b).** Commit `c461825`, um refactor só em `follow.rs`: o `report` do `Stderr` real escreve no mesmo sink do `announce`, no formato `ddc-tray: could not {action}: {error}`. O teste novo `follow::stderr_tests::report_prints_without_the_diagnostics_switch` exige, com o diagnóstico desligado, exatamente a linha de troca seguida de `ddc-tray: could not confirm the switch of RTK-RTK-QHD-HDR-01010101 to input 0x10: monitor did not respond in time`, e uma única tentativa.
+
+**Mutação M14.** Com o `report` passando por `crate::diagnose`, o teste FAILED (`left` só com a linha de troca), também com `DDC_TRAY_DEBUG=1`, e a linha 3 dá NO-OK. Revertida.
+
+**Gates.**
+- fmt, clippy `-D warnings` e clippy Windows: exit 0.
+- `cargo test`: 488 passed, 0 failed, 9 ignored.
+- `llvm-cov`: linhas 89,64%.
+- `test:unit`: 166/166.
+- Playwright: 154 passed.
+
+**Verify.** As linhas 1–9 falham no literal só pelo id antigo de `apps/ddc-tray/src-tauri` e dão `OK` com `:;` e recongeladas. A linha 10 dá `OK`. O orquestrador recongelou em `1250a623…`.
+
