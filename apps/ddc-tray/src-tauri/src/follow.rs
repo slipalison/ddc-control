@@ -162,9 +162,9 @@ pub trait FollowOutput: Send + Sync {
     fn report(&self, action: &str, error: &dyn Display);
 }
 
-/// The app's stderr. The switch line goes to a sink — stderr itself in the
-/// app, a buffer in a test — so a test reads what the app prints whatever
-/// the diagnostics switch says.
+/// The app's stderr. What it prints whatever the diagnostics switch says —
+/// the switch line, the failures — goes to a sink: stderr itself in the
+/// app, a buffer in a test, so a test reads it with the switch off.
 pub struct Stderr {
     sink: Mutex<Box<dyn Write + Send>>,
 }
@@ -181,21 +181,26 @@ impl Stderr {
             sink: Mutex::new(Box::new(sink)),
         }
     }
+
+    fn print(&self, line: &str) {
+        let mut sink = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
+        // As `eprintln!`, without its panic: with stderr gone, no one is told.
+        let _ = writeln!(sink, "{line}");
+    }
 }
 
 impl FollowOutput for Stderr {
     fn announce(&self, line: &str) {
-        let mut sink = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
-        // As `eprintln!`, without its panic: with stderr gone, no one is told.
-        let _ = writeln!(sink, "{line}");
+        self.print(line);
     }
 
     fn diagnose(&self, event: &str) {
         crate::diagnose(event);
     }
 
+    /// The line of [`crate::report`], on the sink.
     fn report(&self, action: &str, error: &dyn Display) {
-        crate::report(action, error);
+        self.print(&format!("ddc-tray: could not {action}: {error}"));
     }
 }
 
@@ -957,14 +962,14 @@ mod tests {
 }
 
 /// The app's own stderr, the one [`spawn`] gives the loop, with the
-/// diagnostics switch off (D-2026-10-02-usb-switch-follow-13).
+/// diagnostics switch off (D-2026-10-02-usb-switch-follow-13, -14).
 #[cfg(test)]
 mod stderr_tests {
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex};
 
-    use ddc_adapters::BackendCall;
-    use ddc_core::domain::VcpCode;
+    use ddc_adapters::{BackendCall, FakeMonitor, InMemoryMonitorBackend};
+    use ddc_core::domain::{DdcError, VcpCode};
     use tempfile::TempDir;
 
     use super::fake::{Inline, ScriptedPresence, keyboard_and_mouse};
@@ -995,40 +1000,88 @@ mod stderr_tests {
         }
     }
 
-    #[test]
-    fn announce_prints_without_the_diagnostics_switch() {
-        // Off for the whole test process, whatever DDC_TRAY_DEBUG says: only
-        // `run()`, which no test calls, reads that variable.
-        assert!(!*crate::DIAGNOSTICS.get_or_init(|| false));
-        let home = TempDir::new().unwrap();
-        let store = ConfigStore::new(home.path().join(CONFIG_FILE));
-        let follow = Arc::new(FollowState::new(store, follow_to(rtk_id(), 0x10, true)));
-        let (osd, backend) = osd_with([rtk_monitor()]);
-        let captured = Captured::default();
-        let mut follow_loop = FollowLoop::new(
-            ScriptedPresence::new([Ok(keyboard_and_mouse())]),
-            follow,
-            Ok(Arc::new(osd)),
-            Arc::new(Stderr::over(captured.clone())),
-            Box::new(Inline),
-        );
+    /// The real loop over `monitor`, following to its input 0x10, printing
+    /// on a [`Stderr`] over a [`Captured`] sink.
+    struct StderrRig {
+        _home: TempDir,
+        follow_loop: FollowLoop<ScriptedPresence>,
+        backend: InMemoryMonitorBackend,
+        captured: Captured,
+    }
 
-        for _ in 0..=DEBOUNCE {
-            follow_loop.tick();
+    impl StderrRig {
+        fn new(monitor: FakeMonitor) -> Self {
+            // Off for the whole test process, whatever DDC_TRAY_DEBUG says:
+            // only `run()`, which no test calls, reads that variable.
+            assert!(!*crate::DIAGNOSTICS.get_or_init(|| false));
+            let home = TempDir::new().unwrap();
+            let store = ConfigStore::new(home.path().join(CONFIG_FILE));
+            let follow = Arc::new(FollowState::new(store, follow_to(rtk_id(), 0x10, true)));
+            let (osd, backend) = osd_with([monitor]);
+            let captured = Captured::default();
+            let follow_loop = FollowLoop::new(
+                ScriptedPresence::new([Ok(keyboard_and_mouse())]),
+                follow,
+                Ok(Arc::new(osd)),
+                Arc::new(Stderr::over(captured.clone())),
+                Box::new(Inline),
+            );
+            Self {
+                _home: home,
+                follow_loop,
+                backend,
+                captured,
+            }
         }
 
-        assert_eq!(captured.text(), format!("{SWITCH_TO_DP2}\n"));
+        /// The learned devices present once, then absent for the debounce.
+        fn leave(&mut self) {
+            for _ in 0..=DEBOUNCE {
+                self.follow_loop.tick();
+            }
+        }
+
+        fn writes(&self) -> Vec<BackendCall> {
+            self.backend
+                .calls()
+                .into_iter()
+                .filter(|call| matches!(call, BackendCall::WriteVcp(..)))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn announce_prints_without_the_diagnostics_switch() {
+        let mut rig = StderrRig::new(rtk_monitor());
+
+        rig.leave();
+
+        assert_eq!(rig.captured.text(), format!("{SWITCH_TO_DP2}\n"));
         assert_eq!(
             SWITCH_TO_DP2,
             "ddc-tray: follow: switching RTK-RTK-QHD-HDR-01010101 to input 0x10"
         );
-        let writes: Vec<_> = backend
-            .calls()
-            .into_iter()
-            .filter(|call| matches!(call, BackendCall::WriteVcp(..)))
-            .collect();
         assert_eq!(
-            writes,
+            rig.writes(),
+            [BackendCall::WriteVcp(rtk_id(), VcpCode::INPUT_SOURCE, 0x10)]
+        );
+    }
+
+    #[test]
+    fn report_prints_without_the_diagnostics_switch() {
+        let mute = rtk_monitor().with_vcp_failure(VcpCode::INPUT_SOURCE, DdcError::Timeout);
+        let mut rig = StderrRig::new(mute);
+
+        rig.leave();
+
+        assert_eq!(
+            rig.captured.text(),
+            "ddc-tray: follow: switching RTK-RTK-QHD-HDR-01010101 to input 0x10\n\
+             ddc-tray: could not confirm the switch of RTK-RTK-QHD-HDR-01010101 \
+             to input 0x10: monitor did not respond in time\n"
+        );
+        assert_eq!(
+            rig.writes(),
             [BackendCall::WriteVcp(rtk_id(), VcpCode::INPUT_SOURCE, 0x10)]
         );
     }
