@@ -55,6 +55,35 @@ export function monitorPicker(monitors, selectedId, silentIds = new Set()) {
   };
 }
 
+/**
+ * The picker's options as the dropdown shows them. A silent monitor — its
+ * EDID reads, DDC/CI does not answer — is named "on another input": the
+ * popup cannot tell that from DDC/CI turned off, which `messageTip` adds
+ * (D-2026-10-02-usb-switch-follow-6). Its name is then a translated text;
+ * any other name is the monitor's data, shown verbatim.
+ * @param {{ options: readonly { id: string, label: string, silent: boolean }[] }} picker
+ * @param {Function} t
+ */
+export function pickerOptions(picker, t) {
+  return picker.options.map(({ id, label, silent }) => ({
+    value: id,
+    label: silent ? t('header.silent', { label }) : label,
+    verbatim: !silent,
+  }));
+}
+
+/**
+ * The tip under a status message: why no monitor or the selected one gives
+ * no DDC/CI answer — on another input, or DDC/CI off in its menu — when
+ * the list is empty or the selected monitor is silent; else none.
+ * @param {'loading' | 'ready' | 'empty' | 'error'} state
+ * @param {boolean} mute whether the selected monitor is silent
+ * @param {Function} t
+ */
+export function messageTip(state, mute, t) {
+  return state === 'empty' || mute ? t('hint.ddc') : null;
+}
+
 /** Where the last monitor whose panel loaded is kept between runs. */
 export const LAST_MONITOR_KEY = 'ddc-tray.last-monitor';
 

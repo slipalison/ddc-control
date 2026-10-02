@@ -15,6 +15,9 @@
 //! brightness shortcut sets the monitor the popup last selected, off the
 //! main thread. "Start with system" flips the OS's own startup entry, read
 //! afresh each time the menu is mounted (D-2026-09-30-input-switch-autostart-9).
+//! The USB switch follow's items (Linux) change its settings off the menu's
+//! thread and ask its loop to learn the switch, with the shortcut target as
+//! the monitor to switch (D-2026-10-02-usb-switch-follow-5).
 
 #[cfg(target_os = "linux")]
 mod kwin_placement;
@@ -36,7 +39,9 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::autostart::{self, Autostart, SharedEntry};
 use crate::commands::{AppState, on_blocking_thread};
-use crate::dto::{PANEL_CHANGED, UiError};
+use crate::dto::{ErrorKind, PANEL_CHANGED, UiError};
+use crate::follow::{FollowError, FollowState, SharedFollow};
+use crate::follow_config::FollowConfig;
 use crate::i18n::Locale;
 use crate::menu::MenuAction;
 use crate::panel::{self, BrightnessChange};
@@ -96,8 +101,93 @@ fn run_menu_action<R: Runtime>(app: &AppHandle<R>, action: MenuAction) {
         MenuAction::OpenPanel => on_main_thread(app, open_panel),
         MenuAction::Brightness(percent) => apply_brightness(app, percent),
         MenuAction::Autostart => toggle_autostart(app),
+        MenuAction::Follow => on_blocking(app, flip_follow),
+        MenuAction::Learn => learn_switch(app),
+        MenuAction::FollowInput(code) => {
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || pick_follow_input(&app, code));
+        }
         MenuAction::Quit => app.exit(0),
     }
+}
+
+/// The follow's settings, for a menu being mounted: off and nothing learned
+/// without the follow's state, which only Linux sets up.
+fn follow_config<R: Runtime>(app: &AppHandle<R>) -> FollowConfig {
+    app.try_state::<SharedFollow>()
+        .map(|follow| follow.config())
+        .unwrap_or_default()
+}
+
+/// Runs `task` on a blocking thread: the follow's settings are a file, and
+/// the menu must not wait for it.
+fn on_blocking<R: Runtime>(app: &AppHandle<R>, task: fn(&AppHandle<R>)) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || task(&app));
+}
+
+/// Turns the follow on or off; turning it on with settings that lack
+/// something leaves it off and reports what is missing.
+fn flip_follow<R: Runtime>(app: &AppHandle<R>) {
+    change_follow(app, "change the USB follow", FollowState::toggle_enabled);
+}
+
+/// Makes `code` the input the follow switches to.
+fn pick_follow_input<R: Runtime>(app: &AppHandle<R>, code: u8) {
+    change_follow(app, "choose the USB follow input", |follow| {
+        follow.choose_input(code)
+    });
+}
+
+/// Applies `change` to the follow's settings, reports a refusal, and has
+/// the menu show what is true.
+fn change_follow<R: Runtime>(
+    app: &AppHandle<R>,
+    action: &str,
+    change: impl FnOnce(&FollowState) -> Result<FollowConfig, FollowError>,
+) {
+    match app.try_state::<SharedFollow>() {
+        Some(follow) => {
+            if let Err(error) = change(&follow) {
+                report(action, &error);
+            }
+        }
+        None => report(action, &"the USB follow is not set up"),
+    }
+    platform::follow_changed(app);
+}
+
+/// Asks the follow's loop to learn the switch, off the menu's thread.
+fn learn_switch<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move { ask_to_learn(&app).await });
+}
+
+/// Asks the follow's loop to learn the switch, with the shortcut target —
+/// the monitor the popup last selected, else the first one listed — as the
+/// monitor it records (D-2026-10-02-usb-switch-follow-5).
+async fn ask_to_learn<R: Runtime>(app: &AppHandle<R>) {
+    match app.try_state::<SharedFollow>() {
+        Some(follow) => match learning_monitor(app).await {
+            Ok(monitor) => follow.request_learning(monitor),
+            Err(error) => report_ui("learn the USB switch", &error),
+        },
+        None => report("learn the USB switch", &"the USB follow is not set up"),
+    }
+    platform::follow_changed(app);
+}
+
+/// The monitor a learning records: the shortcut target, found on a blocking
+/// thread since it may enumerate the monitors.
+async fn learning_monitor<R: Runtime>(app: &AppHandle<R>) -> Result<MonitorId, UiError> {
+    let Some(state) = app.try_state::<AppState>() else {
+        return Err(UiError {
+            kind: ErrorKind::BackendUnavailable,
+            message: "the monitors are not set up".to_owned(),
+        });
+    };
+    let selected = state.selected();
+    on_blocking_thread(&state, move |osd| panel::shortcut_target(osd, selected)).await
 }
 
 /// The OS state of "Start with system", for a menu being mounted. It only
@@ -208,16 +298,26 @@ fn report_ui(action: &str, error: &UiError) {
 mod tests {
     use std::sync::Arc;
 
-    use ddc_adapters::{BackendCall, InMemoryMonitorBackend};
+    use ddc_adapters::{BackendCall, InMemoryMonitorBackend, SysfsUsbPresence};
     use ddc_core::domain::{DdcError, MonitorId, VcpCode};
     use tauri::test::{MockRuntime, mock_app};
     use tauri::{App, Manager};
+    use tempfile::TempDir;
 
-    use super::{APP_NAME, TRAY_ID, autostart_state, brightness_shortcut, flip_autostart};
+    use super::{
+        APP_NAME, TRAY_ID, ask_to_learn, autostart_state, brightness_shortcut, flip_autostart,
+        flip_follow, follow_config, pick_follow_input,
+    };
     use crate::autostart::fake::FakeEntry;
     use crate::autostart::{Autostart, AutostartEntry, SharedEntry};
+    use crate::commands::{AppState, SharedOsd};
     use crate::dto::{ErrorKind, UiError};
     use crate::fixture::{RTK_ID, rtk_id, rtk_monitor};
+    use crate::follow::fake::{
+        FakeRoot, HUB, Inline, KEYBOARD, MOUSE, Recorder, ScriptedClock, keyboard_and_mouse, reads,
+    };
+    use crate::follow::{FollowLoop, FollowState, SharedFollow};
+    use crate::follow_config::{CONFIG_FILE, ConfigStore, FollowConfig, LoadOutcome};
     use crate::panel::BrightnessChange;
     use crate::panel::tests::{DELL_ID, dell_monitor, osd_with};
 
@@ -388,5 +488,139 @@ mod tests {
 
         assert_eq!(autostart_state(app.handle()), Autostart::Disabled);
         flip_autostart(app.handle());
+    }
+
+    /// A mock app holding the follow's state over `config`, whose file lives
+    /// in `home` — not written until a change is saved.
+    fn app_following(
+        config: FollowConfig,
+        home: &TempDir,
+    ) -> (App<MockRuntime>, SharedFollow, ConfigStore) {
+        let app = mock_app();
+        let store = ConfigStore::new(home.path().join("ddc-control").join(CONFIG_FILE));
+        let follow: SharedFollow = Arc::new(FollowState::new(store.clone(), config));
+        app.manage(follow.clone());
+        (app, follow, store)
+    }
+
+    /// Settings with the keyboard and the mouse learned, the RTK to switch
+    /// to DisplayPort 2, the follow off.
+    fn complete_off() -> FollowConfig {
+        FollowConfig::default()
+            .with_learned(keyboard_and_mouse(), rtk_id())
+            .with_target_input(0x10)
+            .unwrap()
+    }
+
+    #[test]
+    fn turning_on_an_incomplete_follow_leaves_it_off_and_saves_nothing() {
+        let home = TempDir::new().unwrap();
+        let learned_only = FollowConfig::default().with_learned(keyboard_and_mouse(), rtk_id());
+        for config in [FollowConfig::default(), learned_only] {
+            let (app, follow, store) = app_following(config.clone(), &home);
+
+            flip_follow(app.handle());
+
+            assert_eq!(follow.config(), config);
+            assert_eq!(follow_config(app.handle()), config);
+            assert_eq!(store.load(), LoadOutcome::Missing);
+        }
+    }
+
+    #[test]
+    fn turning_on_a_complete_follow_saves_it_on_and_the_next_click_off() {
+        let home = TempDir::new().unwrap();
+        let (app, follow, store) = app_following(complete_off(), &home);
+
+        flip_follow(app.handle());
+
+        let on = complete_off().enabled_toggled().unwrap();
+        assert!(on.enabled);
+        assert_eq!(follow.config(), on);
+        assert_eq!(store.load(), LoadOutcome::Loaded(on));
+
+        flip_follow(app.handle());
+        assert_eq!(store.load(), LoadOutcome::Loaded(complete_off()));
+    }
+
+    #[test]
+    fn picking_an_input_saves_it() {
+        let home = TempDir::new().unwrap();
+        let (app, follow, store) = app_following(complete_off(), &home);
+
+        pick_follow_input(app.handle(), 0x0F);
+
+        let chosen = complete_off().with_target_input(0x0F).unwrap();
+        assert_eq!(follow.config(), chosen);
+        assert_eq!(store.load(), LoadOutcome::Loaded(chosen));
+    }
+
+    #[test]
+    fn learning_through_the_loop_records_the_monitor_the_popup_selected_else_the_first_listed() {
+        for (selected, recorded) in [(Some(DELL_ID), DELL_ID), (None, RTK_ID)] {
+            let home = TempDir::new().unwrap();
+            let (app, follow, store) = app_following(FollowConfig::default(), &home);
+            let (osd, backend) = osd_with([rtk_monitor(), dell_monitor(30, 100)]);
+            let osd: SharedOsd = Arc::new(osd);
+            let state = AppState::new(Ok(osd.clone()));
+            if let Some(id) = selected {
+                state.select(MonitorId::new(id));
+            }
+            app.manage(state);
+            let root = FakeRoot::new();
+            let output = Recorder::new();
+            let presence = SysfsUsbPresence::new(root.path());
+            let mut follow_loop =
+                FollowLoop::new(presence, follow.clone(), Ok(osd), output, Box::new(Inline));
+
+            tauri::async_runtime::block_on(ask_to_learn(app.handle()));
+            let reads = reads(&[(&[&HUB, &KEYBOARD, &MOUSE], 1), (&[&HUB], 3)]);
+            let clock = ScriptedClock::new(&root, &reads);
+            follow_loop.run(&clock, clock.keep_going());
+
+            let learned = FollowConfig::default()
+                .with_learned(keyboard_and_mouse(), MonitorId::new(recorded));
+            assert_eq!(follow.config(), learned, "{selected:?}");
+            assert_eq!(store.load(), LoadOutcome::Loaded(learned));
+            assert_eq!(writes(&backend), []);
+        }
+    }
+
+    #[test]
+    fn learning_without_a_monitor_asks_nothing_of_the_loop() {
+        let home = TempDir::new().unwrap();
+        let (app, follow, store) = app_following(FollowConfig::default(), &home);
+        let (osd, _backend) = osd_with([]);
+        let osd: SharedOsd = Arc::new(osd);
+        app.manage(AppState::new(Ok(osd.clone())));
+        let root = FakeRoot::new();
+        let output = Recorder::new();
+        let presence = SysfsUsbPresence::new(root.path());
+        let mut follow_loop =
+            FollowLoop::new(presence, follow, Ok(osd), output.clone(), Box::new(Inline));
+
+        tauri::async_runtime::block_on(ask_to_learn(app.handle()));
+        let reads = reads(&[(&[&HUB, &KEYBOARD, &MOUSE], 1), (&[&HUB], 3)]);
+        let clock = ScriptedClock::new(&root, &reads);
+        follow_loop.run(&clock, clock.keep_going());
+
+        assert_eq!(output.lines(), Vec::<String>::new());
+        assert_eq!(store.load(), LoadOutcome::Missing);
+    }
+
+    #[test]
+    fn without_the_follow_set_up_the_menu_reads_off_and_a_click_changes_nothing() {
+        let app = mock_app();
+
+        assert_eq!(follow_config(app.handle()), FollowConfig::default());
+        flip_follow(app.handle());
+        pick_follow_input(app.handle(), 0x10);
+        tauri::async_runtime::block_on(ask_to_learn(app.handle()));
+        assert!(app.try_state::<SharedFollow>().is_none());
+
+        let home = TempDir::new().unwrap();
+        let (app, follow, _store) = app_following(FollowConfig::default(), &home);
+        tauri::async_runtime::block_on(ask_to_learn(app.handle()));
+        assert_eq!(follow.config(), FollowConfig::default());
     }
 }

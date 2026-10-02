@@ -7,7 +7,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 use tauri_plugin_positioner::{Position, WindowExt};
 
-use super::{TRAY_ID, autostart_state, run_menu_action, toggle_popup};
+use super::{TRAY_ID, autostart_state, follow_config, run_menu_action, toggle_popup};
 use crate::autostart::Autostart;
 use crate::i18n::Locale;
 use crate::menu::{MenuAction, MenuEntry, Platform, menu_entries};
@@ -18,7 +18,12 @@ struct AutostartCheck<R: Runtime>(CheckMenuItem<R>);
 
 /// Puts Tauri's tray icon in the notification area.
 pub(super) fn install<R: Runtime>(app: &AppHandle<R>, locale: Locale) -> tauri::Result<()> {
-    let entries = menu_entries(locale, Platform::Windows, autostart_state(app));
+    let entries = menu_entries(
+        locale,
+        Platform::Windows,
+        autostart_state(app),
+        &follow_config(app),
+    );
     let (menu, autostart) = native_menu(app, &entries)?;
     if let Some(check) = autostart {
         app.manage(AutostartCheck(check));
@@ -51,6 +56,9 @@ pub(super) fn autostart_changed<R: Runtime>(app: &AppHandle<R>) {
         report("mark the start-with-system item", &error);
     }
 }
+
+/// The follow has no item in this menu (D-2026-10-02-usb-switch-follow-10).
+pub(super) fn follow_changed<R: Runtime>(_app: &AppHandle<R>) {}
 
 /// Places the popup above the icon, kept on the icon's screen.
 pub(super) fn place_popup<R: Runtime>(popup: &WebviewWindow<R>) {
@@ -112,6 +120,9 @@ fn native_menu<R: Runtime>(
                     CheckMenuItem::with_id(app, action.id(), label, true, *checked, None::<&str>)?;
                 menu.append(&item)?;
                 autostart = Some(item);
+            }
+            MenuEntry::Note { label } => {
+                menu.append(&MenuItem::new(app, label, false, None::<&str>)?)?;
             }
             MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
         }

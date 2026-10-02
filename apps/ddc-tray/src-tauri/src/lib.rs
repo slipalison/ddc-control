@@ -9,8 +9,12 @@
 
 pub mod autostart;
 pub mod commands;
+#[cfg(test)]
+mod docs;
 pub mod dto;
 pub mod fixture;
+pub mod follow;
+pub mod follow_config;
 pub mod i18n;
 pub mod menu;
 pub mod panel;
@@ -22,6 +26,7 @@ pub mod tray;
 
 use std::ffi::OsStr;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
@@ -35,6 +40,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, Window, WindowEvent}
 use crate::autostart::{PluginEntry, SharedEntry};
 use crate::commands::{AppState, SharedOsd};
 use crate::dto::POPUP_SHOWN;
+use crate::follow_config::{ConfigStore, FollowConfig, LoadOutcome};
 use crate::popup::PopupGate;
 
 /// Label of the popup window in `tauri.conf.json`.
@@ -53,6 +59,15 @@ pub const DIAGNOSTICS_SWITCH: &str = "DDC_TRAY_DEBUG";
 /// of the tray — the wheel, the shortcuts — that must never write to a
 /// real monitor. Off unless set; no I2C device is opened while on.
 pub const SIMULATION_SWITCH: &str = "DDC_TRAY_FAKE";
+
+/// Set, with [`SIMULATION_SWITCH`] on, to the sysfs tree of USB devices the
+/// USB switch follow reads instead of the real one: the fake switch of the
+/// follow's smoke test (D-2026-10-02-usb-switch-follow-9). Read only in
+/// simulation.
+pub const USB_ROOT_SWITCH: &str = "DDC_TRAY_USB_ROOT";
+
+/// The sysfs tree of the USB devices on Linux.
+pub const REAL_USB_ROOT: &str = "/sys/bus/usb/devices";
 
 /// What the app always says on stderr when [`SIMULATION_SWITCH`] is on, so
 /// the mode is never mistaken for the real one.
@@ -120,6 +135,9 @@ pub fn run() -> Result<(), tauri::Error> {
             app.manage(PopupGate::new());
             // Before the tray: its menu reads this entry as it is mounted.
             app.manage::<SharedEntry>(Arc::new(PluginEntry::new(app.handle())));
+            // Before the tray too: its menu reads the follow's settings.
+            #[cfg(target_os = "linux")]
+            start_follow(app.handle());
             tray::install(app.handle())?;
             // So the KWin script is unloaded however the app is stopped.
             #[cfg(target_os = "linux")]
@@ -143,6 +161,71 @@ pub fn run() -> Result<(), tauri::Error> {
             }
         });
     Ok(())
+}
+
+/// The sysfs tree the USB switch follow reads: the real one, unless
+/// [`SIMULATION_SWITCH`] is on — then the one [`USB_ROOT_SWITCH`] names,
+/// and without one none at all, so the simulated mode reads nothing real.
+pub fn usb_root(simulation: Option<&OsStr>, usb_root: Option<&OsStr>) -> Option<PathBuf> {
+    if !switch_on(simulation) {
+        return Some(PathBuf::from(REAL_USB_ROOT));
+    }
+    usb_root.filter(|root| !root.is_empty()).map(PathBuf::from)
+}
+
+/// The follow's settings in `store`: the off default when there are none,
+/// or when they cannot be read — then `report` hears why, and the file is
+/// left as it is (D-2026-10-02-usb-switch-follow-4).
+pub fn follow_settings(
+    store: &ConfigStore,
+    report: impl FnOnce(&str, &dyn Display),
+) -> FollowConfig {
+    match store.load() {
+        LoadOutcome::Loaded(config) => config,
+        LoadOutcome::Missing => FollowConfig::default(),
+        LoadOutcome::NotConfigured(reason) => {
+            let why = format!("{}: {reason}", store.path().display());
+            report("read the USB follow settings", &why);
+            FollowConfig::default()
+        }
+    }
+}
+
+/// Linux: loads the follow's settings, shares them with the tray menu and
+/// starts the follow's loop on the core of [`AppState`]
+/// (D-2026-10-02-usb-switch-follow-2).
+#[cfg(target_os = "linux")]
+fn start_follow<R: Runtime>(app: &AppHandle<R>) {
+    use crate::follow::{FollowState, SharedFollow};
+
+    let path = follow_config::config_path(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    );
+    let Some(path) = path else {
+        report(
+            "set up the USB follow",
+            &"neither XDG_CONFIG_HOME nor HOME is a path",
+        );
+        return;
+    };
+    let store = ConfigStore::new(path);
+    let config = follow_settings(&store, report);
+    let follow: SharedFollow = Arc::new(FollowState::new(store, config));
+    app.manage(follow.clone());
+    let simulation = std::env::var_os(SIMULATION_SWITCH);
+    let Some(root) = usb_root(
+        simulation.as_deref(),
+        std::env::var_os(USB_ROOT_SWITCH).as_deref(),
+    ) else {
+        diagnose("follow: no USB tree in simulation, the follow does not run");
+        return;
+    };
+    let osd = app.state::<AppState>().osd();
+    let presence = ddc_adapters::SysfsUsbPresence::new(root);
+    if let Err(error) = follow::spawn(presence, follow, osd) {
+        report("start the USB follow", &error);
+    }
 }
 
 /// What Tauri embeds of `tauri.conf.json` — merged with the target's
@@ -255,10 +338,19 @@ mod switch_tests {
 
     use ddc_core::domain::{Confirm, VcpCode, VcpValue};
 
+    use std::cell::RefCell;
+    use std::fmt::Display;
+    use std::fs;
+    use std::path::PathBuf;
+
+    use tempfile::TempDir;
+
     use super::{
-        DIAGNOSTICS_SWITCH, SIMULATION_NOTICE, SIMULATION_SWITCH, simulated_osd, switch_on,
+        DIAGNOSTICS_SWITCH, REAL_USB_ROOT, SIMULATION_NOTICE, SIMULATION_SWITCH, USB_ROOT_SWITCH,
+        follow_settings, simulated_osd, switch_on, usb_root,
     };
     use crate::fixture::{rtk_id, rtk_info};
+    use crate::follow_config::{CONFIG_FILE, ConfigStore, FollowConfig};
 
     #[test]
     fn the_switches_are_ddc_tray_debug_and_ddc_tray_fake() {
@@ -296,6 +388,56 @@ mod switch_tests {
         let read_back = osd.set_feature(&rtk_id(), VcpCode::BRIGHTNESS, 80, Confirm::No);
 
         assert_eq!(read_back.map(|value| value.current), Ok(80));
+    }
+
+    #[test]
+    fn the_follow_reads_the_tree_of_ddc_tray_usb_root_only_in_simulation() {
+        let fake = Some(OsStr::new("/tmp/fake-usb"));
+        let real = Some(PathBuf::from("/sys/bus/usb/devices"));
+        assert_eq!(USB_ROOT_SWITCH, "DDC_TRAY_USB_ROOT");
+        assert_eq!(REAL_USB_ROOT, "/sys/bus/usb/devices");
+
+        assert_eq!(usb_root(None, None), real);
+        assert_eq!(usb_root(None, fake), real);
+        assert_eq!(usb_root(Some(OsStr::new("0")), fake), real);
+        assert_eq!(
+            usb_root(Some(OsStr::new("1")), fake),
+            Some(PathBuf::from("/tmp/fake-usb"))
+        );
+        assert_eq!(usb_root(Some(OsStr::new("1")), None), None);
+        assert_eq!(usb_root(Some(OsStr::new("1")), Some(OsStr::new(""))), None);
+    }
+
+    #[test]
+    fn settings_the_app_cannot_read_are_reported_left_alone_and_read_as_off() {
+        let home = TempDir::new().unwrap();
+        let store = ConfigStore::new(home.path().join(CONFIG_FILE));
+        let reports = RefCell::new(Vec::new());
+        let report = |action: &str, error: &dyn Display| {
+            reports.borrow_mut().push(format!("{action}: {error}"));
+        };
+        assert_eq!(follow_settings(&store, report), FollowConfig::default());
+
+        fs::write(store.path(), r#"{"version":7}"#).unwrap();
+        assert_eq!(follow_settings(&store, report), FollowConfig::default());
+
+        assert_eq!(
+            *reports.borrow(),
+            [format!(
+                "read the USB follow settings: {}: version 7 is not one this app reads",
+                store.path().display()
+            )]
+        );
+        assert_eq!(
+            fs::read_to_string(store.path()).unwrap(),
+            r#"{"version":7}"#
+        );
+        let saved = FollowConfig::default().with_learned(Default::default(), rtk_id());
+        store.save(&saved).unwrap();
+        assert_eq!(
+            follow_settings(&store, |_: &str, _: &dyn Display| {}),
+            saved
+        );
     }
 
     #[test]

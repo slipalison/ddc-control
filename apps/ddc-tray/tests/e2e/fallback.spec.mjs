@@ -26,6 +26,10 @@ const TWO_MONITORS = '/?demo=two-monitors';
 const LAST_MONITOR_KEY = 'ddc-tray.last-monitor';
 const TV = t('header.silent', { label: 'LG TV SSCR2' });
 const DELL = 'DELL U2723QE';
+// What the user reads in the suite's locale (pt-BR), written out rather
+// than built with `t`: a wrong phrase in `pt-BR.js` fails here too
+// (D-2026-10-02-usb-switch-follow-6, -13).
+const TV_ON_ANOTHER_INPUT = 'LG TV SSCR2 (em outra entrada)';
 
 test('the mute TV listed first is skipped: the popup opens on the RTK with no error', async ({
   page,
@@ -88,4 +92,16 @@ test('from the TV error, picking the DELL shows its panel and remembers it', asy
 
   await expect(page.locator('#app')).toHaveAttribute('data-state', 'ready');
   await expectPicked(monitorPicker(page), MONITORS.dell);
+});
+
+test('a silent monitor reads on another input in the picker', async ({ page }) => {
+  await open(page, TWO_MONITORS);
+
+  const tvOption = optionsOf(monitorPicker(page)).and(page.locator(`[data-value="${MONITORS.tv}"]`));
+  await expect(tvOption).toHaveText(TV_ON_ANOTHER_INPUT);
+
+  await loadEnds(page, () => pick(monitorPicker(page), TV_ON_ANOTHER_INPUT));
+
+  await expectPicked(monitorPicker(page), MONITORS.tv);
+  await expect(monitorPicker(page)).toHaveText(TV_ON_ANOTHER_INPUT);
 });

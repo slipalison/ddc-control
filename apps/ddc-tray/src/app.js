@@ -26,9 +26,11 @@ import {
   errorText,
   featureView,
   firstAnswering,
+  messageTip,
   monitorOrder,
   monitorPicker,
   panelView,
+  pickerOptions,
   readBackNotice,
   recallMonitor,
   rememberMonitor,
@@ -384,12 +386,7 @@ function metaText(current) {
 }
 
 function paintPicker(picker) {
-  const options = picker.options.map(({ id, label, silent }) => ({
-    value: id,
-    label: silent ? t('header.silent', { label }) : label,
-    verbatim: !silent,
-  }));
-  monitorDropdown.update({ options, value: model.selectedId });
+  monitorDropdown.update({ options: pickerOptions(picker, t), value: model.selectedId });
 }
 
 function paintMessage(status) {
@@ -398,7 +395,7 @@ function paintMessage(status) {
   ui.messageArt.dataset.tone = empty ? 'neutral' : 'danger';
   ui.messageArt.replaceChildren(createIcon(empty ? 'empty' : 'alert'));
   ui.messageTitle.textContent = status.message;
-  setText(ui.messageTip, empty || mute ? t('hint.ddc') : null);
+  setText(ui.messageTip, messageTip(status.state, mute, t));
   setText(ui.messageDetail, status.detail);
   ui.messageHint.hidden = !status.hint;
   // The space is text, not a margin: a copied hint keeps it.

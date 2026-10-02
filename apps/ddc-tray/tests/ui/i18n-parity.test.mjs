@@ -166,7 +166,7 @@ test('the pseudo-locale wraps each whole translated text, placeholders filled in
   assert.deepEqual(PSEUDO_MARKS, ['⟦', '⟧']);
   assert.equal(pseudo('feature.brightness'), '⟦Brilho⟧');
   assert.equal(pseudo('format.fraction', { current: 3, max: 10 }), '⟦3 de 10⟧');
-  assert.equal(pseudo('header.silent', { label: 'LG TV SSCR2' }), '⟦LG TV SSCR2 (sem DDC/CI)⟧');
+  assert.equal(pseudo('header.silent', { label: 'LG TV SSCR2' }), '⟦LG TV SSCR2 (em outra entrada)⟧');
   assert.equal(translator('pt-BR', LOCALES, { pseudo: false })('feature.brightness'), 'Brilho');
   assert.equal(translator('pt-BR')('feature.brightness'), 'Brilho');
 });

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- "Follow USB switch" in the Linux tray menu: when the devices learned from a USB switch leave this computer, `ddc-tray` switches the monitor to the other computer's input (`0x60`), once, and prints `ddc-tray: follow: switching <monitor-id> to input 0x<hh>`. "Learn USB switch" records, within 30 s, the devices that leave together (hubs left out) and the monitor the brightness entries act on, without turning the follow on or writing to the monitor; the target input is one of DisplayPort 1/2 and HDMI 1/2. Turning the follow on needs all three and is the consent to that write; a monitor that does not answer only gets a line on stderr. Settings in `$XDG_CONFIG_HOME/ddc-control/usb-follow.json`; setup on both machines in `docs/usb-switch-follow.md`.
+
 - "Start with system" in the tray menu, on Linux and Windows: a checkable item that makes the OS start `ddc-tray` when you log in (`~/.config/autostart/*.desktop`, or `HKCU\...\Run`), through `tauri-plugin-autostart`. The mark is the OS's own state, read each time the menu opens; it is off on a fresh install and nothing turns it on by itself.
 - Security scans on every pull request and push, through the shared pipeline: Gitleaks over the whole history, TruffleHog (verified secrets) over the commits of the push or pull request, Semgrep, Trivy on `Cargo.lock` and `package-lock.json`, an SPDX SBOM, and CodeQL for Rust, JavaScript/TypeScript and the GitHub Actions workflows. The results go to the Security tab, and an `error` finding fails the run.
 - SonarQube Cloud analysis on CI, whose Quality Gate fails the run. It covers the Rust code (Sonar's own Rust rules, plus `cargo llvm-cov` coverage) and the popup's JS (coverage from `node --test`). `scripts/ci/sonar-coverage.sh` writes both reports, and runs locally too.
@@ -21,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A monitor whose EDID reads but whose DDC/CI does not answer is marked "(on another input)" in the popup's selector, not "(no DDC/CI)", and the tip says it may be on another input or have DDC/CI off in its menu (Portuguese: "(em outra entrada)").
 - CI is one call to the shared `pipeline.yml` of slipalison/github-workflows, instead of `versao`, `qualidade` and `lancar` called one by one. Job names gain the `esteira / ` prefix. v0.1.0 was released before this change, without the security scans, Sonar or the gate.
 - `npm test` in `apps/ddc-tray` runs `test:unit` (the `node --test` suites, with coverage), then the Playwright suite.
 

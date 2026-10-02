@@ -815,6 +815,7 @@ dependencies = [
  "ddc-core",
  "ddc-hi",
  "ddc-i2c",
+ "tempfile",
 ]
 
 [[package]]
