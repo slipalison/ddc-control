@@ -431,6 +431,23 @@ pub fn spawn<P: UsbPresence + 'static>(
     follow: SharedFollow,
     osd: Result<SharedOsd, UiError>,
 ) -> io::Result<JoinHandle<()>> {
+    spawn_until(presence, follow, osd, SystemClock, || true)
+}
+
+/// [`spawn`], waiting on `clock` between reads, for as long as `keep_going`
+/// says: a test stops the thread and joins it.
+fn spawn_until<P, C, K>(
+    presence: P,
+    follow: SharedFollow,
+    osd: Result<SharedOsd, UiError>,
+    clock: C,
+    keep_going: K,
+) -> io::Result<JoinHandle<()>>
+where
+    P: UsbPresence + 'static,
+    C: Clock + Send + 'static,
+    K: FnMut() -> bool + Send + 'static,
+{
     thread::Builder::new()
         .name(LOOP_THREAD.to_owned())
         .spawn(move || {
@@ -441,7 +458,7 @@ pub fn spawn<P: UsbPresence + 'static>(
                 Arc::new(Stderr::default()),
                 Box::new(OwnThread),
             )
-            .run(&SystemClock, || true);
+            .run(&clock, keep_going);
         })
 }
 
@@ -1024,7 +1041,9 @@ mod learning_tests {
     use std::collections::BTreeSet;
     use std::fs;
     use std::io;
-    use std::sync::{Arc, mpsc};
+    use std::sync::Arc;
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     use ddc_adapters::BackendCall;
@@ -1035,7 +1054,7 @@ mod learning_tests {
     use super::tests::{DEBOUNCE, GONE, PLUGGED, Rig, SWITCH_TO_DP2, follow_to};
     use super::{
         Clock, Executor, FollowLoop, FollowState, Job, LOOP_THREAD, OwnThread, SWITCH_THREAD,
-        SystemClock, spawn, switch_line,
+        SystemClock, spawn_until, switch_line,
     };
     use crate::dto::{ErrorKind, UiError};
     use crate::fixture::{rtk_id, rtk_monitor};
@@ -1306,7 +1325,7 @@ mod learning_tests {
 
         OwnThread
             .execute(Box::new(move || {
-                let name = std::thread::current().name().map(str::to_owned);
+                let name = thread::current().name().map(str::to_owned);
                 sender.send(name).unwrap();
             }))
             .unwrap();
@@ -1324,16 +1343,52 @@ mod learning_tests {
         assert!(start.elapsed() >= Duration::from_millis(5));
     }
 
+    /// Never waits: the test paces the loop.
+    struct NoWait;
+
+    impl Clock for NoWait {
+        fn sleep(&self, _duration: Duration) {}
+    }
+
     #[test]
     fn the_loop_runs_on_a_named_thread_of_its_own() {
         let home = TempDir::new().unwrap();
         let store = ConfigStore::new(home.path().join(CONFIG_FILE));
         let follow = Arc::new(FollowState::new(store, FollowConfig::default()));
         let (osd, _backend) = osd_with([rtk_monitor()]);
+        let (go, gate) = mpsc::channel::<()>();
+        let (names, named) = mpsc::channel();
+        let keep_going = move || {
+            names
+                .send(thread::current().name().map(str::to_owned))
+                .unwrap();
+            gate.recv().is_ok()
+        };
 
-        let handle = spawn(ScriptedPresence::new([]), follow, Ok(Arc::new(osd))).unwrap();
-
+        let handle = spawn_until(
+            ScriptedPresence::new([]),
+            follow,
+            Ok(Arc::new(osd)),
+            NoWait,
+            keep_going,
+        )
+        .unwrap();
         assert_eq!(handle.thread().name(), Some(LOOP_THREAD));
-        assert!(!handle.is_finished());
+        go.send(()).unwrap();
+        drop(go);
+
+        // One read, then the loop drops `keep_going`: it has ended, so the
+        // join below cannot hang.
+        let wait = Duration::from_secs(5);
+        let loop_thread = Ok(Some(LOOP_THREAD.to_owned()));
+        assert_eq!(
+            [(); 3].map(|()| named.recv_timeout(wait)),
+            [
+                loop_thread.clone(),
+                loop_thread,
+                Err(RecvTimeoutError::Disconnected)
+            ]
+        );
+        handle.join().unwrap();
     }
 }
