@@ -213,7 +213,7 @@ Expected: `2 passed`, with the timings, the monitors, the panel, `brightness <or
 
 ### 8. The popup by hand (optional)
 
-Start `target/release/ddc-tray` and left-click its tray icon. On the dev machine the LG TV is listed first, and its DDC/CI is mute, so its panel fails: check that the popup opens on the RTK (after about 5 s the first time, while it tries the TV) and that the selector at the top lists the TV as "LG TV SSCR2 (no DDC/CI)". On KDE Plasma under Wayland, check that it opens next to the icon, not in the middle of the screen, and that it has no taskbar entry. Then only:
+Start `target/release/ddc-tray` and left-click its tray icon. On the dev machine the LG TV is listed first, and its DDC/CI is mute, so its panel fails: check that the popup opens on the RTK (after about 5 s the first time, while it tries the TV) and that the selector at the top lists the TV as "LG TV SSCR2 (on another input)". On KDE Plasma under Wayland, check that it opens next to the icon, not in the middle of the screen, and that it has no taskbar entry. Then only:
 
 - left-click the icon again: the popup hides; click it once more: it shows;
 - open the monitor selector and the color preset list, and check that the popup stays open while the list is open and after a pick (the bug of iteration 3); Esc on an open list closes only the list;

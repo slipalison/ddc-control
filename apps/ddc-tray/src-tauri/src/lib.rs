@@ -9,6 +9,8 @@
 
 pub mod autostart;
 pub mod commands;
+#[cfg(test)]
+mod docs;
 pub mod dto;
 pub mod fixture;
 pub mod follow;
