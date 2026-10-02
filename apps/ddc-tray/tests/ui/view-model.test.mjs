@@ -13,9 +13,11 @@ import {
   featureView,
   featuresView,
   firstAnswering,
+  messageTip,
   monitorOrder,
   monitorPicker,
   panelView,
+  pickerOptions,
   readBackNotice,
   recallMonitor,
   rememberMonitor,
@@ -458,6 +460,35 @@ test('a monitor that did not answer stays in the picker, marked silent', () => {
       [DELL, false, false],
     ],
   );
+});
+
+// D-2026-10-02-usb-switch-follow-6: an EDID that reads with no DDC answer
+// cannot tell another input from DDC/CI turned off, so the texts name both.
+test('a monitor with a readable EDID and no DDC answer reads on another input in en and pt-BR', () => {
+  const monitors = [
+    { id: RTK, label: 'RTK QHD HDR' },
+    { id: DELL, label: 'DELL U2723QE' },
+  ];
+  const picker = monitorPicker(monitors, DELL, new Set([RTK]));
+
+  assert.deepEqual(pickerOptions(picker, en), [
+    { value: RTK, label: 'RTK QHD HDR (on another input)', verbatim: false },
+    { value: DELL, label: 'DELL U2723QE', verbatim: true },
+  ]);
+  assert.deepEqual(pickerOptions(picker, pt), [
+    { value: RTK, label: 'RTK QHD HDR (em outra entrada)', verbatim: false },
+    { value: DELL, label: 'DELL U2723QE', verbatim: true },
+  ]);
+  assert.equal(
+    messageTip('error', true, en),
+    'No DDC/CI answer. The monitor may be on another input, or DDC/CI is off in its on-screen menu.',
+  );
+  assert.equal(
+    messageTip('error', true, pt),
+    'Sem resposta DDC/CI. O monitor pode estar em outra entrada, ou o DDC/CI está desligado no menu do monitor.',
+  );
+  assert.equal(messageTip('error', false, en), null);
+  assert.equal(messageTip('empty', false, en), en('hint.ddc'));
 });
 
 test('monitors are tried from the remembered one, then in the order listed', () => {

@@ -6,7 +6,7 @@ export default Object.freeze({
   'header.monitor': 'Monitor',
   'header.meta': '{manufacturer} · DDC/CI',
   'header.tagline': 'Monitor control over DDC/CI',
-  'header.silent': '{label} (no DDC/CI)',
+  'header.silent': '{label} (on another input)',
   'header.noAnswer': 'Not answering over DDC/CI',
   'panel.quick': 'Quick settings',
   'power.changeLabel': 'Change power mode',
@@ -27,7 +27,8 @@ export default Object.freeze({
   'state.empty': 'No monitor with DDC/CI was found.',
   'action.retry': 'Try again',
   'action.refresh': 'Refresh',
-  'hint.ddc': "Turn on DDC/CI in the monitor's on-screen menu, then try again.",
+  'hint.ddc':
+    'No DDC/CI answer. The monitor may be on another input, or DDC/CI is off in its on-screen menu.',
   'hint.i2c':
     'On Linux, DDC/CI needs the i2c-dev module and read/write access to /dev/i2c-*. Setup guide:',
 
