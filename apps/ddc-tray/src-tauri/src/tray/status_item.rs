@@ -16,8 +16,8 @@ use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 use super::kwin_placement::{self, LoadedScript};
 use super::{
-    APP_NAME, TRAY_ID, autostart_state, brightness_changed, on_main_thread, report_ui,
-    run_menu_action, toggle_popup,
+    APP_NAME, TRAY_ID, autostart_state, brightness_changed, follow_config, on_main_thread,
+    report_ui, run_menu_action, toggle_popup,
 };
 use crate::commands::{AppState, on_blocking_thread};
 use crate::i18n::Locale;
@@ -84,6 +84,12 @@ pub(super) fn autostart_changed<R: Runtime>(app: &AppHandle<R>) {
     refresh(app);
 }
 
+/// Asks the host to mount the menu again, which reads the follow's
+/// settings afresh.
+pub(super) fn follow_changed<R: Runtime>(app: &AppHandle<R>) {
+    refresh(app);
+}
+
 fn refresh<R: Runtime>(app: &AppHandle<R>) {
     let Some(item) = app.try_state::<ItemHandle<R>>() else {
         return;
@@ -140,15 +146,22 @@ impl<R: Runtime> ksni::Tray for StatusItem<R> {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        menu_entries(self.locale, Platform::Linux, autostart_state(&self.app))
-            .into_iter()
-            .map(menu_item)
-            .collect()
+        let follow = follow_config(&self.app);
+        menu_entries(
+            self.locale,
+            Platform::Linux,
+            autostart_state(&self.app),
+            &follow,
+        )
+        .into_iter()
+        .map(menu_item)
+        .collect()
     }
 
     // Overridden so that ksni mounts the menu again before the host shows it:
     // the mark of "Start with system" then follows the OS entry even when it
-    // changed outside the app.
+    // changed outside the app, and the follow's items its settings, which its
+    // loop changes when a learning ends.
     fn menu_about_to_show(&mut self) {}
 }
 
@@ -169,6 +182,12 @@ fn menu_item<R: Runtime>(entry: MenuEntry) -> MenuItem<StatusItem<R>> {
             checked,
             activate: Box::new(move |item: &mut StatusItem<R>| run_menu_action(&item.app, action)),
             ..CheckmarkItem::default()
+        }
+        .into(),
+        MenuEntry::Note { label } => StandardItem {
+            label: menu_label(&label),
+            enabled: false,
+            ..StandardItem::default()
         }
         .into(),
         MenuEntry::Separator => MenuItem::Separator,
@@ -239,9 +258,13 @@ mod tests {
     use tauri::test::{MockRuntime, mock_app};
     use tauri::{App, Manager};
 
+    use tempfile::TempDir;
+
     use super::{StatusItem, argb_from_rgba, menu_label, tray_icon};
     use crate::autostart::fake::FakeEntry;
     use crate::autostart::{Autostart, AutostartEntry, SharedEntry};
+    use crate::follow::{FollowState, SharedFollow};
+    use crate::follow_config::{CONFIG_FILE, ConfigStore, FollowConfig};
     use crate::i18n::Locale;
     use crate::scroll::WheelQueue;
 
@@ -295,15 +318,72 @@ mod tests {
         assert_eq!(menu_label("HDMI_1"), "HDMI__1");
     }
 
+    /// The marks of the menu's checkmarks, "Start with system" first, then
+    /// the follow's: its check and the four inputs.
+    fn marks(autostart: bool, follow: bool, input: Option<usize>) -> Vec<(String, bool)> {
+        let labels = [
+            "Follow USB switch",
+            "DisplayPort 1",
+            "DisplayPort 2",
+            "HDMI 1",
+            "HDMI 2",
+        ];
+        [("Start with system".to_owned(), autostart)]
+            .into_iter()
+            .chain(labels.iter().enumerate().map(|(index, label)| {
+                let marked = if index == 0 {
+                    follow
+                } else {
+                    input == Some(index - 1)
+                };
+                ((*label).to_owned(), marked)
+            }))
+            .collect()
+    }
+
     #[test]
     fn the_menu_marks_start_with_system_by_the_os_entry_each_time_it_is_mounted() {
         let entry = Arc::new(FakeEntry::new(Autostart::Disabled));
         let (_app, item) = item_over(&entry);
-        assert_eq!(checkmarks(&item), [("Start with system".to_owned(), false)]);
+        assert_eq!(checkmarks(&item), marks(false, false, None));
 
         entry.set(Autostart::Enabled).unwrap();
 
-        assert_eq!(checkmarks(&item), [("Start with system".to_owned(), true)]);
+        assert_eq!(checkmarks(&item), marks(true, false, None));
+    }
+
+    #[test]
+    fn the_menu_marks_the_follow_and_its_input_from_the_settings_each_time_it_is_mounted() {
+        let entry = Arc::new(FakeEntry::new(Autostart::Disabled));
+        let (app, item) = item_over(&entry);
+        let home = TempDir::new().unwrap();
+        let store = ConfigStore::new(home.path().join(CONFIG_FILE));
+        let follow: SharedFollow = Arc::new(FollowState::new(store, FollowConfig::default()));
+        app.manage(follow.clone());
+        assert_eq!(checkmarks(&item), marks(false, false, None));
+
+        follow.choose_input(0x11).unwrap();
+
+        assert_eq!(checkmarks(&item), marks(false, false, Some(2)));
+    }
+
+    #[test]
+    fn what_was_learned_is_a_line_that_cannot_be_picked() {
+        let entry = Arc::new(FakeEntry::new(Autostart::Disabled));
+        let (_app, item) = item_over(&entry);
+
+        let notes: Vec<(String, bool)> = item
+            .menu()
+            .into_iter()
+            .filter_map(|entry| match entry {
+                MenuItem::Standard(standard) if standard.label.starts_with("Learned") => {
+                    Some((standard.label, standard.enabled))
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(notes, [("Learned: none".to_owned(), false)]);
     }
 
     #[test]

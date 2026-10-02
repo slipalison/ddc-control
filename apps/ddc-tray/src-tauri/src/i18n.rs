@@ -3,6 +3,10 @@
 //! the tray menu is native, so its few labels live here, one [`Labels`]
 //! per locale — a locale missing a label does not compile.
 
+use std::collections::BTreeSet;
+
+use ddc_core::domain::UsbDeviceId;
+
 /// A language the tray speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
@@ -28,6 +32,14 @@ pub struct Labels {
     /// What the wheel over the icon does, in the tooltip of the
     /// StatusNotifierItem.
     pub scroll_hint: &'static str,
+    /// Checkable menu item that turns the USB switch follow on.
+    pub follow: &'static str,
+    /// Menu item that learns the devices the USB switch moves.
+    pub learn: &'static str,
+    /// Word before the devices learned, in the menu's summary line.
+    pub learned: &'static str,
+    /// What the summary line says when nothing is learned.
+    pub nothing_learned: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -37,6 +49,10 @@ const EN: Labels = Labels {
     autostart: "Start with system",
     quit: "Quit",
     scroll_hint: "Scroll to change the brightness",
+    follow: "Follow USB switch",
+    learn: "Learn USB switch",
+    learned: "Learned",
+    nothing_learned: "none",
 };
 
 const PT_BR: Labels = Labels {
@@ -46,6 +62,10 @@ const PT_BR: Labels = Labels {
     autostart: "Iniciar com o sistema",
     quit: "Sair",
     scroll_hint: "Role para mudar o brilho",
+    follow: "Seguir o switch USB",
+    learn: "Aprender o switch USB",
+    learned: "Aprendidos",
+    nothing_learned: "nenhum",
 };
 
 impl Locale {
@@ -73,6 +93,19 @@ impl Locale {
         format!("{} {percent}%", self.labels().brightness)
     }
 
+    /// The menu's summary of what was learned from the USB switch: the
+    /// vendor and product ids of each device, or that there is none.
+    pub fn learned_summary(self, devices: &BTreeSet<UsbDeviceId>) -> String {
+        let labels = self.labels();
+        let names: Vec<String> = devices.iter().map(UsbDeviceId::vendor_product).collect();
+        let listed = if names.is_empty() {
+            labels.nothing_learned.to_owned()
+        } else {
+            names.join(", ")
+        };
+        format!("{}: {listed}", labels.learned)
+    }
+
     /// The text under the tooltip's title: the monitor the tray acts on,
     /// when the popup selected one, and what the wheel does.
     pub fn tooltip_description(self, monitor: Option<&str>) -> String {
@@ -84,9 +117,23 @@ impl Locale {
     }
 }
 
+/// The name of the input `code` of `0x60` in the follow's menu: the
+/// standard MCCS names, brand names the same in every locale, else the code.
+pub fn input_label(code: u8) -> String {
+    match code {
+        0x0F => "DisplayPort 1".to_owned(),
+        0x10 => "DisplayPort 2".to_owned(),
+        0x11 => "HDMI 1".to_owned(),
+        0x12 => "HDMI 2".to_owned(),
+        other => format!("0x{other:02X}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Labels, Locale};
+    use std::collections::BTreeSet;
+
+    use super::{Labels, Locale, input_label};
 
     #[test]
     fn portuguese_tags_get_brazilian_portuguese() {
@@ -113,6 +160,10 @@ mod tests {
                 autostart: "Start with system",
                 quit: "Quit",
                 scroll_hint: "Scroll to change the brightness",
+                follow: "Follow USB switch",
+                learn: "Learn USB switch",
+                learned: "Learned",
+                nothing_learned: "none",
             }
         );
     }
@@ -128,6 +179,10 @@ mod tests {
                 autostart: "Iniciar com o sistema",
                 quit: "Sair",
                 scroll_hint: "Role para mudar o brilho",
+                follow: "Seguir o switch USB",
+                learn: "Aprender o switch USB",
+                learned: "Aprendidos",
+                nothing_learned: "nenhum",
             }
         );
     }
@@ -175,6 +230,10 @@ mod tests {
                 autostart,
                 quit,
                 scroll_hint,
+                follow,
+                learn,
+                learned,
+                nothing_learned,
             } = *locale.labels();
             for label in [
                 tooltip,
@@ -183,9 +242,52 @@ mod tests {
                 autostart,
                 quit,
                 scroll_hint,
+                follow,
+                learn,
+                learned,
+                nothing_learned,
             ] {
                 assert!(!label.trim().is_empty(), "{locale:?}");
             }
         }
+    }
+
+    #[test]
+    fn follow_labels_are_literal_in_en_and_pt_br() {
+        let (en, pt) = (Locale::En.labels(), Locale::PtBr.labels());
+        assert_eq!(
+            (en.follow, pt.follow),
+            ("Follow USB switch", "Seguir o switch USB")
+        );
+        assert_eq!(
+            (en.learn, pt.learn),
+            ("Learn USB switch", "Aprender o switch USB")
+        );
+        assert_eq!(input_label(0x0F), "DisplayPort 1");
+        assert_eq!(input_label(0x10), "DisplayPort 2");
+        assert_eq!(input_label(0x11), "HDMI 1");
+        assert_eq!(input_label(0x12), "HDMI 2");
+        assert_eq!(input_label(0x13), "0x13");
+
+        let learned: BTreeSet<_> = ["046d:c31c:KB0001", "046d:c077"]
+            .iter()
+            .map(|text| text.parse().unwrap())
+            .collect();
+        assert_eq!(
+            Locale::En.learned_summary(&learned),
+            "Learned: 046d:c077, 046d:c31c"
+        );
+        assert_eq!(
+            Locale::PtBr.learned_summary(&learned),
+            "Aprendidos: 046d:c077, 046d:c31c"
+        );
+        assert_eq!(
+            Locale::En.learned_summary(&BTreeSet::new()),
+            "Learned: none"
+        );
+        assert_eq!(
+            Locale::PtBr.learned_summary(&BTreeSet::new()),
+            "Aprendidos: nenhum"
+        );
     }
 }
