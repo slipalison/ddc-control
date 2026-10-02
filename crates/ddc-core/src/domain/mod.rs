@@ -1,11 +1,13 @@
 //! Monitor-control domain model: VCP codes and values, monitors, features and
-//! their write risk, the MCCS catalog, and the domain error type.
+//! their write risk, the MCCS catalog, the domain error type, and the USB
+//! devices the switch follow watches.
 
 mod capabilities;
 mod error;
 mod feature;
 pub mod mccs_catalog;
 mod monitor;
+mod usb;
 mod vcp;
 
 pub use capabilities::Capabilities;
@@ -15,4 +17,5 @@ pub use feature::{
     risk_for_code,
 };
 pub use monitor::{MonitorId, MonitorInfo};
+pub use usb::{UsbDeviceId, UsbDeviceIdError, UsbPresenceError};
 pub use vcp::{VcpCode, VcpValue};

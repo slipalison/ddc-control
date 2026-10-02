@@ -3,6 +3,8 @@
 
 mod monitor_backend;
 mod monitor_control;
+mod usb_presence;
 
 pub use monitor_backend::MonitorBackend;
 pub use monitor_control::MonitorControl;
+pub use usb_presence::UsbPresence;
