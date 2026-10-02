@@ -571,11 +571,18 @@ pub(crate) mod fake {
         }
     }
 
-    /// Records the app's stderr, line by line, as the app prints it with
-    /// `DDC_TRAY_DEBUG=1`.
+    /// Whether the app prints a line whatever `DDC_TRAY_DEBUG` says.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Printed {
+        Always,
+        WithDebug,
+    }
+
+    /// Records the app's stderr, line by line, telling the lines it always
+    /// prints from the diagnostics.
     #[derive(Default)]
     pub(crate) struct Recorder {
-        lines: Mutex<Vec<String>>,
+        lines: Mutex<Vec<(Printed, String)>>,
     }
 
     impl Recorder {
@@ -583,8 +590,24 @@ pub(crate) mod fake {
             Arc::new(Self::default())
         }
 
+        /// The lines as the app prints them with `DDC_TRAY_DEBUG=1`.
         pub(crate) fn lines(&self) -> Vec<String> {
-            self.lines.lock().unwrap().clone()
+            self.printed(|_| true)
+        }
+
+        /// The lines the app prints without `DDC_TRAY_DEBUG`.
+        pub(crate) fn lines_without_debug(&self) -> Vec<String> {
+            self.printed(|printed| printed == Printed::Always)
+        }
+
+        fn printed(&self, shown: impl Fn(Printed) -> bool) -> Vec<String> {
+            self.lines
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(printed, _)| shown(*printed))
+                .map(|(_, line)| line.clone())
+                .collect()
         }
 
         /// The lines that start with `prefix`.
@@ -595,22 +618,25 @@ pub(crate) mod fake {
                 .collect()
         }
 
-        fn push(&self, line: String) {
-            self.lines.lock().unwrap().push(line);
+        fn push(&self, printed: Printed, line: String) {
+            self.lines.lock().unwrap().push((printed, line));
         }
     }
 
     impl FollowOutput for Recorder {
         fn announce(&self, line: &str) {
-            self.push(line.to_owned());
+            self.push(Printed::Always, line.to_owned());
         }
 
         fn diagnose(&self, event: &str) {
-            self.push(format!("ddc-tray: {event}"));
+            self.push(Printed::WithDebug, format!("ddc-tray: {event}"));
         }
 
         fn report(&self, action: &str, error: &dyn Display) {
-            self.push(format!("ddc-tray: could not {action}: {error}"));
+            self.push(
+                Printed::Always,
+                format!("ddc-tray: could not {action}: {error}"),
+            );
         }
     }
 
@@ -783,6 +809,7 @@ mod tests {
                 SWITCH_TO_DP2,
             ]
         );
+        assert_eq!(rig.output.lines_without_debug(), [SWITCH_TO_DP2]);
     }
 
     #[test]
@@ -797,6 +824,7 @@ mod tests {
             rig.output.lines(),
             ["ddc-tray: follow: learned devices present"]
         );
+        assert_eq!(rig.output.lines_without_debug(), Vec::<String>::new());
     }
 
     #[test]
@@ -818,6 +846,7 @@ mod tests {
                 .len(),
             4
         );
+        assert_eq!(rig.output.lines_without_debug(), Vec::<String>::new());
     }
 
     #[test]
@@ -850,6 +879,10 @@ mod tests {
                 SWITCH_TO_DP2,
                 &failed,
             ]
+        );
+        assert_eq!(
+            rig.output.lines_without_debug(),
+            [SWITCH_TO_DP2, &failed, SWITCH_TO_DP2, &failed]
         );
     }
 
