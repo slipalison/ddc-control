@@ -83,9 +83,7 @@ mod tests;
 #[cfg(test)]
 mod robustness_tests {
     use std::collections::BTreeSet;
-    use std::fs;
 
-    use ddc_core::domain::UsbPresenceError;
     use ddc_core::ports::UsbPresence;
     use tempfile::TempDir;
 
@@ -96,6 +94,10 @@ mod robustness_tests {
     #[cfg(unix)]
     #[test]
     fn a_root_that_cannot_be_listed_is_an_error() {
+        use std::fs;
+
+        use ddc_core::domain::UsbPresenceError;
+
         let parent = TempDir::new().unwrap();
         let file = parent.path().join("devices");
         fs::write(&file, "").unwrap();
