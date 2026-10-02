@@ -25,6 +25,8 @@ ddc-hi = { version = "0.4.1", default-features = false, features = ["ddc-i2c", "
 anyhow = "1"
 ddc = "=0.2.2"
 ddc-i2c = "=0.2.2"
+# A fake sysfs tree of USB devices per test, never the real /sys.
+tempfile = "3"
 
 [lints]
 workspace = true
