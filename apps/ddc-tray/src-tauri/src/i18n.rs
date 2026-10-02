@@ -5,7 +5,8 @@
 
 use std::collections::BTreeSet;
 
-use ddc_core::domain::UsbDeviceId;
+use ddc_core::domain::mccs_catalog::value_name;
+use ddc_core::domain::{UsbDeviceId, VcpCode};
 
 /// A language the tray speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,16 +118,12 @@ impl Locale {
     }
 }
 
-/// The name of the input `code` of `0x60` in the follow's menu: the
-/// standard MCCS names, brand names the same in every locale, else the code.
+/// The name of the input `code` of `0x60` in the follow's menu: the core
+/// catalog's MCCS name with a space for the hyphen (`DisplayPort 1`), a
+/// brand name the same in every locale, else the code.
 pub fn input_label(code: u8) -> String {
-    match code {
-        0x0F => "DisplayPort 1".to_owned(),
-        0x10 => "DisplayPort 2".to_owned(),
-        0x11 => "HDMI 1".to_owned(),
-        0x12 => "HDMI 2".to_owned(),
-        other => format!("0x{other:02X}"),
-    }
+    value_name(VcpCode::INPUT_SOURCE, code)
+        .map_or_else(|| format!("0x{code:02X}"), |name| name.replace('-', " "))
 }
 
 #[cfg(test)]
