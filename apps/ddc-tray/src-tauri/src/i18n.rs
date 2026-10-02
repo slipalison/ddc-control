@@ -21,6 +21,8 @@ pub struct Labels {
     pub open_panel: &'static str,
     /// Word before the percentage of a brightness shortcut.
     pub brightness: &'static str,
+    /// Checkable menu item that starts the app with the system.
+    pub autostart: &'static str,
     /// Menu item that ends the app.
     pub quit: &'static str,
     /// What the wheel over the icon does, in the tooltip of the
@@ -32,6 +34,7 @@ const EN: Labels = Labels {
     tooltip: "DDC Control — monitor settings",
     open_panel: "Open panel",
     brightness: "Brightness",
+    autostart: "Start with system",
     quit: "Quit",
     scroll_hint: "Scroll to change the brightness",
 };
@@ -40,6 +43,7 @@ const PT_BR: Labels = Labels {
     tooltip: "DDC Control — ajustes do monitor",
     open_panel: "Abrir painel",
     brightness: "Brilho",
+    autostart: "Iniciar com o sistema",
     quit: "Sair",
     scroll_hint: "Role para mudar o brilho",
 };
@@ -106,6 +110,7 @@ mod tests {
                 tooltip: "DDC Control — monitor settings",
                 open_panel: "Open panel",
                 brightness: "Brightness",
+                autostart: "Start with system",
                 quit: "Quit",
                 scroll_hint: "Scroll to change the brightness",
             }
@@ -120,6 +125,7 @@ mod tests {
                 tooltip: "DDC Control — ajustes do monitor",
                 open_panel: "Abrir painel",
                 brightness: "Brilho",
+                autostart: "Iniciar com o sistema",
                 quit: "Sair",
                 scroll_hint: "Role para mudar o brilho",
             }
@@ -150,16 +156,34 @@ mod tests {
     }
 
     #[test]
+    fn the_autostart_label_is_set_in_every_locale_and_differs_between_them() {
+        let english = Locale::En.labels().autostart;
+        let portuguese = Locale::PtBr.labels().autostart;
+
+        assert_eq!(english, "Start with system");
+        assert_eq!(portuguese, "Iniciar com o sistema");
+        assert_ne!(english, portuguese);
+    }
+
+    #[test]
     fn no_label_is_empty_in_any_locale() {
         for locale in [Locale::En, Locale::PtBr] {
             let Labels {
                 tooltip,
                 open_panel,
                 brightness,
+                autostart,
                 quit,
                 scroll_hint,
             } = *locale.labels();
-            for label in [tooltip, open_panel, brightness, quit, scroll_hint] {
+            for label in [
+                tooltip,
+                open_panel,
+                brightness,
+                autostart,
+                quit,
+                scroll_hint,
+            ] {
                 assert!(!label.trim().is_empty(), "{locale:?}");
             }
         }

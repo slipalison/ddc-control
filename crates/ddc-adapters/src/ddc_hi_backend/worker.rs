@@ -183,6 +183,16 @@ impl From<DdcError> for TransactError {
     }
 }
 
+/// How long a caller waits for a write of `code`. A write of the input source
+/// waits out the settle window of `policies` on top of the VCP budget.
+fn write_budget(budgets: &DdcHiBudgets, policies: &RetryPolicies, code: VcpCode) -> Duration {
+    if code == VcpCode::INPUT_SOURCE {
+        budgets.vcp + policies.input_settle.window
+    } else {
+        budgets.vcp
+    }
+}
+
 type Job<S> = Box<dyn FnOnce(&mut Worker<S, SystemClock>) + Send>;
 
 /// Owner of the displays; runs one job at a time on its own thread.
@@ -286,7 +296,47 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
         let refused = move |_| DdcError::UnsupportedFeature(code);
         self.transact(id, deadline, policy, refused, |handle| {
             handle.write_vcp(code, value)
-        })
+        })?;
+        if code == VcpCode::INPUT_SOURCE {
+            self.settle_input(id, value, deadline);
+        }
+        Ok(())
+    }
+
+    /// Waits for the monitor to show the input it was just told to switch
+    /// to: reads the input every settle step of the policies until it reads
+    /// `value`, or until the settle window after the write, never past
+    /// `deadline`. A monitor that keeps the old input is not an error: the
+    /// write was accepted, and the caller's own read after it tells what the
+    /// monitor kept (D-2026-09-30-input-switch-autostart-3).
+    fn settle_input(&mut self, id: &MonitorId, value: u16, deadline: Instant) {
+        let settle = self.policies.input_settle;
+        let end = (self.clock.now() + settle.window).min(deadline);
+        loop {
+            let left = end.saturating_duration_since(self.clock.now());
+            if left.is_zero() {
+                return;
+            }
+            self.clock.sleep(left.min(settle.step));
+            if !self.input_unsettled(id, value) {
+                return;
+            }
+        }
+    }
+
+    /// Whether the input still has to be waited for after one more read of
+    /// it. The loop around this read is the retry, so the read is a single
+    /// [`isolated`] attempt: a failed or garbled reply counts as "not yet".
+    /// A panic or a refusal is final, as for any read.
+    fn input_unsettled(&mut self, id: &MonitorId, value: u16) -> bool {
+        let Some(handle) = handle_of(&mut self.displays, id) else {
+            return false;
+        };
+        let code = VcpCode::INPUT_SOURCE;
+        match isolated(|| handle.read_vcp(code)?.answering(code)) {
+            Ok(read) => !same_input(read.current, value),
+            Err(error) => !(error.is_unsupported() || error.is_panic()),
+        }
     }
 
     /// Runs `op` on the handle of `id` under `policy`, each attempt
@@ -359,6 +409,13 @@ impl<S: DisplaySource, C: Clock> Worker<S, C> {
     }
 }
 
+/// Whether a reading of the input source shows the input that was written.
+// WHY low byte only: a non-continuous value is the low byte of its reading,
+// as the popup and the MCCS catalog read it; a monitor may fill the high byte.
+fn same_input(read: u16, written: u16) -> bool {
+    read & 0xFF == written & 0xFF
+}
+
 fn handle_of<'a, H>(displays: &'a mut [(MonitorId, H)], id: &MonitorId) -> Option<&'a mut H> {
     displays
         .iter_mut()
@@ -370,6 +427,9 @@ fn handle_of<'a, H>(displays: &'a mut [(MonitorId, H)], id: &MonitorId) -> Optio
 pub(crate) struct WorkerClient<S: DisplaySource> {
     jobs: Sender<Job<S>>,
     budgets: DdcHiBudgets,
+    /// Seen by the rest of `ddc_hi_backend` so the backend's own unit tests
+    /// can check the policies its constructor wires in.
+    pub(super) policies: RetryPolicies,
     _worker: JoinHandle<()>,
 }
 
@@ -390,12 +450,19 @@ impl<S: DisplaySource> WorkerClient<S> {
         Ok(Self {
             jobs,
             budgets,
+            policies,
             _worker: worker,
         })
     }
 
     pub(crate) fn with_budgets(self, budgets: DdcHiBudgets) -> Self {
         Self { budgets, ..self }
+    }
+
+    /// How long this client waits for a write of `code`: the budgets and the
+    /// settle window it was started with, never the defaults.
+    fn write_budget_of(&self, code: VcpCode) -> Duration {
+        write_budget(&self.budgets, &self.policies, code)
     }
 
     /// Queues `op` and waits at most `budget` for its answer; the worker
@@ -469,7 +536,8 @@ impl<S: DisplaySource> MonitorBackend for WorkerClient<S> {
     }
 
     fn write_vcp(&self, id: &MonitorId, code: VcpCode, value: u16) -> Result<(), DdcError> {
-        self.transact(id, self.budgets.vcp, move |worker, id, deadline| {
+        let budget = self.write_budget_of(code);
+        self.transact(id, budget, move |worker, id, deadline| {
             worker.write_vcp(id, code, value, deadline)
         })
     }

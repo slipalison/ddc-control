@@ -12,6 +12,12 @@ export const I2C_DOC = 'docs/linux-ddc-setup.md';
 /** Error kinds a Linux user may fix by setting up i2c-dev access. */
 const I2C_HINT_KINDS = new Set(['backend_unavailable', 'transport', 'timeout']);
 
+/** The VCP code of the input source: the one write whose failure the popup reads differently. */
+const INPUT_CODE = 0x60;
+
+/** Error kinds after which the monitor may have left the input this computer is on. */
+const SWITCHED_AWAY_KINDS = new Set(['timeout', 'transport', 'not_found']);
+
 const CONFIRM_BODY_KEYS = new Map([
   ['input', 'confirm.body.input'],
   ['power', 'confirm.body.power'],
@@ -196,6 +202,40 @@ export function withReadBack(item, { current, max }) {
 }
 
 /**
+ * What to tell when the monitor read back a value other than the one asked
+ * (D-2026-09-30-input-switch-autostart-5): `null` when they are the same
+ * after the normalization of `withReadBack`, else the text naming the value
+ * kept and the value asked. For the input source it adds that the asked
+ * input may have no signal, which is when a monitor goes back on its own.
+ * @param {{ code: number, key?: string, alias?: string, name?: string | null, value: object }} item
+ * @param {{ asked: number, readBack: { current: number, max: number } }} change
+ * @param {Function} t
+ */
+export function readBackNotice(item, { asked, readBack }, t) {
+  const kept = withReadBack(item, readBack).value;
+  const wanted = withReadBack(item, { current: asked, max: readBack.max }).value;
+  if (kept.current === wanted.current) return null;
+  const { label } = featureLabel(t, item.key ?? item.alias, item.name ?? null, item.code);
+  const params = { feature: label, kept: shownValue(kept, t), asked: shownValue(wanted, t) };
+  return t(item.code === INPUT_CODE ? 'notice.inputKept' : 'notice.kept', params);
+}
+
+/**
+ * The text of a failed write: an input change followed by an error that
+ * says the monitor went quiet (`timeout`, `transport`, `not_found`) may have
+ * worked, and the monitor may now show an input this computer cannot reach
+ * (D-2026-09-30-input-switch-autostart-6). Any other failure reads as
+ * `errorText`.
+ * @param {{ kind: string, message?: string } | null | undefined} error
+ * @param {number} code
+ * @param {Function} t
+ */
+export function writeFailureText(error, code, t) {
+  if (code === INPUT_CODE && SWITCHED_AWAY_KINDS.has(error?.kind)) return t('notice.inputUnread');
+  return errorText(error, t);
+}
+
+/**
  * The status line: `loading`, `ready`, `empty` or `error`. Empty and error
  * offer `retry`; on Linux, when a missing i2c-dev setup may be the cause,
  * `hint` points at the setup guide: its text, then the guide's path.
@@ -241,6 +281,11 @@ export function hex(code) {
 
 function valueView(value, t) {
   return value.kind === 'continuous' ? sliderFields(value, t) : choiceFields(value, t);
+}
+
+function shownValue(value, t) {
+  const view = valueView(value, t);
+  return view.widget === 'slider' ? view.valueText : view.currentLabel;
 }
 
 function sliderFields({ current, max }, t) {

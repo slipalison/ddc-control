@@ -29,11 +29,13 @@ import {
   monitorOrder,
   monitorPicker,
   panelView,
+  readBackNotice,
   recallMonitor,
   rememberMonitor,
   statusView,
   storageOf,
   withReadBack,
+  writeFailureText,
 } from './view-model.js';
 
 const CONTROL_ICONS = Object.freeze({
@@ -676,24 +678,31 @@ async function changePower(entry) {
 }
 
 // The answer is the value read back: it replaces what was asked for, and a
-// difference is flagged and announced.
+// difference is flagged, announced and told in the toast, which names the
+// value the monitor kept (D-2026-09-30-input-switch-autostart-5).
 function showReadBack(lane, readBack, sent) {
   const entry = entryOf(sent);
   if (!entry) return;
+  const notice = readBackNotice(entry.dto, { asked: sent.value, readBack }, t);
   entry.dto = withReadBack(entry.dto, readBack);
   if (writes.busy(lane) || entry.editing) return;
   const view = viewOf(entry);
   entry.widget.update(view);
-  hideToast();
-  if (view.current === sent.value) return;
+  if (notice === null) {
+    hideToast();
+    return;
+  }
   entry.widget.flag();
+  showToast(notice);
   announce(t('announce.readBack', { feature: view.label, value: shownValue(view) }));
 }
 
+// An input change whose follow-up failed may still have switched the
+// monitor away (D-2026-09-30-input-switch-autostart-6).
 function writeFailed(lane, error, sent) {
   const entry = entryOf(sent);
   if (entry && !writes.busy(lane)) entry.widget.update(viewOf(entry));
-  showToast(errorText(error, t));
+  showToast(writeFailureText(error, sent.code, t));
 }
 
 function entryOf({ monitorId, code }) {

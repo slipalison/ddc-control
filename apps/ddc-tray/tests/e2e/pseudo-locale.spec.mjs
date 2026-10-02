@@ -15,9 +15,10 @@
 // scripts by tests/ui/toast-states.test.mjs). So does every variant of the
 // confirmation dialog — the input's, with its note; power's, before and
 // after another mode is picked; the generic one of any other dangerous
-// setting, from a list and from a slider — and what only a monitor unlike
-// the demo's shows: a code the catalog does not name, a setting that gave
-// no value, a list whose current value is not one of its choices.
+// setting, from a list and from a slider — the notices of an input the
+// monitor kept and of one whose read-back failed, and what only a monitor
+// unlike the demo's shows: a code the catalog does not name, a setting that
+// gave no value, a list whose current value is not one of its choices.
 
 import { readFileSync } from 'node:fs';
 import {
@@ -78,6 +79,8 @@ const BRIDGE = readFileSync(new URL('../../src/bridge.js', import.meta.url), 'ut
 const WAIT_LINE = "await wait(command === 'probe_features' ? latencyMs * PROBE_LATENCY_FACTOR : latencyMs);";
 const FEATURES_LINE = 'return features.map(featureDto);';
 const MONITORS_LINE = 'const monitors = scenarioMonitors(scenario);';
+const WRITE_LINE = 'entry.reading.current = value;';
+const INPUT_CODE = '0x60';
 
 /**
  * A demo in which `command` never answers, so the popup stays waiting on it
@@ -86,6 +89,9 @@ const MONITORS_LINE = 'const monitors = scenarioMonitors(scenario);';
 function holding(command) {
   return { line: WAIT_LINE, by: `if (command === '${command}') await new Promise(() => {}); ${WAIT_LINE}` };
 }
+
+/** A demo whose monitor ignores a switch of input, like a scaler with no signal on the asked one. */
+const KEEPING_ITS_INPUT = { line: WRITE_LINE, by: `if (code !== ${INPUT_CODE}) ${WRITE_LINE}` };
 
 /** A demo whose monitor declares nothing besides the quick controls. */
 const NOTHING_ELSE_DECLARED = { line: FEATURES_LINE, by: 'return [];' };
@@ -152,6 +158,17 @@ async function probe(page) {
 
 async function toastShows(page) {
   await expect(page.locator('#toast')).toBeVisible();
+}
+
+/** Asks for HDMI-1 and accepts the confirmation: the write the demo then answers. */
+async function switchToHdmi1(page) {
+  await page
+    .getByRole('radiogroup', { name: pseudo('feature.input'), exact: true })
+    .getByRole('radio', { name: 'HDMI-1', exact: true })
+    .click();
+  await dialogShows(page);
+  await page.locator('#confirm-accept').click();
+  await toastShows(page);
 }
 
 /** Waits for the confirmation dialog, its title, body and both buttons. */
@@ -317,6 +334,19 @@ const STATES = [
     },
   },
   {
+    name: 'rtk after the monitor kept the old input',
+    path: RTK,
+    state: 'ready',
+    bridge: KEEPING_ITS_INPUT,
+    reach: switchToHdmi1,
+  },
+  {
+    name: 'rtk after an input write whose read-back failed',
+    path: rtkFailing('write'),
+    state: 'ready',
+    reach: switchToHdmi1,
+  },
+  {
     name: 'rtk after a color preset change that timed out',
     path: rtkFailing('write'),
     state: 'ready',
@@ -400,6 +430,7 @@ const STATES = [
 const TOAST_STATES = [
   { site: 'app.js › listen', state: 'rtk after listening to the tray was refused' },
   { site: 'app.js › hideOnEscape', state: 'rtk after hiding the popup was refused' },
+  { site: 'app.js › showReadBack', state: 'rtk after the monitor kept the old input' },
   { site: 'app.js › writeFailed', state: 'rtk after a brightness write that timed out' },
   { site: 'app.js › probe', state: 'rtk after a probe that timed out' },
 ];

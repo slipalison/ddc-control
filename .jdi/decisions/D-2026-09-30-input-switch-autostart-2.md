@@ -1,0 +1,1 @@
+D-2026-09-30-input-switch-autostart-2 (2026-09-30): "Autostart com o sistema" sai do goal da phase `profiles-hotkeys` e passa para esta. Os dois itens ficavam no mesmo goal; o pedido do usuário de 2026-09-30 o puxou para agora, junto do bug da troca de entrada. `profiles-hotkeys` mantém perfis e hotkeys globais. Só a linha de goal mudou; a ordem das phases não.

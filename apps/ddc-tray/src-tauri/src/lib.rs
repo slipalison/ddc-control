@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod autostart;
 pub mod commands;
 pub mod dto;
 pub mod fixture;
@@ -31,6 +32,7 @@ use ddc_core::app::SoftwareOsd;
 use ddc_core::domain::DdcError;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, Window, WindowEvent};
 
+use crate::autostart::{PluginEntry, SharedEntry};
 use crate::commands::{AppState, SharedOsd};
 use crate::dto::POPUP_SHOWN;
 use crate::popup::PopupGate;
@@ -108,6 +110,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_popup(app);
         }));
+    let builder = autostart::register(builder);
     // Windows: tracks where the tray icon is, to anchor the popup to it.
     #[cfg(not(target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_positioner::init());
@@ -115,6 +118,8 @@ pub fn run() -> Result<(), tauri::Error> {
         .setup(|app| {
             app.manage(AppState::new(compose_osd()));
             app.manage(PopupGate::new());
+            // Before the tray: its menu reads this entry as it is mounted.
+            app.manage::<SharedEntry>(Arc::new(PluginEntry::new(app.handle())));
             tray::install(app.handle())?;
             // So the KWin script is unloaded however the app is stopped.
             #[cfg(target_os = "linux")]

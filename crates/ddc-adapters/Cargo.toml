@@ -5,6 +5,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# No doctests: an example in a `///` comment would run as a test from inside
+# the hardware adapter's production files, which hold no test code
+# (D-2026-10-01-input-switch-autostart-3). The crate has none to lose.
+[lib]
+doctest = false
+
 [features]
 default = ["ddc-hi"]
 ddc-hi = ["dep:ddc-hi"]

@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- "Start with system" in the tray menu, on Linux and Windows: a checkable item that makes the OS start `ddc-tray` when you log in (`~/.config/autostart/*.desktop`, or `HKCU\...\Run`), through `tauri-plugin-autostart`. The mark is the OS's own state, read each time the menu opens; it is off on a fresh install and nothing turns it on by itself.
 - Security scans on every pull request and push, through the shared pipeline: Gitleaks over the whole history, TruffleHog (verified secrets) over the commits of the push or pull request, Semgrep, Trivy on `Cargo.lock` and `package-lock.json`, an SPDX SBOM, and CodeQL for Rust, JavaScript/TypeScript and the GitHub Actions workflows. The results go to the Security tab, and an `error` finding fails the run.
 - SonarQube Cloud analysis on CI, whose Quality Gate fails the run. It covers the Rust code (Sonar's own Rust rules, plus `cargo llvm-cov` coverage) and the popup's JS (coverage from `node --test`). `scripts/ci/sonar-coverage.sh` writes both reports, and runs locally too.
 - One `esteira / Portao` check that fails when any job of the pipeline failed, or when Sonar is off without a written reason.
 - An 80% line-coverage floor for the popup's JS modules: `npm run test:unit` writes `apps/ddc-tray/coverage/lcov.info`, and it measured 88.15%. Before, the CI job printed an error annotation for the missing report and passed.
+
+### Fixed
+
+- Switching the monitor's input from the popup or from `ddc-cli` no longer reads the old input back. After a write of the input source (`0x60`) the adapter waits, up to 3 s, for the monitor to read the new input, and the popup says so when the monitor keeps another one (it may have no signal on the input asked for) or may have switched away after a failed read.
 
 ### Changed
 
