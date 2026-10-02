@@ -166,3 +166,15 @@ Specialist de todas: `jdi-doer-ddc-control` (single-stack, glob `**/*`). 1 task 
 - `notification_area.rs` (só Windows) só é provado pela compilação e pelos testes do runner windows-latest do CI.
 - O smoke depende de tempo (debounce de 1,5 s). As janelas são nomeadas e esperam bordas de diagnóstico, nunca só `sleep`.
 - O formato do `/sys` real varia por kernel (não afirmado). O adapter pula entradas malformadas sem falhar o conjunto.
+
+## Emendas (iteração 1, D-2026-10-02-usb-switch-follow-12)
+- **T-5, `usb_root`:** com `DDC_TRAY_FAKE=1` e sem `DDC_TRAY_USB_ROOT`, não há raiz e o laço não sobe; o `/sys` real só é usado fora da simulação (D-12a).
+- **Arquivos fora da lista original:**
+  - `docs/hardware-validation.md` (rótulo "(on another input)", T-7);
+  - `apps/ddc-tray/src-tauri/src/tray/notification_area.rs` (usa `follow_config(app)`, T-5);
+  - módulos de teste livres fora dos prefixos do DoD (`usb_sysfs::robustness_tests`, `follow_config::rule_tests`, `follow::learning_tests`, `switch_tests`).
+- **Commits extras:** `e43fbe4` (clippy do Windows) e os reforços de teste `4625553`, `d49544e` e `df69902`, que nasceram de furos achados por mutação.
+- **DoD:**
+  - a linha 6 exige também a suíte Playwright inteira (D-12b);
+  - a linha 8 descreve a saída do hub junto com teclado e mouse (D-12c);
+  - o congelamento foi preenchido com os ids de `df69902`.
